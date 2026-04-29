@@ -1,0 +1,41 @@
+# Xcode
+*.xcworkspace
+xcuserdata/
+DerivedData/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+build/
+
+# Swift Package Manager
+.build/
+Package.resolved
+
+# CocoaPods
+Pods/
+!Pods/Target Support Files/
+
+# Carthage
+Carthage/Build
+
+# macOS
+.DS_Store
+*.swp
+*.swo
+*~
+
+# IDE
+.idea/
+.vscode/
+*.sw[mnl]
+
+# Env
+.env
+.env.local
+*.key
+credentials*
+
+# Project specific
+ios-app/AppForgeStudio.xcodeproj/project.xcworkspace/
+ios-app/AppForgeStudio.xcodeproj/xcuserdata/
