@@ -60,6 +60,8 @@ struct AppForgeStudioApp: App {
                         case .hybrid:
                             HybridModeView(canvasVM: appState.canvasVM, renderer: appState.satinRenderer, toolVM: appState.toolVM, animationVM: appState.animationVM, subdivisionVM: appState.subdivisionVM)
                                 .equatable()
+                        case .animation:
+                            AnimationView(engine: appState.animationVM)
                         case .render:
                             SatinRendererView(scene: Binding(get: { appState.scene }, set: { appState.canvasVM.scene = $0 }))
                         }

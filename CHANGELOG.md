@@ -1,5 +1,19 @@
 # Changelog - AppForge Studio
 
+## 2026-04-29 21:50 UTC - Correcciones post-Fase 4 + Integracion AnimationView
+
+### Acciones
+- Verificado ExportService.swift (97 lineas) con buildMDLAsset y meshToMDL implementados
+- Verificado ExportViewModel.swift (112 lineas) con exportModel() conectado a ExportService real
+- Integrado AnimationView en navegacion principal como 5to modo (Animation)
+- Agregado case animation = "Animation" a AppState.AppMode enum
+- Agregado case .animation al switch en AppForgeStudioApp.swift
+- Limpiados archivos temporales __temp_*.txt (ya eliminados)
+
+### Estado
+- Fase 4 completa: animacion keyframes + exportacion real + modo Animation navegable
+- Pendiente: implementar exportTo*() real en ExportService si es necesario
+
 ## 2026-04-27 23:57 UTC - Archivo de Documentos Obsoletos
 
 ### Acciones

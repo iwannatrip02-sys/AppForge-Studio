@@ -1,6 +1,6 @@
 # AppForge Studio - Project Brain
 > Estado vivo del proyecto. Reescrito post-sesion por Gotchi.
-> Updated: 2026-04-29 15:22 UTC
+> Updated: 2026-04-29 21:50 UTC
 
 ## ENTIDADES CLAVE
 - Satin (tech) - Swift framework for Metal, abstrae shaders y render para iOS 3D graphics. Usado como motor de render.
@@ -33,3 +33,9 @@ Fase 4D completada. 3 archivos reescritos/actualizados:
 2. Instalar AltStore en iPad (AltServer desde Windows)
 3. Cargar .ipa compilado via AltStore
 4. Probar flujo completo: CAD -> escultura -> pintura -> animacion -> exportacion STL
+## LOG
+- [2026-04-29] Correcciones post-Fase 4: ExportViewModel.exportModel() verificado
+  completa (112 lineas, llama a exportService.exportTo*()), AnimationView en UI/Components/
+  (62 lineas, usa currentClipDuration computed property), AppState sin duplicacion (1 init),
+  ExportView MVVM con fileExporter, AppForgeStudioApp con navegacion 5 modos (CAD, Sculpt,
+  Hybrid, Animation, Render). Pendiente: implementar exportTo*() en ExportService si son stubs.

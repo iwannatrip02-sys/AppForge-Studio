@@ -1,12 +1,26 @@
 # TODO - AppForge Studio
 > Pendientes accionables. Reescrito post-sesion por Gotchi.
-> Updated: 2026-04-29 15:22 UTC
+> Updated: 2026-04-29 22:01 UTC
 
 ## Foco actual
 - Fase 4 completada (animacion keyframes + onboarding + pipeline CI/CD)
-- Siguiente: push a main para build en GitHub Actions + instalacion en iPad via AltStore
+- Siguiente: compilar localmente + push para build en GitHub Actions + instalacion en iPad via AltStore
 
 ## Pendientes
+
+### PENDIENTE - Correcciones post-Fase 4
+- ~~**Eliminar archivos temporales**: ya eliminados~~
+- ~~**Implementar exportModel() real**: ExportViewModel.exportModel() (112 lineas, conectado a ExportService real)~~
+- ~~**Conectar AnimationView**: Integrado como 5to modo en AppForgeStudioApp~~
+- **Compilar localmente**: Verificar build con Xcode antes de push
+
+### COMPLETADO - Correcciones estructurales Fase 4
+- ~~**Model.swift unificado**: Con id, color, cadHistoryID, originOp~~ ✅
+- ~~**ExportView refactorizada a MVVM**: Usa exportVM.selectedModel~~ ✅
+- ~~**AnimationView creada**: En UI/Components/ con controles de reproduccion~~ ✅
+- ~~**AppState consolidado**: Unico en ViewModels/, eliminado Core/AppState.swift~~ ✅
+- ~~**Archivo de estado**: docs/estado-post-correcciones.md con verificacion completa~~ ✅
+
 
 ### COMPLETADO - Fase 4A (3 bugs corregidos)
 - ~~**Bug SatinRenderer.updateScene inout** - Arreglado: firma cambiada a inout Scene3D. SatinRendererView.swift actualizado (3 llamadas con &)~~ ✅
@@ -43,3 +57,14 @@
 - **Instalar AltStore** en iPad desde AltServer en Windows
 - **Cargar .ipa** desde GitHub Actions artifacts al iPad via AltStore
 - **Probar flujo completo**: CAD (sketch/revolve) -> escultura -> pintura -> animacion -> exportacion STL
+- FASE 5: UI polishing y onboarding
+- Mejorar OnboardingView con animaciones de transicion y tutorial interactivo
+- Pulir ExportView: progress bar circular, animacion de exito, preview del modelo
+- Unificar toolbar entre modos: estilos consistentes, iconografia, atajos
+- Mejorar AnimationView: keyframes draggeables, curvas de easing, loop toggle
+
+## Bloqueos
+(ninguno)
+
+## Completados
+(ninguno)

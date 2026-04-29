@@ -22,6 +22,7 @@ class AppState: ObservableObject {
         case cad = "CAD"
         case sculpt = "Esculpir"
         case hybrid = "Hybrid"
+        case animation = "Animation"
         case render = "Render"
     }
 
@@ -36,23 +37,6 @@ class AppState: ObservableObject {
         self.satinRenderer = SatinRenderer(mtkView: mtkView)
         self.subdivisionVM = SubdivisionEngine(device: device)
         self.satinRenderer.setup()
-    }
-
-    var scene: Scene3D { canvasVM.scene }
-    var strokes: [BrushStroke] { canvasVM.scene.strokes }
-}
-
-    init() {
-        self.canvasVM = CanvasViewModel()
-        self.toolVM = ToolViewModel()
-        let device = MTLCreateSystemDefaultDevice() ??
-            fatalError("Metal no soportado en este dispositivo")
-        self.exportVM = ExportViewModel(exportService: ExportService(device: device))
-        let mtkView = MTKView()
-        mtkView.device = device
-        self.satinRenderer = SatinRenderer(mtkView: mtkView)
-        self.satinRenderer.setup()
-        self.subdivisionVM = SubdivisionEngine(device: device)
     }
 
     var scene: Scene3D { canvasVM.scene }
