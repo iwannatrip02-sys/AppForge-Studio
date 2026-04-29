@@ -2,7 +2,6 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct ExportView: View {
-    let model: Model
     @ObservedObject var exportVM: ExportViewModel
     @State private var showFileExporter = false
     @State private var exportFileName: String = "modelo"
@@ -43,14 +42,8 @@ struct ExportView: View {
                             }
                             .frame(maxWidth: .infinity)
                             .padding(12)
-                            .background(exportVM.selectedFormat == format ?
-                                        Color.accentColor.opacity(0.3) :
-                                        Color.gray.opacity(0.15))
-                            .cornerRadius(12)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(exportVM.selectedFormat == format ? Color.accentColor : Color.clear, lineWidth: 2)
-                            )
+                            .background(exportVM.selectedFormat == format ? Color.accentColor.opacity(0.2) : Color.gray.opacity(0.1))
+                            .cornerRadius(10)
                         }
                         .buttonStyle(.plain)
                     }
@@ -58,107 +51,75 @@ struct ExportView: View {
             }
             .padding(.horizontal, 24)
             
-            // Nombre de archivo
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Nombre del archivo")
-                    .font(.headline)
-                    .foregroundColor(.white)
-                TextField("nombre-del-modelo", text: $exportFileName)
+            // Nombre del archivo
+            HStack {
+                Text("Nombre:")
+                    .foregroundColor(.gray)
+                TextField("Nombre del archivo", text: $exportFileName)
                     .textFieldStyle(.roundedBorder)
-                    .autocapitalization(.none)
-                    .disableAutocorrection(true)
-                Text(".\(exportVM.selectedFormat.fileExtension)")
-                    .font(.caption)
+                    .foregroundColor(.white)
+                Text("." + exportVM.selectedFormat.fileExtension)
                     .foregroundColor(.gray)
             }
             .padding(.horizontal, 24)
             
-            Spacer()
-            
-            // Progress bar
-            if exportVM.isExporting {
-                VStack(spacing: 8) {
-                    ProgressView(value: exportVM.exportProgress)
-                        .progressViewStyle(.linear)
-                        .tint(.accentColor)
-                    Text("Exportando... \(Int(exportVM.exportProgress * 100))%")
+            // Info del modelo
+            if let model = exportVM.selectedModel {
+                HStack {
+                    Text(model.name)
+                        .foregroundColor(.white)
+                    Text("\(model.meshes.count) mallas")
                         .font(.caption)
                         .foregroundColor(.gray)
                 }
-                .padding(.horizontal, 24)
             }
             
+            Spacer()
+            
             // Boton exportar
-            Button(action: {
-                Task {
-                    await exportVM.exportModel(model, fileName: exportFileName)
-                    if exportVM.exportedFileURL != nil {
-                        showFileExporter = true
-                    }
-                }
-            }) {
+            Button(action: { showFileExporter = true }) {
                 HStack {
-                    Image(systemName: "square.and.arrow.up")
-                    Text("Exportar")
+                    if exportVM.isExporting {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .scaleEffect(0.8)
+                    } else {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    Text(exportVM.isExporting ? "Exportando..." : "Exportar")
                 }
-                .font(.headline)
-                .foregroundColor(.white)
                 .frame(maxWidth: .infinity)
-                .padding()
+                .padding(16)
                 .background(exportVM.isExporting ? Color.gray : Color.accentColor)
+                .foregroundColor(.white)
                 .cornerRadius(12)
             }
-            .disabled(exportVM.isExporting)
+            .disabled(exportVM.isExporting || exportVM.selectedModel == nil)
             .padding(.horizontal, 24)
             .padding(.bottom, 32)
         }
         .background(Color.black.opacity(0.9))
-        .alert("Exportacion exitosa", isPresented: $exportVM.showSuccessAlert) {
-            Button("Compartir") { showFileExporter = true }
-            Button("Cerrar", role: .cancel) { exportVM.reset() }
-        } message: {
-            Text("El modelo se exporto correctamente en formato \(exportVM.selectedFormat.rawValue).")
-        }
-        .alert("Error de exportacion", isPresented: Binding<Bool>(
-            get: { exportVM.exportError != nil },
-            set: { if !$0 { exportVM.exportError = nil } }
-        )) {
-            Button("Cerrar", role: .cancel) { exportVM.exportError = nil }
-        } message: {
-            Text(exportVM.exportError ?? "Error desconocido")
-        }
-        .fileExporter(
-            isPresented: $showFileExporter,
-            document: exportVM.exportedFileURL != nil ?
-                ExportFileData(url: exportVM.exportedFileURL!) : nil,
-            contentType: exportVM.selectedFormat.utType,
-            defaultFilename: exportFileName + "." + exportVM.selectedFormat.fileExtension
-        ) { result in
+        .fileExporter(isPresented: $showFileExporter,
+                      document: exportVM.selectedModel.map { ExportDocument(model: $0) },
+                      contentType: exportVM.selectedFormat.utType,
+                      defaultFilename: exportFileName + "." + exportVM.selectedFormat.fileExtension) { result in
             switch result {
-            case .success:
-                exportVM.reset()
+            case .success(let url):
+                exportVM.exportedFileURL = url
+                exportVM.showSuccessAlert = true
             case .failure(let error):
-                exportVM.exportError = "Error al guardar: \(error.localizedDescription)"
+                exportVM.exportError = error.localizedDescription
             }
         }
-    }
-}
-
-// Helper para fileExporter
-struct ExportFileData: FileDocument {
-    let url: URL
-    
-    static var readableContentTypes: [UTType] { [.data] }
-    
-    init(url: URL) {
-        self.url = url
-    }
-    
-    init(configuration: ReadConfiguration) throws {
-        throw CocoaError(.fileReadUnknown)
-    }
-    
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        FileWrapper(url: url)
+        .alert("Exportado exitosamente", isPresented: $exportVM.showSuccessAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Archivo guardado en \(exportVM.exportedFileURL?.lastPathComponent ?? "")")
+        }
+        .alert("Error al exportar", isPresented: .constant(exportVM.exportError != nil)) {
+            Button("OK", role: .cancel) { exportVM.exportError = nil }
+        } message: {
+            Text(exportVM.exportError ?? "")
+        }
     }
 }

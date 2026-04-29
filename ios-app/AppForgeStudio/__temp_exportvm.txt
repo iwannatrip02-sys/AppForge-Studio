@@ -50,7 +50,6 @@ class ExportViewModel: ObservableObject {
     @Published var exportError: String?
     @Published var showSuccessAlert = false
     @Published var exportedFileURL: URL?
-    @Published var selectedModel: Model?
     
     let exportService: ExportService
     
@@ -58,11 +57,7 @@ class ExportViewModel: ObservableObject {
         self.exportService = exportService
     }
     
-    func exportModel(fileName: String) async {
-        guard let model = selectedModel else {
-            exportError = "No hay modelo seleccionado para exportar."
-            return
-        }
+    func exportModel(_ model: Model, fileName: String) async {
         isExporting = true
         exportError = nil
         exportProgress = 0.0
@@ -107,6 +102,5 @@ class ExportViewModel: ObservableObject {
         exportError = nil
         showSuccessAlert = false
         exportedFileURL = nil
-        selectedModel = nil
     }
 }

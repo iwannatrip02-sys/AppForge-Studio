@@ -12,7 +12,9 @@ class AppState: ObservableObject {
     let canvasVM: CanvasViewModel
     let toolVM: ToolViewModel
     let exportVM: ExportViewModel
-    let animationVM: AnimationEngine
+    lazy var animationVM: AnimationEngine = {
+        AnimationEngine(appState: self)
+    }()
     let subdivisionVM: SubdivisionEngine
     var satinRenderer: SatinRenderer!
 
@@ -32,8 +34,24 @@ class AppState: ObservableObject {
         let mtkView = MTKView()
         mtkView.device = device
         self.satinRenderer = SatinRenderer(mtkView: mtkView)
+        self.subdivisionVM = SubdivisionEngine(device: device)
         self.satinRenderer.setup()
-        self.animationVM = AnimationEngine(appState: self)
+    }
+
+    var scene: Scene3D { canvasVM.scene }
+    var strokes: [BrushStroke] { canvasVM.scene.strokes }
+}
+
+    init() {
+        self.canvasVM = CanvasViewModel()
+        self.toolVM = ToolViewModel()
+        let device = MTLCreateSystemDefaultDevice() ??
+            fatalError("Metal no soportado en este dispositivo")
+        self.exportVM = ExportViewModel(exportService: ExportService(device: device))
+        let mtkView = MTKView()
+        mtkView.device = device
+        self.satinRenderer = SatinRenderer(mtkView: mtkView)
+        self.satinRenderer.setup()
         self.subdivisionVM = SubdivisionEngine(device: device)
     }
 
