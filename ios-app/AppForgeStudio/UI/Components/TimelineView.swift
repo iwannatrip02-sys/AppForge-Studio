@@ -4,6 +4,8 @@ struct TimelineView: View {
     @ObservedObject var engine: AnimationEngine
     @State private var dragTime: Float? = nil
     @State private var showAddKeyframe = false
+    @State private var draggedKeyframe: KeyframeEntry? = nil
+    @State private var dragOffset: CGFloat = 0
     
     var body: some View {
         VStack(spacing: 8) {
@@ -52,113 +54,112 @@ struct TimelineView: View {
     }
     
     private var timelineScrubber: some View {
-        VStack(spacing: 4) {
+        let duration = engine.clips[engine.selectedClipName]?.duration ?? 1.0
+        return VStack(spacing: 4) {
             Slider(value: Binding(
                 get: { Double(dragTime ?? engine.currentTime) },
                 set: { newValue in
-                    let val = Float(newValue)
-                    dragTime = val
-                    engine.currentTime = val
-                    engine.pause()
+                    dragTime = Float(newValue)
+                    engine.currentTime = Float(newValue)
+                    engine.seek(to: Float(newValue))
                 }
-            ), in: 0...(Double(engine.clips[engine.selectedClipName]?.duration ?? 1)))
-            .disabled(engine.selectedClipName.isEmpty)
+            ), in: 0...Double(duration), step: 0.016)
+            .accentColor(.blue)
             
             HStack {
-                Text(formatTime(engine.currentTime))
-                    .font(.caption)
+                Text(String(format: "%.1fs", dragTime ?? engine.currentTime))
+                    .font(.caption2.monospacedDigit())
                     .foregroundColor(.white)
                 Spacer()
-                Text(formatTime(engine.clips[engine.selectedClipName]?.duration ?? 0))
-                    .font(.caption)
+                Text(String(format: "%.1fs", duration))
+                    .font(.caption2.monospacedDigit())
                     .foregroundColor(.gray)
             }
         }
+        .padding(.horizontal, 4)
     }
     
     private var keyframeList: some View {
-        Group {
-            if let clip = engine.clips[engine.selectedClipName], !engine.selectedClipName.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Keyframes")
-                        .font(.caption.bold())
-                        .foregroundColor(.white)
-                    ForEach(engine.keyframes, id: \.id) { kf in
-                        HStack {
-                            Text(kf.type)
-                                .font(.caption)
-                                .foregroundColor(.accentColor)
-                            Spacer()
-                            Text(formatTime(kf.time))
-                                .font(.caption)
-                                .foregroundColor(.gray)
-                        }
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(Color.gray.opacity(0.2))
-                        .cornerRadius(6)
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) {
-                                engine.removeKeyframe(id: kf.id)
-                            } label: {
-                                Label("Eliminar", systemImage: "trash")
-                            }
-                        }
-                    }
+        let duration = engine.clips[engine.selectedClipName]?.duration ?? 1.0
+        let filtered = engine.keyframes.filter { $0.modelName == engine.selectedClipName }
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("Keyframes")
+                .font(.caption.bold())
+                .foregroundColor(.gray)
+            
+            if filtered.isEmpty {
+                Text("Sin keyframes. Anade uno con +")
+                    .font(.caption2)
+                    .foregroundColor(.gray.opacity(0.6))
+                    .padding(.vertical, 8)
+            } else {
+                ForEach(filtered) { kf in
+                    keyframeRow(kf: kf, duration: duration)
                 }
             }
         }
     }
-}
-
-struct AddKeyframeSheet: View {
-    @ObservedObject var engine: AnimationEngine
-    @Binding var isPresented: Bool
-    @State private var selectedType = "posicion"
-    @State private var keyframeTime: Float = 0
-    @State private var modelName = ""
     
-    var body: some View {
-        NavigationView {
-            Form {
-                Section("Tipo") {
-                    Picker("Tipo", selection: $selectedType) {
-                        ForEach(engine.keyframeTypes, id: \.self) { t in
-                            Text(t).tag(t)
+    private func keyframeRow(kf: KeyframeEntry, duration: Float) -> some View {
+        let pos = duration > 0 ? CGFloat(kf.time / duration) : 0
+        let color: Color = {
+            switch kf.type {
+            case "posicion": return .green
+            case "rotacion": return .blue
+            case "escala": return .orange
+            default: return .accentColor
+            }
+        }()
+        
+        return HStack(spacing: 8) {
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.gray.opacity(0.2))
+                    .frame(height: 28)
+                
+                Circle()
+                    .fill(color)
+                    .frame(width: 14, height: 14)
+                    .offset(x: pos * (UIScreen.main.bounds.width - 120) - 7)
+                    .gesture(
+                        DragGesture()
+                            .onChanged { value in
+                                draggedKeyframe = kf
+                                let newOffset = value.translation.width
+                                let totalWidth = UIScreen.main.bounds.width - 120
+                                let newTime = max(0, min(Float(duration), Float(newOffset / totalWidth) * duration))
+                                if let idx = engine.keyframes.firstIndex(where: { $0.id == kf.id }) {
+                                    engine.keyframes[idx].time = newTime
+                                }
+                            }
+                            .onEnded { value in
+                                let totalWidth = UIScreen.main.bounds.width - 120
+                                let rawTime = max(0, min(Float(duration), Float(value.translation.width / totalWidth) * duration))
+                                let snappedTime = round(rawTime * 2) / 2.0
+                                if let idx = engine.keyframes.firstIndex(where: { $0.id == kf.id }) {
+                                    engine.keyframes[idx].time = min(snappedTime, Float(duration))
+                                }
+                                draggedKeyframe = nil
+                            }
+                    )
+                    .contextMenu {
+                        Button(action: { engine.removeKeyframe(at: kf.time) }) {
+                            Label("Eliminar", systemImage: "trash")
+                        }
+                        Button(action: {
+                            let newTime = min(kf.time + 0.5, Float(duration))
+                            engine.addKeyframe(type: kf.type, time: newTime, modelName: kf.modelName)
+                        }) {
+                            Label("Duplicar", systemImage: "plus.square")
                         }
                     }
-                }
-                Section("Tiempo") {
-                    Slider(value: Binding(
-                        get: { Double(keyframeTime) },
-                        set: { keyframeTime = Float($0) }
-                    ), in: 0...(Double(engine.clips[engine.selectedClipName]?.duration ?? 1)))
-                    Text("\(formatTime(keyframeTime))")
-                        .font(.caption)
-                        .foregroundColor(.gray)
-                }
-                Section("Modelo") {
-                    TextField("Nombre del modelo", text: $modelName)
-                }
             }
-            .navigationTitle("Agregar Keyframe")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancelar") { isPresented = false }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Agregar") {
-                        engine.addKeyframe(type: selectedType, time: keyframeTime, modelName: modelName)
-                        isPresented = false
-                    }
-                }
-            }
+            
+            Text(String(format: "%.1fs", kf.time))
+                .font(.caption2.monospacedDigit())
+                .foregroundColor(color)
+                .frame(width: 40)
         }
+        .padding(.vertical, 2)
     }
-}
-
-func formatTime(_ time: Float) -> String {
-    let mins = Int(time) / 60
-    let secs = Int(time) % 60
-    let millis = Int((time - Float(Int(time))) * 100)
-    return String(format: "%d:%02d.%02d", mins, secs, millis)
 }

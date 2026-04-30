@@ -1,6 +1,6 @@
 # TODO - AppForge Studio
 > Pendientes accionables. Reescrito post-sesion por Gotchi.
-> Updated: 2026-04-29 22:01 UTC
+> Updated: 2026-04-29 22:33 UTC
 
 ## Foco actual
 - Fase 4 completada (animacion keyframes + onboarding + pipeline CI/CD)
@@ -62,6 +62,7 @@
 - Pulir ExportView: progress bar circular, animacion de exito, preview del modelo
 - Unificar toolbar entre modos: estilos consistentes, iconografia, atajos
 - Mejorar AnimationView: keyframes draggeables, curvas de easing, loop toggle
+- Pulir ExportView (progress bar, preview, mejores animaciones)
 
 ## Bloqueos
 (ninguno)

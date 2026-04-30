@@ -54,6 +54,9 @@ struct CADModeView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 bottomBar
             }
+            .onChange(of: selectedTool) { newTool in
+                executeCADTool(newTool, canvasVM: canvasVM, toolVM: toolVM)
+            }
         }.sheet(isPresented: $showMeasurements) {
             NavigationView {
                 List {

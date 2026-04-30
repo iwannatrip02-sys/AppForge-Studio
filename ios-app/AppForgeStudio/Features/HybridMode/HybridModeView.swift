@@ -57,7 +57,7 @@ struct HybridModeView: View {
                     HStack {
                         Text("Esculpir").font(.caption).bold()
                         Spacer()
-                        Button("Subdividir") {}.font(.caption)
+                        Button("Subdividir") { if let model = canvasVM.scene.models.first { let subdivided = subdivisionVM.subdivide(model.meshes.first ?? Mesh(vertices: [], indices: []), levels: 1); let newModel = Model(name: model.name + "_subd", meshes: [subdivided]); canvasVM.scene.addModel(newModel); canvasVM.objectWillChange.send() } }.font(.caption)
                         Button("Remesh") {}.font(.caption)
                     }
                 case .paint:
