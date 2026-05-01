@@ -1,10 +1,6 @@
 import Foundation
 import simd
 import OCCTSwift
-
-class OCCTEngine {
-    static let shared = OCCTEngine()
-    var historyTree = CADHistoryTree()
     
     private init() {}
     
@@ -67,7 +63,7 @@ class OCCTEngine {
     
     
     func loft(profiles: [Shape], ruled: Bool = false) -> Shape {
-        return profile.lofted(profiles: profiles, ruled: ruled)
+        return Shape.loft(profiles: profiles, ruled: ruled)
     }
     
     // MARK: - History Tree
@@ -85,8 +81,6 @@ class OCCTEngine {
     func redoLastOperation() -> Bool {
         guard let _ = historyTree.redo() else { return false }
         return true
-    }e) -> Shape {
-        return Shape.loft(profiles: profiles, ruled: ruled)
     }
     
     func exportSTEP(shape: Shape, to url: URL) throws {
@@ -220,5 +214,16 @@ class OCCTEngine {
     func measureBoundingBox(_ shape: Shape) -> (min: SIMD3<Double>, max: SIMD3<Double>, size: SIMD3<Double>) {
         let box = shape.boundingBox()
         return (box.min, box.max, box.size)
+    }
+    func measureBoundingBox(_ shape: Shape) -> (min: SIMD3<Double>, max: SIMD3<Double>, size: SIMD3<Double>) {
+        let box = shape.boundingBox()
+        return (box.min, box.max, box.size)
+    }
+
+    // MARK: - STEP Export
+
+    func exportSTEP(shape: Shape, to url: URL) throws {
+        let stepData = shape.exportSTEP()
+        try stepData.write(to: url, atomically: true, encoding: .utf8)
     }
 }

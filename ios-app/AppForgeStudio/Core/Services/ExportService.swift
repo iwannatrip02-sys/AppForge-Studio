@@ -13,68 +13,63 @@ class ExportService {
     let device: MTLDevice
     let occtEngine: OCCTEngine
     let csgEngine: CSGEngine
-    
+
     init(device: MTLDevice, occtEngine: OCCTEngine = .shared, csgEngine: CSGEngine = .shared) {
         self.device = device
         self.occtEngine = occtEngine
         self.csgEngine = csgEngine
     }
-    
+
     func exportToOBJ(model: Model, url: URL) throws {
         guard let asset = buildMDLAsset(from: model) else {
             throw ExportError.invalidModel("No valid meshes found in model for OBJ export")
         }
-        do {
-            try asset.export(to: url)
-        } catch {
-            throw ExportError.exportFailed("OBJ export failed - \(error.localizedDescription)")
-        }
+        do { try asset.export(to: url) }
+        catch { throw ExportError.exportFailed("OBJ export failed - \(error.localizedDescription)") }
     }
-    
+
     func exportToSTL(model: Model, url: URL) throws {
         guard let asset = buildMDLAsset(from: model) else {
             throw ExportError.invalidModel("No valid meshes found in model for STL export")
         }
-        do {
-            try asset.export(to: url, fileType: "stl")
-        } catch {
-            throw ExportError.exportFailed("STL export failed - \(error.localizedDescription)")
-        }
+        do { try asset.export(to: url, fileType: "stl") }
+        catch { throw ExportError.exportFailed("STL export failed - \(error.localizedDescription)") }
     }
-    
+
     func exportToUSDZ(model: Model, url: URL) throws {
         guard let asset = buildMDLAsset(from: model) else {
             throw ExportError.invalidModel("No valid meshes found in model for USDZ export")
         }
-        do {
-            try asset.export(to: url, fileType: "usdz")
-        } catch {
-            throw ExportError.exportFailed("USDZ export failed - \(error.localizedDescription)")
-        }
+        do { try asset.export(to: url, fileType: "usdz") }
+        catch { throw ExportError.exportFailed("USDZ export failed - \(error.localizedDescription)") }
     }
-    
+
     func exportToSTEP(model: Model, url: URL) throws {
         guard !model.meshes.isEmpty else {
             throw ExportError.invalidModel("Model has no meshes for STEP export")
         }
-        
+        // Prefer OCCTEngine native STEP via Shape
+        if model.meshes.count == 1, let shape = occtEngine.meshToShape(model.meshes[0]) {
+            try occtEngine.exportSTEP(shape: shape, to: url)
+            return
+        }
+        // Fallback: manual ISO-10303-21 AP214 generation
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd"
         let currentDate = dateFormatter.string(from: Date())
-        
-        var stepContent = "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('View exchange'),'1');\nFILE_NAME('\(url.lastPathComponent)','\(currentDate)',('Author'),('Org'),'Preprocessor Ver','','');\nFILE_SCHEMA(('AP214'));\nENDSEC;\nDATA;\n"
+        var stepContent = "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((\'View exchange\'),\'1\');\nFILE_NAME(\'" + url.lastPathComponent + "\',\'" + currentDate + "\',(\'Author\'),(\'Org\'),\'Preprocessor Ver\',\'\',\'\');\nFILE_SCHEMA((\'AP214\'));\nENDSEC;\nDATA;\n"
         var vertexId = 1
         var faceId = 1
         for mesh in model.meshes {
             for v in mesh.vertices {
-                stepContent += "#\(vertexId)=CARTESIAN_POINT('',(\(v.position.x),\(v.position.y),\(v.position.z)));\n"
+                stepContent += "#" + String(vertexId) + "=CARTESIAN_POINT(\'\',(" + String(v.position.x) + "," + String(v.position.y) + "," + String(v.position.z) + "));\n"
                 vertexId += 1
             }
             for i in stride(from: 0, to: mesh.indices.count, by: 3) {
                 let i1 = Int(mesh.indices[i]) + 1
                 let i2 = Int(mesh.indices[i+1]) + 1
                 let i3 = Int(mesh.indices[i+2]) + 1
-                stepContent += "#\(faceId)=POLYLOOP('',(#\(i1),#\(i2),#\(i3)));\n"
+                stepContent += "#" + String(faceId) + "=POLYLOOP(\'\',(#" + String(i1) + ",#" + String(i2) + ",#" + String(i3) + "));\n"
                 faceId += 1
             }
         }
@@ -85,7 +80,7 @@ class ExportService {
             throw ExportError.fileWriteFailed("STEP export failed - \(error.localizedDescription)")
         }
     }
-    
+
     func exportToGLTF(model: Model, url: URL) throws {
         guard !model.meshes.isEmpty else {
             throw ExportError.invalidModel("No valid meshes found in model for GLTF export")
@@ -99,9 +94,7 @@ class ExportService {
             for v in mesh.vertices {
                 verticesList.append(["pos": [v.position.x, v.position.y, v.position.z], "nml": [v.normal.x, v.normal.y, v.normal.z], "uv": [v.uv.x, v.uv.y]])
             }
-            for i in mesh.indices {
-                indicesList.append(i + vertexOffset)
-            }
+            for i in mesh.indices { indicesList.append(i + vertexOffset) }
             vertexOffset += UInt32(mesh.vertices.count)
         }
         let gltf: [String: Any] = [
@@ -111,25 +104,23 @@ class ExportService {
             "nodes": [["mesh": 0, "name": model.name]],
             "meshes": [["primitives": [["attributes": ["POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2], "indices": 3]]]],
             "accessors": [
-                ["bufferView": 0, "componentType": 5126, "count": \(verticesList.count), "type": "VEC3"],
-                ["bufferView": 1, "componentType": 5126, "count": \(verticesList.count), "type": "VEC3"],
-                ["bufferView": 2, "componentType": 5126, "count": \(verticesList.count), "type": "VEC2"],
-                ["bufferView": 3, "componentType": 5125, "count": \(indicesList.count), "type": "SCALAR"]
+                ["bufferView": 0, "componentType": 5126, "count": verticesList.count, "type": "VEC3", "max": [Float.greatestFiniteMagnitude], "min": [-Float.greatestFiniteMagnitude]],
+                ["bufferView": 1, "componentType": 5126, "count": verticesList.count, "type": "VEC3"],
+                ["bufferView": 2, "componentType": 5126, "count": verticesList.count, "type": "VEC2"],
+                ["bufferView": 3, "componentType": 5125, "count": indicesList.count, "type": "SCALAR"]
             ],
             "bufferViews": [
-                ["buffer": 0, "byteOffset": 0, "byteLength": \(verticesList.count * 12), "target": 34962],
-                ["buffer": 0, "byteOffset": \(verticesList.count * 12), "byteLength": \(verticesList.count * 12), "target": 34962],
-                ["buffer": 0, "byteOffset": \(verticesList.count * 24), "byteLength": \(verticesList.count * 8), "target": 34962],
-                ["buffer": 0, "byteOffset": \(verticesList.count * 32), "byteLength": \(indicesList.count * 4), "target": 34963]
+                ["buffer": 0, "byteOffset": 0, "byteLength": verticesList.count * 12, "target": 34962],
+                ["buffer": 0, "byteOffset": verticesList.count * 12, "byteLength": verticesList.count * 12, "target": 34962],
+                ["buffer": 0, "byteOffset": verticesList.count * 24, "byteLength": verticesList.count * 8, "target": 34962],
+                ["buffer": 0, "byteOffset": verticesList.count * 32, "byteLength": indicesList.count * 4, "target": 34963]
             ],
-            "buffers": [["byteLength": \(verticesList.count * 32 + indicesList.count * 4), "uri": ""]]
+            "buffers": [["byteLength": verticesList.count * 32 + indicesList.count * 4, "uri": url.lastPathComponent.replacingOccurrences(of: ".gltf", with: ".bin")]]
         ]
-        if let data = try? JSONSerialization.data(withJSONObject: gltf, options: .prettyPrinted) {
-            var gltfStr = String(data: data, encoding: .utf8) ?? ""
-            try gltfStr.write(to: url, atomically: true, encoding: .utf8)
-        } else {
+        guard let data = try? JSONSerialization.data(withJSONObject: gltf, options: .prettyPrinted) else {
             throw ExportError.exportFailed("GLTF serialization failed")
         }
+        try data.write(to: url)
     }
 
     private func buildMDLAsset(from model: Model) -> MDLAsset? {

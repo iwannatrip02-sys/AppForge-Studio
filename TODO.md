@@ -1,5 +1,5 @@
 # AppForge Studio - TODO.md
-> Estado: 2026-05-01 07:28 UTC
+> Estado: 2026-05-01 07:30 UTC
 
 - [x] Transiciones animadas entre modos (matchedGeometryEffect + .opacity + .slide)
 - [x] Haptics en ToolbarView (UIImpactFeedbackGenerator en Snap, Reset, Brush, Loop, Delete)
@@ -12,11 +12,11 @@
 - [x] Fase 6: Tests (AnimationEngineTests 12, ExportServiceTests 6, ModelCacheServiceTests 5)
 - [x] Fase 7: ModelCacheService (NSCache 50 obj/128MB + disco JSON)
 - [x] Integrar ModelCacheService con ModelLoadService (cache transparente)
+- [x] Modo oscuro completo (ThemeManager + AppTheme + 11 vistas actualizadas)
+- [x] Pantalla de carga 3D (LoadingScreenView con MTKView + ProgressView)
 
 - [ ] Validar tests en Xcode (compilar y ejecutar)
-- [ ] Modo oscuro completo (DynamicColor + asset catalog)
 - [ ] Migrar STEP Export a OCCTEngine nativo
-- [ ] Pantalla de carga 3D con MTKView + Satin
 - [ ] Analisis competitivo vs Shapr3D ($299/ano)
 - [ ] Beta testing: AltStore + TestFlight
 - [ ] Exportacion FBX y Collada
@@ -25,18 +25,20 @@
 - [ ] Implementar Material Editor con PBR textures
 - [ ] Animacion de morph targets entre mallas
 - [ ] Exportar a USDZ para AR QuickLook
-> Updated: 2026-05-01 07:28 UTC
+> Updated: 2026-05-01 08:26 UTC
 
 ## Foco actual
-- Validar tests en Xcode (AnimationEngineTests, ExportServiceTests, ModelCacheServiceTests)
-- Modo oscuro completo
-- Pantalla de carga 3D con MTKView + Satin
+- Migrar STEP Export a OCCTEngine nativo
+- Validar tests en Xcode
+
+## Pendientes
+- Migrar STEP Export a OCCTEngine nativo
 
 ## Bloqueos
-(ninguno)
+
+## Completados recientes
+- Modo oscuro completo con ThemeManager + AppTheme + 11+ vistas *(commit e7acae5)*
+- Pantalla de carga 3D con MTKView + SwiftUI overlay *(commit e7acae5)*
 
 ## Completados
-- Fase 5: Exportacion 5 formatos con ExportView y Confetti *(done 2026-05-01)*
-- Fase 6: Tests unitarios para AnimationEngine, ExportService, ModelCacheService *(done 2026-05-01)*
-- Fase 7: ModelCacheService con memoria + disco *(done 2026-05-01)*
-- Integrar ModelCacheService con ModelLoadService *(done 2026-05-01)*
+(ninguno)
