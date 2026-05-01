@@ -1,5 +1,5 @@
 # AppForge Studio - Architecture Document
-> 2026-04-27 18:32 UTC-5 | Creacion inicial
+> 2026-04-30 07:30 UTC | Actualizado post-validacion STEP
 
 ## Stack Tecnologico
 - **Swift 5.9+** con SwiftUI (iOS 17+)
@@ -28,7 +28,7 @@
 - **CADModeView**: toolbar 9 herramientas, toggle snap, boton mediciones
 - **SculptModeView**: Picker esculpir/pintar, selector 9 brushes, slider radio, toggle simetria, undo/redo
 - **HybridModeView**: 3 submodos (CAD/Sculpt/Paint), boton capas
-- **ExportView**: selector formato (STL/OBJ), file picker, progreso, alerta
+- **ExportView**: selector 4 formatos (STL/OBJ/STEP/USDZ) con LazyVGrid, fileExporter, ProgressView, alerta
 
 ### Capa 4: Render (Metal)
 - **MetalView**: UIViewRepresentable con MTKView, delegate Coordinator
@@ -51,7 +51,8 @@
   - MeasureEngine: distancia, area, volumen (teorema divergencia)
 
 ### Capa 6: Servicios
-- **ExportService**: exportToOBJ() / exportToSTL() via MDLAsset
+- **ExportService**: exportToOBJ() / exportToSTL() / exportToUSDZ() via MDLAsset + ModelIO nativo
+- **ExportService**: exportToSTEP() via generacion manual AP214 (CARTESIAN_POINT + POLYLOOP + MANIFOLD_SOLID_BREP). NO usa OCCTEngine. Validado 2026-04-30: funcional para mallas triangulares simples. Ver docs/validacion-export-step-20260430.md
 - **ModelLoadService**: loadModel(url), createPrimitive(box/sphere/cylinder/plane/torus) via MDLMesh
 
 ### Capa 7: Modelos de Datos
@@ -67,7 +68,8 @@
 2. BrushEngine -> deforma vertices en Mesh -> UploadToGPU()
 3. CanvasViewModel.saveState() -> undo stack
 4. MetalView.draw() -> pipeline Metal -> framebuffer
-5. Export: ExportView -> ExportViewModel.exportModel() -> ExportService.exportToOBJ/STL()
+5. Export: ExportView -> ExportViewModel.exportModel() -> ExportService.exportToOBJ/STL/STEP/USDZ()
+   - STEP: generacion manual AP214 (CARTESIAN_POINT + POLYLOOP), sin OCCTEngine
 
 ## Decisiones de Arquitectura
 - **Package.swift** con SPM y Satin 0.3.0 como unica dependencia externa
@@ -81,3 +83,4 @@
 2. HybridMode no comparte estado de deformacion entre submodos
 3. BooleanEngine incompleto (sin BSP tree)
 4. Sources/ duplicado en raiz del proyecto
+5. ExportService.exportToSTEP() usa generacion manual AP214 sin OCCTEngine — funcional para casos simples pero con 5 debilidades de robustez (validado 2026-04-30). Recomendado migrar a OCCTEngine.exportSTEP() para soporte CAD completo (NURBS, B-Rep).

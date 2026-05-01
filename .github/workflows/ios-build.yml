@@ -1,0 +1,36 @@
+name: iOS Build Verification
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Build and Test
+    runs-on: macos-14
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Select Xcode 16.1
+        run: sudo xcode-select -s /Applications/Xcode_16.1.app
+      
+      - name: Build iOS App
+        run: |
+          cd ios-app
+          xcodebuild clean build \
+            -scheme AppForgeStudio \
+            -project AppForgeStudio.xcodeproj \
+            -destination 'platform=iOS Simulator,name=iPad Pro 11-inch M4,OS=18.1' \
+            CODE_SIGNING_ALLOWED=NO | xcpretty
+      
+      - name: Run Tests
+        run: |
+          cd ios-app
+          xcodebuild test \
+            -scheme AppForgeStudio \
+            -project AppForgeStudio.xcodeproj \
+            -destination 'platform=iOS Simulator,name=iPad Pro 11-inch M4,OS=18.1' \
+            CODE_SIGNING_ALLOWED=NO | xcpretty

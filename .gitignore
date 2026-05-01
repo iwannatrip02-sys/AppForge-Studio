@@ -39,3 +39,4 @@ credentials*
 # Project specific
 ios-app/AppForgeStudio.xcodeproj/project.xcworkspace/
 ios-app/AppForgeStudio.xcodeproj/xcuserdata/
+ios-app/AppForgeStudio/nul

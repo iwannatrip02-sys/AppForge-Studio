@@ -1,5 +1,35 @@
 # Changelog - AppForge Studio
 
+## 2026-04-30 07:30 UTC - Validacion Export STEP
+
+### Acciones
+- Auditado ExportService.exportToSTEP() en Core/Services/ExportService.swift (~76 lineas)
+- Verificado bug previo corregido: `for mesh in model.meshes` (antes era `for mesh in mesh.meshes`)
+- Evaluado formato STEP AP214 generado: CARTESIAN_POINT + POLYLOOP + MANIFOLD_SOLID_BREP
+
+### 5 Debilidades Detectadas
+1. Sin deduplicacion de vertices: cada vertice genera CARTESIAN_POINT, incluidos duplicados por normales/UV
+2. Sin chequeo de primitiveType: asume todas las caras son triangulares sin validar `mesh.primitiveType == .triangle`
+3. Sin post-validacion de archivo: OBJ/STL verifican `fileExists(atPath:)`, STEP carece de esta validacion
+4. Sin manejo de errores: retorna `true` aunque la escritura del archivo falle
+5. Sin uso de OCCTEngine: `occtEngine` disponible como propiedad pero no usado; generacion manual menos robusta que OCCTSwift nativo
+
+### Recomendaciones documentadas
+- Migrar a OCCTEngine.exportSTEP() para soporte CAD completo (NURBS, B-Rep)
+- Agregar post-validacion de fileExists + tamano > 0 bytes
+- Desduplicar vertices con Set de SIMD3<Float> si se mantiene generacion manual
+- Validar primitiveType antes de exportar
+- Usar Date() en lugar de fecha hardcodeada '2026-04-30'
+
+### Archivos
+- Creado: docs/validacion-export-step-20260430.md (analisis completo)
+- Actualizado: BRAIN.md, ARCHITECTURE.md (documentacion canonica)
+
+### Estado
+- exportToSTEP funcional para casos simples (1 malla triangular, pocos vertices)
+- Sin bugs activos de compilacion; debilidades de robustez documentadas
+- Pendiente: migracion a OCCTEngine.exportSTEP() para produccion
+
 ## 2026-04-29 21:50 UTC - Correcciones post-Fase 4 + Integracion AnimationView
 
 ### Acciones
