@@ -1,5 +1,5 @@
 # AppForge Studio - TODO.md
-> Estado: 2026-05-01 07:30 UTC
+> Estado: 2026-05-01 08:30 UTC
 
 - [x] Transiciones animadas entre modos (matchedGeometryEffect + .opacity + .slide)
 - [x] Haptics en ToolbarView (UIImpactFeedbackGenerator en Snap, Reset, Brush, Loop, Delete)
@@ -16,7 +16,7 @@
 - [x] Pantalla de carga 3D (LoadingScreenView con MTKView + ProgressView)
 
 - [ ] Validar tests en Xcode (compilar y ejecutar)
-- [ ] Migrar STEP Export a OCCTEngine nativo
+- [x] Migrar STEP Export a OCCTEngine nativo (commit d773acc)
 - [ ] Analisis competitivo vs Shapr3D ($299/ano)
 - [ ] Beta testing: AltStore + TestFlight
 - [ ] Exportacion FBX y Collada
@@ -28,15 +28,15 @@
 > Updated: 2026-05-01 08:26 UTC
 
 ## Foco actual
-- Migrar STEP Export a OCCTEngine nativo
-- Validar tests en Xcode
+- Validar tests en Xcode (compilar y ejecutar)
+- Analisis competitivo vs Shapr3D ($299/ano)
 
 ## Pendientes
-- Migrar STEP Export a OCCTEngine nativo
 
 ## Bloqueos
 
 ## Completados recientes
+- Migrar STEP Export a OCCTEngine nativo a OCCTEngine.exportSTEP(shape:to:) *(commit d773acc)*
 - Modo oscuro completo con ThemeManager + AppTheme + 11+ vistas *(commit e7acae5)*
 - Pantalla de carga 3D con MTKView + SwiftUI overlay *(commit e7acae5)*
 
