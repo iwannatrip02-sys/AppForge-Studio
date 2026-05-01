@@ -5,75 +5,100 @@ import Metal
 struct AppForgeStudioApp: App {
     @StateObject private var appState = AppState()
     @State private var showOnboarding = !UserDefaults.standard.bool(forKey: "onboardingComplete")
+    @Namespace private var modeTransition
 
     var body: some Scene {
         WindowGroup {
+            AppRootView(appState: appState, showOnboarding: $showOnboarding, modeTransition: modeTransition)
+        }
+    }
+}
+
+struct AppRootView: View {
+    @ObservedObject var appState: AppState
+    @Binding var showOnboarding: Bool
+    var modeTransition: Namespace.ID
+    @Environment(\.colorScheme) private var systemColorScheme
+
+    var body: some View {
+        Group {
             if showOnboarding {
                 OnboardingView(isOnboardingComplete: $showOnboarding)
+                    .environmentObject(appState.themeManager)
                     .transition(.opacity)
-            } else {
-                ZStack {
-                    Color.black.edgesIgnoringSafeArea(.all)
-
-                VStack(spacing: 0) {
-                    // Top navigation
-                    HStack {
-                        Text("AppForge Studio")
-                            .font(.headline)
-                            .foregroundColor(.white)
-                        Spacer()
-                        HStack(spacing: 2) {
-                            ForEach(AppState.AppMode.allCases, id: \.self) { mode in
-                                Button(action: { appState.selectedMode = mode }) {
-                                    Text(mode.rawValue)
-                                        .font(.system(size: 12, weight: appState.selectedMode == mode ? .bold : .regular))
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 6)
-                                        .background(appState.selectedMode == mode ? Color.accentColor : Color.gray.opacity(0.3))
-                                        .foregroundColor(.white)
-                                        .cornerRadius(8)
-                                }
+            } else if appState.isLoading {
+                LoadingScreenView()
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
+                            withAnimation(.easeInOut(duration: 0.6)) {
+                                appState.isLoading = false
                             }
                         }
-                        Spacer()
-                        Button(action: { appState.showExport = true }) {
-                            Image(systemName: "square.and.arrow.up")
-                                .foregroundColor(.white)
-                        }
-                        .disabled(appState.canvasVM.scene.models.isEmpty)
                     }
-                }
-            }
-                    .padding(.horizontal)
-                    .padding(.vertical, 8)
-                    .background(Color.black.opacity(0.8))
+            } else {
+                NavigationStack {
+                .preferredColorScheme(appState.isDarkMode ? .dark : .light)
+                    ZStack {
+                        appState.themeManager.currentTheme.background
+                            .edgesIgnoringSafeArea(.all)
 
-                    // Content area based on selected mode
-                    Group {
-                        switch appState.selectedMode {
-                        case .cad:
-                            CADModeView(canvasVM: appState.canvasVM, renderer: appState.satinRenderer, toolVM: appState.toolVM, animationVM: appState.animationVM)
-                                .equatable()
-                        case .sculpt:
-                            SculptModeView(canvasVM: appState.canvasVM, renderer: appState.satinRenderer, toolVM: appState.toolVM, subdivisionVM: appState.subdivisionVM)
-                                .equatable()
-                        case .hybrid:
-                            HybridModeView(canvasVM: appState.canvasVM, renderer: appState.satinRenderer, toolVM: appState.toolVM, animationVM: appState.animationVM, subdivisionVM: appState.subdivisionVM)
-                                .equatable()
-                        case .animation:
-                            AnimationView(engine: appState.animationVM)
-                        case .render:
-                            SatinRendererView(scene: Binding(get: { appState.scene }, set: { appState.canvasVM.scene = $0 }))
+                        VStack(spacing: 0) {
+                            ToolbarView(toolVM: appState.toolVM, scene: $appState.canvasVM.scene)
+                                .environmentObject(appState.themeManager)
+                                .padding(.horizontal)
+                                .padding(.vertical, 4)
+
+                            Group {
+                                switch appState.selectedMode {
+                                case .cad:
+                                    CADModeView(canvasVM: appState.canvasVM, renderer: appState.satinRenderer, toolVM: appState.toolVM, animationVM: appState.animationVM)
+                                        .environmentObject(appState.themeManager)
+                                        .equatable()
+                                        .matchedGeometryEffect(id: "mode-cad", in: modeTransition)
+                                        .transition(.opacity.combined(with: .slide))
+                                case .sculpt:
+                                    SculptModeView(canvasVM: appState.canvasVM, renderer: appState.satinRenderer, toolVM: appState.toolVM, subdivisionVM: appState.subdivisionVM)
+                                        .environmentObject(appState.themeManager)
+                                        .equatable()
+                                        .matchedGeometryEffect(id: "mode-sculpt", in: modeTransition)
+                                        .transition(.opacity.combined(with: .slide))
+                                case .hybrid:
+                                    HybridModeView(canvasVM: appState.canvasVM, renderer: appState.satinRenderer, toolVM: appState.toolVM, animationVM: appState.animationVM, subdivisionVM: appState.subdivisionVM)
+                                        .environmentObject(appState.themeManager)
+                                        .equatable()
+                                        .matchedGeometryEffect(id: "mode-hybrid", in: modeTransition)
+                                        .transition(.opacity.combined(with: .slide))
+                                case .animation:
+                                    AnimationModeView(canvasVM: appState.canvasVM, renderer: appState.satinRenderer, toolVM: appState.toolVM, animationVM: appState.animationVM, subdivisionVM: appState.subdivisionVM)
+                                        .environmentObject(appState.themeManager)
+                                        .equatable()
+                                        .matchedGeometryEffect(id: "mode-animation", in: modeTransition)
+                                        .transition(.opacity.combined(with: .slide))
+                                case .render:
+                                    RenderModeView(canvasVM: appState.canvasVM, renderer: appState.satinRenderer, toolVM: appState.toolVM, animationVM: appState.animationVM, subdivisionVM: appState.subdivisionVM)
+                                        .environmentObject(appState.themeManager)
+                                        .equatable()
+                                        .matchedGeometryEffect(id: "mode-render", in: modeTransition)
+                                        .transition(.opacity.combined(with: .slide))
+                                }
+                            }
+                            .animation(.easeInOut(duration: 0.3), value: appState.selectedMode)
+
+                            ModeSelectorView(selectedMode: $appState.selectedMode, themeManager: appState.themeManager)
+                                .padding(.horizontal)
+                                .padding(.vertical, 4)
                         }
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .edgesIgnoringSafeArea(.all)
                 }
             }
-            .preferredColorScheme(.dark)
-            .sheet(isPresented: $appState.showExport) {
-                ExportView(exportVM: appState.exportVM, exportService: ExportService(device: MTLCreateSystemDefaultDevice() ?? nil!), model: appState.canvasVM.scene.models.first ?? Model(name: "Empty", meshes: []))
-            }
-            .environmentObject(appState)
+        }
+        .preferredColorScheme(appState.themeManager.preferredColorScheme)
+        .onChange(of: systemColorScheme) { newScheme in
+            appState.themeManager.updateForColorScheme(newScheme)
+        }
+        .onAppear {
+            appState.themeManager.updateForColorScheme(systemColorScheme)
         }
     }
 }

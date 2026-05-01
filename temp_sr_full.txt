@@ -1,0 +1,153 @@
+import Foundation
+import Satin
+import MetalKit
+import Combine
+
+private struct Uniforms {
+    var modelMatrix: simd_float4x4
+    var viewMatrix: simd_float4x4
+    var projectionMatrix: simd_float4x4
+    var ambientColor: SIMD3<Float>
+    var lightDirection: SIMD3<Float>
+    var lightColor: SIMD3<Float>
+    var lightIntensity: Float
+}
+
+class SatinRenderer: NSObject, ObservableObject {
+    let device: MTLDevice
+    var scene: Object
+    var camera: PerspectiveCamera
+    @Published var scene3D: Scene3D?
+
+    private let commandQueue: MTLCommandQueue
+    private var pipelineState: MTLRenderPipelineState?
+    private var depthState: MTLDepthStencilState?
+    private weak var mtkView: MTKView?
+
+    init(mtkView: MTKView) {
+        self.device = mtkView.device ?? MTLCreateSystemDefaultDevice()!
+        self.commandQueue = self.device.makeCommandQueue()!
+        self.scene = Object()
+        self.camera = PerspectiveCamera()
+        self.mtkView = mtkView
+        super.init()
+        mtkView.framebufferOnly = false
+        mtkView.enableSetNeedsDisplay = true
+        mtkView.isPaused = false
+        setup()
+    }
+
+    func setup() {
+        guard let library = device.makeDefaultLibrary() else { return }
+        guard let vertexFn = library.makeFunction(name: "vertex_main"),
+              let fragmentFn = library.makeFunction(name: "fragment_main") else { return }
+
+        let vertexDescriptor = MTLVertexDescriptor()
+        vertexDescriptor.attributes[0].format = .float4
+        vertexDescriptor.attributes[0].offset = 0
+        vertexDescriptor.attributes[0].bufferIndex = 0
+        vertexDescriptor.attributes[1].format = .float3
+        vertexDescriptor.attributes[1].offset = MemoryLayout<Float>.size * 4
+        vertexDescriptor.attributes[1].bufferIndex = 0
+        vertexDescriptor.attributes[2].format = .float2
+        vertexDescriptor.attributes[2].offset = MemoryLayout<Float>.size * 7
+        vertexDescriptor.attributes[2].bufferIndex = 0
+        vertexDescriptor.attributes[3].format = .float4
+        vertexDescriptor.attributes[3].offset = MemoryLayout<Float>.size * 9
+        vertexDescriptor.attributes[3].bufferIndex = 0
+        vertexDescriptor.layouts[0].stride = MemoryLayout<Float>.size * 13
+
+        let pipelineDescriptor = MTLRenderPipelineDescriptor()
+        pipelineDescriptor.vertexFunction = vertexFn
+        pipelineDescriptor.fragmentFunction = fragmentFn
+        pipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+        pipelineDescriptor.depthAttachmentPixelFormat = .depth32Float
+        pipelineDescriptor.vertexDescriptor = vertexDescriptor
+
+        do {
+            pipelineState = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+        } catch {
+            print("SatinRenderer: pipeline error: \(error)")
+        }
+
+        let depthDesc = MTLDepthStencilDescriptor()
+        depthDesc.depthCompareFunction = .less
+        depthDesc.isDepthWriteEnabled = true
+        depthState = device.makeDepthStencilState(descriptor: depthDesc)
+    }
+
+    func updateScene(_ newScene: Scene3D) {
+        scene3D = newScene
+    }
+
+    func draw() {
+        guard let pipelineState = pipelineState,
+              let view = mtkView,
+              let drawable = view.currentDrawable,
+              let descriptor = view.currentRenderPassDescriptor,
+              let commandBuffer = commandQueue.makeCommandBuffer(),
+              let scene3D = scene3D else { return }
+
+        let cam = scene3D.camera
+        let viewMatrix = lookAt(eye: cam.position, target: cam.target, up: cam.up)
+        let aspect = Float(view.bounds.size.width / view.bounds.size.height)
+        let projMatrix = perspectiveFov(fov: cam.fov * .pi / 180, aspect: aspect, near: cam.nearPlane, far: cam.farPlane)
+
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else { return }
+        encoder.setRenderPipelineState(pipelineState)
+        encoder.setDepthStencilState(depthState)
+        encoder.setFrontFacing(.counterClockwise)
+        encoder.setCullMode(.back)
+
+        for model in scene3D.models {
+            for mesh in model.meshes {
+                guard let vb = mesh.vertexBuffer, let ib = mesh.indexBuffer else { continue }
+
+                let modelMatrix = model.transform
+
+                var uniforms = Uniforms(
+                    modelMatrix: modelMatrix,
+                    viewMatrix: viewMatrix,
+                    projectionMatrix: projMatrix,
+                    ambientColor: scene3D.lighting.ambientColor,
+                    lightDirection: scene3D.lighting.directionalLight.direction,
+                    lightColor: scene3D.lighting.directionalLight.color,
+                    lightIntensity: scene3D.lighting.directionalLight.intensity
+                )
+                encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+                encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+
+                encoder.setVertexBuffer(vb, offset: 0, index: 0)
+                encoder.drawIndexedPrimitives(type: .triangle, indexCount: mesh.indices.count, indexType: .uint32, indexBuffer: ib, indexBufferOffset: 0)
+            }
+        }
+
+        encoder.endEncoding()
+        commandBuffer.present(drawable)
+        commandBuffer.commit()
+    }
+}
+
+private func lookAt(eye: SIMD3<Float>, target: SIMD3<Float>, up: SIMD3<Float>) -> simd_float4x4 {
+    let f = simd_normalize(target - eye)
+    let s = simd_normalize(simd_cross(f, up))
+    let u = simd_cross(s, f)
+    return simd_float4x4(
+        SIMD4<Float>(s.x, u.x, -f.x, 0),
+        SIMD4<Float>(s.y, u.y, -f.y, 0),
+        SIMD4<Float>(s.z, u.z, -f.z, 0),
+        SIMD4<Float>(-simd_dot(s, eye), -simd_dot(u, eye), simd_dot(f, eye), 1)
+    )
+}
+
+private func perspectiveFov(fov: Float, aspect: Float, near: Float, far: Float) -> simd_float4x4 {
+    let y = 1.0 / tan(fov * 0.5)
+    let x = y / aspect
+    let z = far / (far - near)
+    return simd_float4x4(
+        SIMD4<Float>(x, 0, 0, 0),
+        SIMD4<Float>(0, y, 0, 0),
+        SIMD4<Float>(0, 0, z, 1),
+        SIMD4<Float>(0, 0, -near * z, 0)
+    )
+}

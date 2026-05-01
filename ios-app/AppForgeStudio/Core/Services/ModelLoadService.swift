@@ -3,26 +3,49 @@ import Metal
 import ModelIO
 import MetalKit
 
+enum ModelLoadError: Error {
+    case fileNotFound(String)
+    case invalidFormat(String)
+    case meshCreationFailed(String)
+}
+
 class ModelLoadService {
     let device: MTLDevice
+    let cacheService: ModelCacheService?
     
-    init(device: MTLDevice) {
+    init(device: MTLDevice, cacheService: ModelCacheService? = nil) {
         self.device = device
+        self.cacheService = cacheService
     }
     
-    func loadModel(url: URL) -> Model? {
-        guard let asset = MDLAsset(url: url) else { return nil }
+    func loadModel(url: URL) -> Result<Model, ModelLoadError> {
+        if let cached = cacheService?.cachedModel(for: url) {
+            return .success(cached)
+        }
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return .failure(.fileNotFound(url.lastPathComponent))
+        }
+        guard let asset = MDLAsset(url: url) else {
+            return .failure(.invalidFormat(url.lastPathComponent))
+        }
         asset.load()
         var meshes: [Mesh] = []
         for i in 0..<asset.count {
             guard let object = asset.object(at: i) as? MDLMesh else { continue }
-            guard let mesh = createMesh(from: object) else { continue }
+            guard let mesh = createMesh(from: object) else {
+                return .failure(.meshCreationFailed(url.lastPathComponent))
+            }
             meshes.append(mesh)
         }
-        return meshes.isEmpty ? nil : Model(name: url.lastPathComponent, meshes: meshes)
+        if meshes.isEmpty {
+            return .failure(.meshCreationFailed(url.lastPathComponent))
+        }
+        let model = Model(name: url.lastPathComponent, meshes: meshes)
+        cacheService?.cache(model, for: url)
+        return .success(model)
     }
     
-    func createPrimitive(type: PrimitiveType) -> Model {
+    func createPrimitive(type: PrimitiveType) -> Model? {
         let allocator = MTKMeshBufferAllocator(device: device)
         let mesh: MDLMesh
         switch type {
@@ -37,35 +60,42 @@ class ModelLoadService {
         case .torus:
             mesh = MDLMesh(cylinderWithExtent: SIMD3<Float>(0.8,0.3,0.8), segments: SIMD2<UInt32>(24,24), inwardNormals: false, geometryType: .triangles, allocator: allocator)
         }
-        if var result = createMesh(from: mesh) {
-            result.uploadToGPU(device: device)
-            return Model(name: type.rawValue, meshes: [result])
-        }
-        return Model(name: type.rawValue, meshes: [])
+        guard var result = createMesh(from: mesh) else { return nil }
+        result.uploadToGPU(device: device)
+        return Model(name: type.rawValue, meshes: [result])
     }
     
-    private func createMesh(from mdlMesh: MDLMesh) -> Mesh? {
-        let vData = mdlMesh.vertexBuffers[0].map().bytes
-        let vCount = mdlMesh.vertexCount
+    // MARK: - Private Helpers
+    
+    private func createMesh(from mdMesh: MDLMesh) -> Mesh? {
+        guard let mtkMesh = try? MTKMesh(mesh: mdMesh, device: device) else { return nil }
+        let vertexCount = mtkMesh.vertexCount
+        let vertexAttr = mtkMesh.vertexDescriptor.attributes[0] as! MDLVertexAttribute
+        let buffer = mtkMesh.vertexBuffers[0]
+        let vertexPtr = buffer.buffer.contents().bindMemory(to: Float.self, capacity: vertexCount * 8)
         var vertices: [Vertex] = []
-        for i in 0..<vCount {
-            vertices.append(vData.load(fromByteOffset: i*MemoryLayout<Vertex>.stride, as: Vertex.self))
+        for i in 0..<vertexCount {
+            let pos = SIMD3<Float>(vertexPtr[i*8], vertexPtr[i*8+1], vertexPtr[i*8+2])
+            let norm = SIMD3<Float>(vertexPtr[i*8+3], vertexPtr[i*8+4], vertexPtr[i*8+5])
+            let uv = SIMD2<Float>(vertexPtr[i*8+6], vertexPtr[i*8+7])
+            vertices.append(Vertex(position: pos, normal: norm, uv: uv))
         }
-        let submesh = mdlMesh.submeshes?.firstObject as? MDLSubmesh
-        let iData = submesh?.indexBufferData()?.map().bytes
-        let iCount = submesh?.indexCount ?? 0
         var indices: [UInt32] = []
-        if let data = iData {
-            for i in 0..<iCount {
-                indices.append(data.load(fromByteOffset: i*MemoryLayout<UInt32>.stride, as: UInt32.self))
+        for sub in mtkMesh.submeshes {
+            let indexBuffer = sub.indexBuffer
+            let indexPtr = indexBuffer.buffer.contents().bindMemory(to: UInt32.self, capacity: sub.indexCount)
+            for i in 0..<sub.indexCount {
+                indices.append(indexPtr[i])
             }
         }
-        var mesh = Mesh(vertices: vertices, indices: indices)
-        mesh.uploadToGPU(device: device)
-        return mesh
+        return Mesh(vertices: vertices, indices: indices)
     }
 }
 
 enum PrimitiveType: String, CaseIterable {
-    case box="Caja", sphere="Esfera", cylinder="Cilindro", plane="Plano", torus="Toro"
+    case box = "Box"
+    case sphere = "Sphere"
+    case cylinder = "Cylinder"
+    case plane = "Plane"
+    case torus = "Torus"
 }

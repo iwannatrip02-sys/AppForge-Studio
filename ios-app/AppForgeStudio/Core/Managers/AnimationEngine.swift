@@ -1,13 +1,14 @@
 import Foundation
 import simd
 import QuartzCore
+import Combine
 
 // MARK: - Keyframe
 struct Keyframe<T> {
     let time: Float
     let value: T
     let easing: Easing
-    
+
     init(time: Float, value: T, easing: Easing = .linear) {
         self.time = time
         self.value = value
@@ -16,7 +17,7 @@ struct Keyframe<T> {
 }
 
 // MARK: - Easing
-enum Easing {
+enum Easing: String, CaseIterable {
     case linear
     case easeInQuad
     case easeOutQuad
@@ -24,7 +25,7 @@ enum Easing {
     case easeInCubic
     case easeOutCubic
     case easeInOutCubic
-    
+
     func apply(_ t: Float) -> Float {
         switch self {
         case .linear: return t
@@ -38,6 +39,41 @@ enum Easing {
     }
 }
 
+// MARK: - EasingCurve (UI-friendly wrapper)
+enum EasingCurve: String, CaseIterable {
+    case linear
+    case easeInQuad
+    case easeOutQuad
+    case easeInOutQuad
+    case easeInCubic
+    case easeOutCubic
+    case easeInOutCubic
+
+    var icon: String {
+        switch self {
+        case .linear: return "line.diagonal"
+        case .easeInQuad: return "arrow.up.right.circle"
+        case .easeOutQuad: return "arrow.down.right.circle"
+        case .easeInOutQuad: return "circle.circle"
+        case .easeInCubic: return "arrow.up.right.square"
+        case .easeOutCubic: return "arrow.down.right.square"
+        case .easeInOutCubic: return "square.circle"
+        }
+    }
+
+    var easing: Easing {
+        switch self {
+        case .linear: return .linear
+        case .easeInQuad: return .easeInQuad
+        case .easeOutQuad: return .easeOutQuad
+        case .easeInOutQuad: return .easeInOutQuad
+        case .easeInCubic: return .easeInCubic
+        case .easeOutCubic: return .easeOutCubic
+        case .easeInOutCubic: return .easeInOutCubic
+        }
+    }
+}
+
 // MARK: - AnimationClip
 struct AnimationClip {
     let name: String
@@ -47,7 +83,7 @@ struct AnimationClip {
     var rotationFrames: [Keyframe<simd_quatf>] = []
     var scaleFrames: [Keyframe<SIMD3<Float>>] = []
     var targetModelName: String = ""
-    
+
     init(name: String, duration: Float) {
         self.name = name
         self.duration = duration
@@ -61,205 +97,253 @@ class AnimationEngine: ObservableObject {
     @Published var currentTime: Float = 0
     @Published var selectedClipName: String = ""
     @Published var clips: [String: AnimationClip] = [:]
-    
+
     @Published var keyframes: [KeyframeEntry] = []
     @Published var keyframeTypes: [String] = ["posicion", "rotacion", "escala"]
-    
+
+    @Published var currentTransforms: [String: simd_float4x4] = [:]
+
+    var currentClipDuration: Float {
+        clips[selectedClipName]?.duration ?? 5.0
+    }
+
     struct KeyframeEntry: Identifiable {
         let id = UUID()
         var type: String
         var time: Float
-        var modelName: String
+        var modelName: String = ""
+        var easing: String = "linear"
+        var positionValue: SIMD3<Float> = .zero
+        var rotationValue: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+        var scaleValue: SIMD3<Float> = SIMD3<Float>(1, 1, 1)
+
+        var easingEnum: Easing {
+            Easing(rawValue: easing) ?? .linear
+        }
     }
-    
-    func addKeyframe(type: String, time: Float, modelName: String) {
-        let entry = KeyframeEntry(type: type, time: time, modelName: modelName)
-        keyframes.append(entry)
-        keyframes.sort { $0.time < $1.time }
+
+    var onFrame: ((Float, [String: simd_float4x4]) -> Void)?
+
+    init() {}
+
+    convenience init(appState: Any) {
+        self.init()
     }
-    
-    func removeKeyframe(id: UUID) {
-        keyframes.removeAll { $0.id == id }
+
+    func play() {
+        isPlaying = true
     }
-    
-    private weak var appState: AppState?
-    private var lastFrameTime: CFTimeInterval = 0
-    private var displayLink: CADisplayLink?
-    
-    init(appState: AppState?) {
-        self.appState = appState
+
+    func pause() {
+        isPlaying = false
     }
-    
-    deinit {
-        stopDisplayLink()
+
+    func stop() {
+        isPlaying = false
+        currentTime = 0
     }
-    
-    // MARK: - Clip Management
+
+    func togglePlayPause() {
+        if isPlaying {
+            pause()
+        } else {
+            play()
+        }
+    }
+
+    func seek(to time: Float) {
+        let duration = currentClipDuration
+        currentTime = max(0, min(time, duration))
+        let transforms = evaluate(at: currentTime)
+        currentTransforms = transforms
+        onFrame?(currentTime, transforms)
+    }
+
     func registerClip(_ clip: AnimationClip) {
         clips[clip.name] = clip
     }
-    
-    func removeClip(named name: String) {
-        clips.removeValue(forKey: name)
+
+    func addKeyframe(modelName: String, type: String, time: Float) {
+        let entry = KeyframeEntry(type: type, time: time, modelName: modelName)
+        keyframes.append(entry)
+        updateClipsFromKeyframes()
     }
-    
-    // MARK: - Playback Control
-    func playClip(named name: String) {
-        guard clips[name] != nil else { return }
-        selectedClipName = name
-        currentTime = 0
-        isPlaying = true
-        lastFrameTime = CACurrentMediaTime()
-        startDisplayLink()
+
+    func addKeyframe(type: String, time: Float, modelName: String) {
+        addKeyframe(modelName: modelName, type: type, time: time)
     }
-    
-    func stop() {
-        isPlaying = false
-        stopDisplayLink()
+
+    func removeKeyframe(at index: Int) {
+        guard index >= 0, index < keyframes.count else { return }
+        keyframes.remove(at: index)
+        updateClipsFromKeyframes()
     }
-    
-    func pause() {
-        isPlaying = false
-        stopDisplayLink()
+
+    func removeKeyframe(at time: Float) {
+        keyframes.removeAll { abs($0.time - time) < 0.001 }
+        updateClipsFromKeyframes()
     }
-    
-    func resume() {
-        isPlaying = true
-        lastFrameTime = CACurrentMediaTime()
-        startDisplayLink()
+
+    func moveKeyframe(id: UUID, to newTime: Float) {
+        guard let index = keyframes.firstIndex(where: { $0.id == id }) else { return }
+        keyframes[index].time = max(0, min(newTime, currentClipDuration))
+        updateClipsFromKeyframes()
     }
-    
-    // MARK: - Update Scene (CORREGIDO: ahora recibe Scene3D como inout)
-    func updateScene(_ scene: inout Scene3D, deltaTime: Float) {
-        guard isPlaying, let clip = clips[selectedClipName] else { return }
-        
-        currentTime += deltaTime
-        
-        // Loop si el clip esta configurado para loop
-        if currentTime >= clip.duration {
-            if clip.loop {
-                currentTime = currentTime.truncatingRemainder(dividingBy: clip.duration)
-            } else {
-                currentTime = clip.duration
-                stop()
-                return
-            }
-        }
-        
-        let t = currentTime / clip.duration
-        
-        // Actualizar posicion del modelo objetivo si hay keyframes de posicion
-        if !clip.positionFrames.isEmpty {
-            let interpolatedPos = interpolatePosition(frames: clip.positionFrames, time: t)
-            if let modelIndex = scene.models.firstIndex(where: { $0.name == clip.targetModelName }) {
-                scene.models[modelIndex].transform.position = interpolatedPos
-            }
-        }
-        
-        // Actualizar rotacion si hay keyframes de rotacion
-        if !clip.rotationFrames.isEmpty {
-            let interpolatedRot = interpolateRotation(frames: clip.rotationFrames, time: t)
-            if let modelIndex = scene.models.firstIndex(where: { $0.name == clip.targetModelName }) {
-                scene.models[modelIndex].transform.rotation = interpolatedRot
-            }
-        }
-        
-        // Actualizar escala si hay keyframes de escala
-        if !clip.scaleFrames.isEmpty {
-            let interpolatedScale = interpolateScale(frames: clip.scaleFrames, time: t)
-            if let modelIndex = scene.models.firstIndex(where: { $0.name == clip.targetModelName }) {
-                scene.models[modelIndex].transform.scale = interpolatedScale
-            }
-        }
-    }
-    
-    // MARK: - Interpolacion de Keyframes
-    private func interpolatePosition(frames: [Keyframe<SIMD3<Float>>], time: Float) -> SIMD3<Float> {
-        guard frames.count > 1 else { return frames.first?.value ?? .zero }
-        
-        var prev = frames[0]
-        var next = frames.last!
-        
-        for i in 1..<frames.count {
-            if frames[i].time > time {
-                next = frames[i]
+
+    private func updateClipsFromKeyframes() {
+        guard !selectedClipName.isEmpty else { return }
+        var clip = clips[selectedClipName] ?? AnimationClip(name: selectedClipName, duration: 5.0)
+        clip.positionFrames = []
+        clip.rotationFrames = []
+        clip.scaleFrames = []
+
+        let modelKfs = keyframes.filter { $0.modelName == selectedClipName }
+        for kf in modelKfs {
+            switch kf.type {
+            case "posicion":
+                clip.positionFrames.append(Keyframe(time: kf.time, value: kf.positionValue, easing: kf.easingEnum))
+            case "rotacion":
+                clip.rotationFrames.append(Keyframe(time: kf.time, value: kf.rotationValue, easing: kf.easingEnum))
+            case "escala":
+                clip.scaleFrames.append(Keyframe(time: kf.time, value: kf.scaleValue, easing: kf.easingEnum))
+            default:
                 break
             }
-            prev = frames[i]
         }
-        
-        let duration = next.time - prev.time
-        guard duration > 0 else { return next.value }
-        let localT = (time - prev.time) / duration
-        let easedT = prev.easing.apply(localT)
-        return simd_mix(prev.value, next.value, easedT)
+        clips[selectedClipName] = clip
     }
-    
-    private func interpolateRotation(frames: [Keyframe<simd_quatf>], time: Float) -> simd_quatf {
-        guard frames.count > 1 else { return frames.first?.value ?? .init(real: 1, imag: .zero) }
-        
-        var prev = frames[0]
-        var next = frames.last!
-        
-        for i in 1..<frames.count {
-            if frames[i].time > time {
-                next = frames[i]
-                break
-            }
-            prev = frames[i]
+
+    func evaluateAnimation(deltaTime: Float) -> [String: simd_float4x4] {
+        let duration = currentClipDuration
+        guard duration > 0 else { return [:] }
+
+        var newTime = currentTime + deltaTime
+
+        if let clip = clips[selectedClipName], clip.loop {
+            newTime = newTime.truncatingRemainder(dividingBy: duration)
+            if newTime < 0 { newTime += duration }
+        } else {
+            newTime = max(0, min(newTime, duration))
         }
-        
-        let duration = next.time - prev.time
-        guard duration > 0 else { return next.value }
-        let localT = (time - prev.time) / duration
-        let easedT = prev.easing.apply(localT)
-        return simd_slerp(prev.value, next.value, easedT)
+
+        currentTime = newTime
+        let transforms = evaluate(at: newTime)
+        currentTransforms = transforms
+        onFrame?(currentTime, transforms)
+        return transforms
     }
-    
-    private func interpolateScale(frames: [Keyframe<SIMD3<Float>>], time: Float) -> SIMD3<Float> {
-        guard frames.count > 1 else { return frames.first?.value ?? .init(repeating: 1) }
-        
-        var prev = frames[0]
-        var next = frames.last!
-        
-        for i in 1..<frames.count {
-            if frames[i].time > time {
-                next = frames[i]
-                break
-            }
-            prev = frames[i]
+
+    func evaluate(at time: Float) -> [String: simd_float4x4] {
+        var result: [String: simd_float4x4] = [:]
+
+        let groups = Dictionary(grouping: keyframes) { $0.modelName }
+
+        for (modelName, entries) in groups {
+            let positionKeys = entries.filter { $0.type == "posicion" }.sorted { $0.time < $1.time }
+            let rotationKeys = entries.filter { $0.type == "rotacion" }.sorted { $0.time < $1.time }
+            let scaleKeys = entries.filter { $0.type == "escala" }.sorted { $0.time < $1.time }
+
+            let pos = interpolatePosition(keys: positionKeys, at: time)
+            let rot = interpolateRotation(keys: rotationKeys, at: time)
+            let scale = interpolateScale(keys: scaleKeys, at: time)
+
+            let translationMatrix = simd_float4x4.translation(pos)
+            let rotationMatrix = simd_float4x4(rot)
+            let scaleMatrix = simd_float4x4.scale(scale)
+
+            let transform = translationMatrix * rotationMatrix * scaleMatrix
+            result[modelName] = transform
         }
-        
-        let duration = next.time - prev.time
-        guard duration > 0 else { return next.value }
-        let localT = (time - prev.time) / duration
-        let easedT = prev.easing.apply(localT)
-        return simd_mix(prev.value, next.value, easedT)
+
+        return result
     }
-    
-    // MARK: - Display Link
-    private func startDisplayLink() {
-        stopDisplayLink()
-        displayLink = CADisplayLink(target: self, selector: #selector(tick))
-        displayLink?.add(to: .main, forMode: .common)
-    }
-    
-    private func stopDisplayLink() {
-        displayLink?.invalidate()
-        displayLink = nil
-    }
-    
-    @objc private func tick() {
-        guard isPlaying else { return }
-        let now = CACurrentMediaTime()
-        let delta = Float(now - lastFrameTime)
-        lastFrameTime = now
-        
-        // Llamar updateScene con la escena del appState
-        if var scene = appState?.canvasVM.scene {
-            // Hacemos una copia mutable, actualizamos y reasignamos
-            updateScene(&scene, deltaTime: delta)
-            appState?.canvasVM.scene = scene
+
+    private func interpolatePosition(keys: [KeyframeEntry], at time: Float) -> SIMD3<Float> {
+        guard !keys.isEmpty else { return .zero }
+        if keys.count == 1 { return keys[0].positionValue }
+
+        var prev: KeyframeEntry?
+        var next: KeyframeEntry?
+
+        for key in keys {
+            if key.time <= time { prev = key }
+            if key.time >= time && next == nil { next = key }
         }
+
+        guard let p = prev, let n = next else {
+            if let p = prev { return p.positionValue }
+            if let n = next { return n.positionValue }
+            return keys.last?.positionValue ?? .zero
+        }
+
+        if p.time == n.time { return p.positionValue }
+        let rawT = (time - p.time) / (n.time - p.time)
+        let t = p.easingEnum.apply(rawT)
+        return simd_mix(p.positionValue, n.positionValue, t)
+    }
+
+    private func interpolateRotation(keys: [KeyframeEntry], at time: Float) -> simd_quatf {
+        guard !keys.isEmpty else { return simd_quatf(ix: 0, iy: 0, iz: 0, r: 1) }
+        if keys.count == 1 { return keys[0].rotationValue }
+
+        var prev: KeyframeEntry?
+        var next: KeyframeEntry?
+
+        for key in keys {
+            if key.time <= time { prev = key }
+            if key.time >= time && next == nil { next = key }
+        }
+
+        guard let p = prev, let n = next else {
+            if let p = prev { return p.rotationValue }
+            if let n = next { return n.rotationValue }
+            return keys.last?.rotationValue ?? simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+        }
+
+        if p.time == n.time { return p.rotationValue }
+        let rawT = (time - p.time) / (n.time - p.time)
+        let t = p.easingEnum.apply(rawT)
+        return simd_slerp(p.rotationValue, n.rotationValue, t)
+    }
+
+    private func interpolateScale(keys: [KeyframeEntry], at time: Float) -> SIMD3<Float> {
+        guard !keys.isEmpty else { return SIMD3<Float>(1, 1, 1) }
+        if keys.count == 1 { return keys[0].scaleValue }
+
+        var prev: KeyframeEntry?
+        var next: KeyframeEntry?
+
+        for key in keys {
+            if key.time <= time { prev = key }
+            if key.time >= time && next == nil { next = key }
+        }
+
+        guard let p = prev, let n = next else {
+            if let p = prev { return p.scaleValue }
+            if let n = next { return n.scaleValue }
+            return keys.last?.scaleValue ?? SIMD3<Float>(1, 1, 1)
+        }
+
+        if p.time == n.time { return p.scaleValue }
+        let rawT = (time - p.time) / (n.time - p.time)
+        let t = p.easingEnum.apply(rawT)
+        return simd_mix(p.scaleValue, n.scaleValue, t)
+    }
+}
+
+// MARK: - simd_float4x4 Extensions
+private extension simd_float4x4 {
+    static func translation(_ v: SIMD3<Float>) -> simd_float4x4 {
+        var m = matrix_identity_float4x4
+        m.columns.3 = SIMD4<Float>(v.x, v.y, v.z, 1)
+        return m
+    }
+
+    static func scale(_ v: SIMD3<Float>) -> simd_float4x4 {
+        var m = matrix_identity_float4x4
+        m.columns.0.x = v.x
+        m.columns.1.y = v.y
+        m.columns.2.z = v.z
+        return m
     }
 }

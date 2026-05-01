@@ -4,23 +4,24 @@ import MetalKit
 
 class PaintRenderer {
     let device: MTLDevice
-    let commandQueue: MTLCommandQueue
+    let commandQueue: MTLCommandQueue?
     var pipelineState: MTLRenderPipelineState?
     var computePipelineState: MTLComputePipelineState?
     var paintTexture: MTLTexture?
     var depthState: MTLDepthStencilState?
     
-    init(device: MTLDevice) {
+    init?(device: MTLDevice) {
         self.device = device
-        self.commandQueue = device.makeCommandQueue()!
-        setupPipelines()
+        guard let commandQueue = device.makeCommandQueue() else { print("Warning: Could not create command queue. Paint disabled."); self.commandQueue = nil; return nil; }; self.commandQueue = commandQueue
+        guard setupPipelines() else { return nil }
         setupDepthState()
         createPaintTexture(width: 2048, height: 2048)
     }
     
-    private func setupPipelines() {
+    private func setupPipelines() -> Bool {
         guard let library = device.makeDefaultLibrary() else {
-            fatalError("Failed to create Metal library")
+            print("Warning: No Metal library found. Paint rendering disabled.")
+            return false
         }
         
         // Vertex pipeline
@@ -55,6 +56,7 @@ class PaintRenderer {
         if let paintKernel = library.makeFunction(name: "paint_kernel") {
             computePipelineState = try? device.makeComputePipelineState(function: paintKernel)
         }
+        return true
     }
     
     private func setupDepthState() {
@@ -74,6 +76,7 @@ class PaintRenderer {
     }
     
     func render(mesh: Mesh, uniforms: Uniforms, in view: MTKView, commandBuffer: MTLCommandBuffer) {
+        guard let commandQueue = self.commandQueue else { return }
         guard let pipelineState = pipelineState,
               let descriptor = view.currentRenderPassDescriptor,
               let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else { return }

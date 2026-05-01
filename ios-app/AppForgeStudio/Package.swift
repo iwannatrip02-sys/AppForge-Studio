@@ -3,9 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "AppForgeStudio",
-    platforms: [
-        .iOS(.v17)
-    ],
+    platforms: [.iOS(.v17)],
     dependencies: [
         .package(url: "https://github.com/mattrajca/Satin.git", from: "0.3.0")
     ],
@@ -13,7 +11,9 @@ let package = Package(
         .executableTarget(
             name: "AppForgeStudio",
             dependencies: ["Satin"],
-            path: "."
+            path: ".",
+            exclude: ["docs/", "Resources/", "Models/Model.swift", "Models/CADHistory.swift"],
+            resources: []
         )
     ]
 )

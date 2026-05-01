@@ -1,8 +1,11 @@
 import SwiftUI
 
 struct TimelineView: View {
+    @EnvironmentObject var themeManager: ThemeManager
     @ObservedObject var engine: AnimationEngine
     @State private var dragTime: Float? = nil
+
+    private var theme: AppTheme { themeManager.currentTheme }
     @State private var showAddKeyframe = false
     @State private var draggedKeyframe: KeyframeEntry? = nil
     @State private var dragOffset: CGFloat = 0
@@ -15,7 +18,7 @@ struct TimelineView: View {
             keyframeList
         }
         .padding()
-        .background(Color.gray.opacity(0.1))
+        .background(theme.surfaceSecondary)
         .cornerRadius(8)
         .sheet(isPresented: $showAddKeyframe) {
             AddKeyframeSheet(engine: engine, isPresented: $showAddKeyframe)
@@ -46,7 +49,7 @@ struct TimelineView: View {
             }
             Button(action: { engine.togglePlayPause() }) {
                 Image(systemName: engine.isPlaying ? "pause.fill" : "play.fill")
-                    .foregroundColor(engine.selectedClipName.isEmpty ? .gray : .blue)
+                    .foregroundColor(engine.selectedClipName.isEmpty ? theme.textSecondary : .blue)
             }
             .disabled(engine.selectedClipName.isEmpty)
         }
@@ -69,11 +72,11 @@ struct TimelineView: View {
             HStack {
                 Text(String(format: "%.1fs", dragTime ?? engine.currentTime))
                     .font(.caption2.monospacedDigit())
-                    .foregroundColor(.white)
+                    .foregroundColor(theme.textPrimary)
                 Spacer()
                 Text(String(format: "%.1fs", duration))
                     .font(.caption2.monospacedDigit())
-                    .foregroundColor(.gray)
+                    .foregroundColor(theme.textSecondary)
             }
         }
         .padding(.horizontal, 4)
@@ -85,12 +88,12 @@ struct TimelineView: View {
         return VStack(alignment: .leading, spacing: 6) {
             Text("Keyframes")
                 .font(.caption.bold())
-                .foregroundColor(.gray)
+                .foregroundColor(theme.textSecondary)
             
             if filtered.isEmpty {
                 Text("Sin keyframes. Anade uno con +")
                     .font(.caption2)
-                    .foregroundColor(.gray.opacity(0.6))
+                    .foregroundColor(theme.textSecondary.opacity(0.6))
                     .padding(.vertical, 8)
             } else {
                 ForEach(filtered) { kf in
@@ -114,7 +117,7 @@ struct TimelineView: View {
         return HStack(spacing: 8) {
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.gray.opacity(0.2))
+                    .fill(theme.surfaceSecondary)
                     .frame(height: 28)
                 
                 Circle()

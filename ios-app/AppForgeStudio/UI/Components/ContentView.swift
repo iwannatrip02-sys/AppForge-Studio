@@ -9,6 +9,7 @@ struct ContentView: View {
     var renderer: SatinRenderer
     var brushEngine: BrushEngine?
     var isPaintMode: Bool = false
+    @EnvironmentObject var themeManager: ThemeManager
 
     @State private var lastDrag: CGSize = .zero
     @State private var lastMagnification: CGFloat = 1.0
@@ -19,7 +20,7 @@ struct ContentView: View {
             var s = canvasVM.scene
             s.strokes = newVal
             canvasVM.scene = s
-        }, renderer: renderer, onTouch3D: handleTouch)
+        }), renderer: renderer, animationEngine: canvasVM.animationEngine, onTouch3D: handleTouch, metalBackground: themeManager.currentTheme.metalBackground)
             .gesture(
                 DragGesture(minimumDistance: isPaintMode ? 2 : 20)
                     .onChanged { value in

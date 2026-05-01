@@ -12,6 +12,7 @@ class CanvasViewModel: ObservableObject {
     @Published var isEditing: Bool = false
     @Published var showGrid: Bool = true
     @Published var showWireframe: Bool = false
+    @Published var animationEngine: AnimationEngine?
     
     var currentMesh: Mesh {
         get {
@@ -36,7 +37,7 @@ class CanvasViewModel: ObservableObject {
     private var undoStack: [Scene3D] = []
     private var redoStack: [Scene3D] = []
     private let maxUndo: Int = 50
-
+    
     init() {
         self.scene = Scene3D()
         let verts = generateSphereVertices(radius: 0.8, segments: 32)
@@ -65,47 +66,61 @@ class CanvasViewModel: ObservableObject {
         undoStack.append(scene)
         scene = redoStack.removeLast()
     }
-
-    var canUndo: Bool { !undoStack.isEmpty }
-    var canRedo: Bool { !redoStack.isEmpty }
-
-    func addModel(_ model: Model) {
-        saveState()
-        scene.addModel(model)
-        selectedModelIndex = scene.models.count - 1
-    }
-
-    func removeModel(at index: Int) {
-        guard index < scene.models.count else { return }
-        saveState()
-        scene.models.remove(at: index)
-        selectedModelIndex = scene.models.isEmpty ? nil : min(index, scene.models.count - 1)
-    }
-
-    func updateCamera(_ camera: Scene3D.Camera) {
-        scene.camera = camera
-    }
-
-    func resetCamera() {
+    
+    func resetView() {
         scene.camera = .default
     }
-
-    func clearScene() {
-        saveState()
-        scene.models.removeAll()
-        scene.strokes.removeAll()
-        selectedModelIndex = nil
+    
+    var currentMode: AppMode {
+        .hybrid
     }
+}
 
-    func resetScene() {
-        scene = Scene3D()
-        let verts = generateSphereVertices(radius: 0.8, segments: 32)
-        var mesh = Mesh(vertices: verts.vertices, indices: verts.indices)
-        if let device = MTLCreateSystemDefaultDevice() {
-            mesh.uploadToGPU(device: device)
+// MARK: - Helpers
+
+struct SphereVertices {
+    let vertices: [Vertex]
+    let indices: [UInt32]
+}
+
+func generateSphereVertices(radius: Float, segments: Int) -> SphereVertices {
+    var verts: [Vertex] = []
+    var idx: [UInt32] = []
+    for lat in 0...segments {
+        let theta = Float(lat) * Float.pi / Float(segments)
+        let sinTheta = sin(theta)
+        let cosTheta = cos(theta)
+        for lon in 0...segments {
+            let phi = Float(lon) * 2.0 * Float.pi / Float(segments)
+            let sinPhi = sin(phi)
+            let cosPhi = cos(phi)
+            let x = cosPhi * sinTheta
+            let y = cosTheta
+            let z = sinPhi * sinTheta
+            verts.append(Vertex(position: SIMD3<Float>(x*radius, y*radius, z*radius),
+                                normal: SIMD3<Float>(x, y, z),
+                                uv: SIMD2<Float>(Float(lon)/Float(segments), Float(lat)/Float(segments))))
         }
-        let model = Model(name: "Default", meshes: [mesh])
-        scene.addModel(model)
-        selectedModelIndex = 0
     }
+    for lat in 0..<segments {
+        for lon in 0..<segments {
+            let first = UInt32(lat * (segments + 1) + lon)
+            let second = first + UInt32(segments + 1)
+            idx.append(first)
+            idx.append(second)
+            idx.append(first + 1)
+            idx.append(second)
+            idx.append(second + 1)
+            idx.append(first + 1)
+        }
+    }
+    return SphereVertices(vertices: verts, indices: idx)
+}
+
+enum AppMode: String {
+    case hybrid = "Hybrid"
+    case cad = "CAD"
+    case sculpt = "Sculpt"
+    case animation = "Animation"
+    case render = "Render"
 }

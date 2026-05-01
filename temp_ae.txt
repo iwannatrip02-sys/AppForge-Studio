@@ -1,0 +1,306 @@
+import Foundation
+import simd
+import QuartzCore
+import Combine
+
+// MARK: - Keyframe
+struct Keyframe<T> {
+    let time: Float
+    let value: T
+    let easing: Easing
+
+    init(time: Float, value: T, easing: Easing = .linear) {
+        self.time = time
+        self.value = value
+        self.easing = easing
+    }
+}
+
+// MARK: - Easing
+enum Easing {
+    case linear
+    case easeInQuad
+    case easeOutQuad
+    case easeInOutQuad
+    case easeInCubic
+    case easeOutCubic
+    case easeInOutCubic
+
+    func apply(_ t: Float) -> Float {
+        switch self {
+        case .linear: return t
+        case .easeInQuad: return t * t
+        case .easeOutQuad: return t * (2 - t)
+        case .easeInOutQuad: return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t
+        case .easeInCubic: return t * t * t
+        case .easeOutCubic: return (t - 1) * (t - 1) * (t - 1) + 1
+        case .easeInOutCubic: return t < 0.5 ? 4 * t * t * t : (t - 1) * (2 * t - 2) * (2 * t - 2) + 1
+        }
+    }
+}
+
+// MARK: - AnimationClip
+struct AnimationClip {
+    let name: String
+    let duration: Float
+    var loop: Bool = false
+    var positionFrames: [Keyframe<SIMD3<Float>>] = []
+    var rotationFrames: [Keyframe<simd_quatf>] = []
+    var scaleFrames: [Keyframe<SIMD3<Float>>] = []
+    var targetModelName: String = ""
+
+    init(name: String, duration: Float) {
+        self.name = name
+        self.duration = duration
+    }
+}
+
+// MARK: - AnimationEngine
+@MainActor
+class AnimationEngine: ObservableObject {
+    @Published var isPlaying = false
+    @Published var currentTime: Float = 0
+    @Published var selectedClipName: String = ""
+    @Published var clips: [String: AnimationClip] = [:]
+
+    @Published var keyframes: [KeyframeEntry] = []
+    @Published var keyframeTypes: [String] = ["posicion", "rotacion", "escala"]
+
+    struct KeyframeEntry: Identifiable {
+        let id = UUID()
+        var type: String
+        var time: Float
+        var modelName: String
+    }
+
+    // Conexion con el renderer para playback
+    weak var renderer: SatinRenderer?
+    var onFrame: ((_ scene: inout Scene3D) -> Void)?
+
+    private var displayLink: CADisplayLink?
+    private var lastTimestamp: CFTimeInterval = 0
+
+    func addKeyframe(type: String, time: Float, modelName: String) {
+        let entry = KeyframeEntry(type: type, time: time, modelName: modelName)
+        keyframes.append(entry)
+        objectWillChange.send()
+    }
+
+    func removeKeyframe(id: UUID) {
+        keyframes.removeAll { $0.id == id }
+        objectWillChange.send()
+    }
+
+    func registerClip(_ clip: AnimationClip) {
+        clips[clip.name] = clip
+        if selectedClipName.isEmpty {
+            selectedClipName = clip.name
+        }
+        objectWillChange.send()
+    }
+
+    func removeClip(named name: String) {
+        clips.removeValue(forKey: name)
+        if selectedClipName == name {
+            selectedClipName = clips.keys.first ?? ""
+        }
+        objectWillChange.send()
+    }
+
+    func playClip(named name: String) {
+        guard clips[name] != nil else { return }
+        selectedClipName = name
+        currentTime = 0
+        isPlaying = true
+        lastTimestamp = CACurrentMediaTime()
+        startDisplayLink()
+        objectWillChange.send()
+    }
+
+    func stop() {
+        isPlaying = false
+        stopDisplayLink()
+        objectWillChange.send()
+    }
+
+    func pause() {
+        isPlaying = false
+        stopDisplayLink()
+        objectWillChange.send()
+    }
+
+    func resume() {
+        guard isPlaying == false, !selectedClipName.isEmpty else { return }
+        isPlaying = true
+        lastTimestamp = CACurrentMediaTime()
+        startDisplayLink()
+        objectWillChange.send()
+    }
+
+    // MARK: - Evaluacion de animacion
+    func evaluateAnimation(scene: inout Scene3D) {
+        guard isPlaying, let clip = clips[selectedClipName] else { return }
+
+        // Avanzar tiempo
+        if currentTime >= clip.duration {
+            if clip.loop {
+                currentTime = 0
+            } else {
+                stop()
+                return
+            }
+        }
+
+        // Encontrar modelo target
+        guard let modelIndex = scene.models.firstIndex(where: { $0.name == clip.targetModelName }) else { return }
+
+        // Interpolar posicion
+        if !clip.positionFrames.isEmpty {
+            let interpolated = interpolateKeyframes(frames: clip.positionFrames, time: currentTime)
+            if let pos = interpolated {
+                scene.models[modelIndex].position = pos
+            }
+        }
+
+        // Interpolar rotacion
+        if !clip.rotationFrames.isEmpty {
+            let interpolated = interpolateKeyframes(frames: clip.rotationFrames, time: currentTime)
+            if let rot = interpolated {
+                scene.models[modelIndex].rotation = rot
+            }
+        }
+
+        // Interpolar escala
+        if !clip.scaleFrames.isEmpty {
+            let interpolated = interpolateKeyframes(frames: clip.scaleFrames, time: currentTime)
+            if let s = interpolated {
+                scene.models[modelIndex].scale = s
+            }
+        }
+
+        // Notificar al renderer
+        onFrame?(&scene)
+    }
+
+    // MARK: - Interpolacion generica
+    private func interpolateKeyframes(frames: [Keyframe<SIMD3<Float>>], time: Float) -> SIMD3<Float>? {
+        guard frames.count >= 2 else { return frames.first?.value }
+
+        let sorted = frames.sorted { $0.time < $1.time }
+
+        // Buscar par de keyframes que envuelvan el tiempo actual
+        var lower: Keyframe<SIMD3<Float>>? = nil
+        var upper: Keyframe<SIMD3<Float>>? = nil
+
+        for i in 0..<sorted.count - 1 {
+            if time >= sorted[i].time && time <= sorted[i + 1].time {
+                lower = sorted[i]
+                upper = sorted[i + 1]
+                break
+            }
+        }
+
+        // Si time es menor que el primer keyframe
+        if time < sorted.first!.time {
+            return sorted.first!.value
+        }
+
+        // Si time es mayor que el ultimo keyframe
+        if time > sorted.last!.time {
+            return sorted.last!.value
+        }
+
+        guard let l = lower, let u = upper else { return nil }
+
+        let duration = u.time - l.time
+        guard duration > 0 else { return l.value }
+
+        var t = (time - l.time) / duration
+        t = min(max(t, 0), 1)
+        t = u.easing.apply(t)
+
+        return mix(l.value, u.value, t: t)
+    }
+
+    private func interpolateKeyframes(frames: [Keyframe<simd_quatf>], time: Float) -> simd_quatf? {
+        guard frames.count >= 2 else { return frames.first?.value }
+
+        let sorted = frames.sorted { $0.time < $1.time }
+
+        var lower: Keyframe<simd_quatf>? = nil
+        var upper: Keyframe<simd_quatf>? = nil
+
+        for i in 0..<sorted.count - 1 {
+            if time >= sorted[i].time && time <= sorted[i + 1].time {
+                lower = sorted[i]
+                upper = sorted[i + 1]
+                break
+            }
+        }
+
+        if time < sorted.first!.time { return sorted.first!.value }
+        if time > sorted.last!.time { return sorted.last!.value }
+
+        guard let l = lower, let u = upper else { return nil }
+
+        let duration = u.time - l.time
+        guard duration > 0 else { return l.value }
+
+        var t = (time - l.time) / duration
+        t = min(max(t, 0), 1)
+        t = u.easing.apply(t)
+
+        return simd_slerp(l.value, u.value, t)
+    }
+
+    // MARK: - DisplayLink
+    private func startDisplayLink() {
+        stopDisplayLink()
+        let link = CADisplayLink(target: self, selector: #selector(tick))
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+    }
+
+    private func stopDisplayLink() {
+        displayLink?.invalidate()
+        displayLink = nil
+    }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        let now = link.timestamp
+        if lastTimestamp == 0 { lastTimestamp = now }
+        let delta = Float(now - lastTimestamp)
+        lastTimestamp = now
+        currentTime += delta
+        objectWillChange.send()
+    }
+
+    // MARK: - Init
+    init() {}
+
+    init(appState: AppState) {
+        self.renderer = appState.satinRenderer
+        self.onFrame = { [weak self] scene in
+            self?.renderer?.updateScene(&scene)
+        }
+        // Clip por defecto
+        var defaultClip = AnimationClip(name: "Walk", duration: 2.0)
+        defaultClip.loop = true
+        defaultClip.targetModelName = "Default"
+        defaultClip.positionFrames = [
+            Keyframe(time: 0, value: SIMD3<Float>(0, 0, 0), easing: .linear),
+            Keyframe(time: 1, value: SIMD3<Float>(0.5, 0, 0), easing: .easeInOutQuad),
+            Keyframe(time: 2, value: SIMD3<Float>(0, 0, 0), easing: .easeInOutQuad)
+        ]
+        registerClip(defaultClip)
+    }
+
+    deinit {
+        stopDisplayLink()
+    }
+}
+
+// MARK: - Funciones auxiliares
+private func mix(_ a: SIMD3<Float>, _ b: SIMD3<Float>, t: Float) -> SIMD3<Float> {
+    return a + (b - a) * t
+}

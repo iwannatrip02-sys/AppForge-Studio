@@ -1,69 +1,96 @@
 import SwiftUI
+import UIKit
 
 struct ToolbarView: View {
     @ObservedObject var toolVM: ToolViewModel
     @Binding var scene: Scene3D
-    
+    @EnvironmentObject var themeManager: ThemeManager
+
+    private var theme: AppTheme { themeManager.currentTheme }
+
+    private func triggerHaptic(style: UIImpactFeedbackGenerator.FeedbackStyle = .light) {
+        let generator = UIImpactFeedbackGenerator(style: style)
+        generator.prepare()
+        generator.impactOccurred()
+    }
+
     var body: some View {
-        HStack(spacing: 8) {
-            if toolVM.currentMode == .CAD || toolVM.currentMode == .Hybrid {
-                Toggle("Snap", isOn: $toolVM.snapEnabled)
-                    .toggleStyle(.button)
-                    .font(.caption)
-                Picker("Space", selection: $toolVM.transformSpace) {
-                    Text("Local").tag("local")
-                    Text("World").tag("world")
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 120)
-                Button(action: { toolVM.resetCamera() }) {
-                    Label("Reset View", systemImage: "camera.viewfinder")
-                        .font(.caption2)
-                }
-                .buttonStyle(.bordered)
-            }
-            if toolVM.currentMode == .Sculpt || toolVM.currentMode == .Paint {
-                ForEach(toolVM.brushPresets.map { $0["name"] as? String ?? "" }.filter { !$0.isEmpty }, id: \.self) { name in
-                    Button(name) {
-                        toolVM.selectPreset(["name": name])
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                if toolVM.currentMode == .CAD || toolVM.currentMode == .Hybrid {
+                    toolbarButton(icon: "magnet", label: "Snap", isActive: toolVM.snapEnabled) {
+                        triggerHaptic()
+                        toolVM.snapEnabled.toggle()
                     }
-                    .font(.caption2)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.gray.opacity(0.3))
-                    .cornerRadius(6)
+                    .keyboardShortcut("s", modifiers: [.command])
+                    .help("Snap to grid")
+
+                    ToolbarSpacePicker(transformSpace: $toolVM.transformSpace)
+
+                    toolbarButton(icon: "arrow.counterclockwise", label: "Reset") {
+                        triggerHaptic()
+                        toolVM.resetCamera()
+                    }
+                    .keyboardShortcut("r", modifiers: [.command])
+                    .help("Reset camera view")
+
+                    Divider().frame(height: 24).foregroundColor(theme.border)
+                }
+
+                if toolVM.currentMode == .Sculpt || toolVM.currentMode == .Paint {
+                    ForEach(toolVM.brushPresets.map { $0["name"] as? String ?? "" }.filter { !$0.isEmpty }, id: \.self) { name in
+                        toolbarButton(icon: "paintbrush.fill", label: name) {
+                            triggerHaptic()
+                            toolVM.selectPreset(["name": name])
+                        }
+                        .help("Brush: " + name)
+                    }
+                    Divider().frame(height: 24).foregroundColor(theme.border)
+                }
+
+                if toolVM.currentMode == .Animation {
+                    toolbarButton(icon: "repeat", label: "Loop", isActive: false) {
+                        triggerHaptic()
+                    }
+                        .help("Animation loop toggle")
+                }
+
+                if toolVM.hasSelection {
+                    toolbarButton(icon: "trash", label: "Delete") {
+                        triggerHaptic(style: .heavy)
+                        toolVM.deleteSelected()
+                    }
+                    .keyboardShortcut(.delete, modifiers: [])
+                    .foregroundColor(theme.destructive)
+                    .help("Delete selected object")
                 }
             }
-            if toolVM.currentMode == .Animation {
-                Toggle(isOn: Binding(
-                    get: { toolVM.animationLoop },
-                    set: { toolVM.animationLoop = $0 }
-                )) {
-                    Image(systemName: "repeat")
-                        .font(.caption)
-                }
-                .toggleStyle(.button)
-                Stepper(value: Binding(
-                    get: { toolVM.animationSpeed },
-                    set: { toolVM.animationSpeed = $0 }
-                ), in: 0.5...3.0, step: 0.5) {
-                    Text(String(format: "%.1fx", toolVM.animationSpeed))
-                        .font(.caption2)
-                        .frame(width: 36)
-                }
-                .frame(width: 100)
-                Button(action: { toolVM.addKeyframe() }) {
-                    Image(systemName: "plus.circle")
-                        .font(.caption)
-                }
-                .buttonStyle(.bordered)
-            }
-            Spacer()
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(themeManager.isDarkMode ? Color.black.opacity(0.6) : theme.surface)
+            .cornerRadius(12)
         }
-        .padding(.horizontal)
-        .padding(.vertical, 6)
-        .background(Color.black.opacity(0.4))
-        .cornerRadius(10)
-        .frame(height: 44)
+    }
+
+    @ViewBuilder
+    private func toolbarButton(icon: String, label: String, isActive: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: icon)
+                    .font(.system(size: 14))
+                    .frame(width: 28, height: 28)
+                    .background(isActive ? Color.blue.opacity(0.3) : Color.clear)
+                    .cornerRadius(8)
+                Text(label)
+                    .font(.system(size: 7))
+                    .lineLimit(1)
+            }
+            .foregroundColor(isActive ? .blue : theme.textPrimary)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            .background(isActive ? Color.blue.opacity(0.1) : Color.clear)
+            .cornerRadius(10)
+        }
+        .buttonStyle(.plain)
     }
 }

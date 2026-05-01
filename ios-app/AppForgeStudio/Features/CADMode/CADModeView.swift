@@ -3,9 +3,12 @@ import SwiftUI
 struct CADModeView: View {
     @ObservedObject var canvasVM: CanvasViewModel
     var renderer: SatinRenderer
+    @ObservedObject var toolVM: ToolViewModel
     @ObservedObject var animationVM: AnimationEngine
-    @StateObject private var toolVM = ToolViewModel()
     @StateObject private var sketchEngine = CADSketchEngine()
+    @EnvironmentObject var themeManager: ThemeManager
+
+    private var theme: AppTheme { themeManager.currentTheme }
 
     @State private var selectedTool: CADTool = .select
     @State private var showMeasurements = false
@@ -83,11 +86,11 @@ struct CADModeView: View {
                     ForEach(transformTools, id: \.self) { tool in
                         toolButton(tool)
                     }
-                    Color.white.frame(width: 1, height: 20).opacity(0.3).padding(.horizontal, 4)
+                    theme.border.frame(width: 1, height: 20).padding(.horizontal, 4)
                     ForEach(cadTools, id: \.self) { tool in
                         toolButton(tool)
                     }
-                    Color.white.frame(width: 1, height: 20).opacity(0.3).padding(.horizontal, 4)
+                    theme.border.frame(width: 1, height: 20).padding(.horizontal, 4)
                     ForEach(sketchTools, id: \.self) { tool in
                         toolButton(tool)
                     }
@@ -95,7 +98,7 @@ struct CADModeView: View {
             }
             animationRow
         }
-        .background(Color.black.opacity(0.85))
+        .background(theme.surface)
     }
     
     private func toolButton(_ tool: CADTool) -> some View {
@@ -109,8 +112,8 @@ struct CADModeView: View {
             Text(tool.rawValue)
                 .font(.system(size: 9))
                 .padding(.horizontal, 5).padding(.vertical, 3)
-                .background(selectedTool == tool ? Color.blue : Color.gray.opacity(0.3))
-                .foregroundColor(.white).cornerRadius(5)
+                .background(selectedTool == tool ? Color.blue : theme.surfaceSecondary)
+                .foregroundColor(theme.textPrimary).cornerRadius(5)
         }
     }
     
@@ -130,11 +133,11 @@ struct CADModeView: View {
             switch selectedTool {
             case .fillet:
                 HStack {
-                    Text("Radio:").font(.caption).foregroundColor(.white)
+                    Text("Radio:").font(.caption).foregroundColor(theme.textPrimary)
                     Slider(value: $toolVM.filletRadius, in: 0.01...0.5)
                         .frame(width: 120)
                     Text(String(format: "%.2f", toolVM.filletRadius))
-                        .font(.caption).foregroundColor(.white).frame(width: 35)
+                        .font(.caption).foregroundColor(theme.textPrimary).frame(width: 35)
                     Spacer()
                     Button("Aplicar") { executeSelectedTool() }
                         .font(.caption)
@@ -145,11 +148,11 @@ struct CADModeView: View {
                 .background(Color.blue.opacity(0.15))
             case .chamfer:
                 HStack {
-                    Text("Radio:").font(.caption).foregroundColor(.white)
+                    Text("Radio:").font(.caption).foregroundColor(theme.textPrimary)
                     Slider(value: $toolVM.chamferRadius, in: 0.01...0.5)
                         .frame(width: 120)
                     Text(String(format: "%.2f", toolVM.chamferRadius))
-                        .font(.caption).foregroundColor(.white).frame(width: 35)
+                        .font(.caption).foregroundColor(theme.textPrimary).frame(width: 35)
                     Spacer()
                     Button("Aplicar") { executeSelectedTool() }
                         .font(.caption)
@@ -160,11 +163,11 @@ struct CADModeView: View {
                 .background(Color.orange.opacity(0.15))
             case .shell:
                 HStack {
-                    Text("Grosor:").font(.caption).foregroundColor(.white)
+                    Text("Grosor:").font(.caption).foregroundColor(theme.textPrimary)
                     Slider(value: $toolVM.shellThickness, in: 0.005...0.2)
                         .frame(width: 120)
                     Text(String(format: "%.3f", toolVM.shellThickness))
-                        .font(.caption).foregroundColor(.white).frame(width: 40)
+                        .font(.caption).foregroundColor(theme.textPrimary).frame(width: 40)
                     Spacer()
                     Button("Aplicar") { executeSelectedTool() }
                         .font(.caption)
@@ -176,7 +179,7 @@ struct CADModeView: View {
             case .loft:
                 HStack {
                     Text("Loft entre 2 perfiles (copia desplazada en Z)")
-                        .font(.caption).foregroundColor(.white)
+                        .font(.caption).foregroundColor(theme.textPrimary)
                     Spacer()
                     Button("Ejecutar") { executeSelectedTool() }
                         .font(.caption)
@@ -187,11 +190,11 @@ struct CADModeView: View {
                 .background(Color.purple.opacity(0.15))
             case .sweep:
                 HStack {
-                    Text("Altura:").font(.caption).foregroundColor(.white)
+                    Text("Altura:").font(.caption).foregroundColor(theme.textPrimary)
                     Slider(value: $toolVM.sweepHeight, in: 0.1...2.0)
                         .frame(width: 120)
                     Text(String(format: "%.2f", toolVM.sweepHeight))
-                        .font(.caption).foregroundColor(.white).frame(width: 35)
+                        .font(.caption).foregroundColor(theme.textPrimary).frame(width: 35)
                     Spacer()
                     Button("Aplicar") { executeSelectedTool() }
                         .font(.caption)
@@ -203,7 +206,7 @@ struct CADModeView: View {
             case .boolean:
                 HStack {
                     Text("Union con copia desplazada +0.15 en X")
-                        .font(.caption).foregroundColor(.white)
+                        .font(.caption).foregroundColor(theme.textPrimary)
                     Spacer()
                     Button("Ejecutar") { executeSelectedTool() }
                         .font(.caption)
@@ -215,7 +218,7 @@ struct CADModeView: View {
             case .measure:
                 HStack {
                     Text("Medicion via OCCT (CSG real)")
-                        .font(.caption).foregroundColor(.white)
+                        .font(.caption).foregroundColor(theme.textPrimary)
                     Spacer()
                     Button("Medir") { executeSelectedTool() }
                         .font(.caption)
@@ -238,7 +241,7 @@ struct CADModeView: View {
                 animationVM.selectedClipName = clip.name
             }) {
                 Image(systemName: "play.rectangle")
-                    .foregroundColor(canvasVM.scene.models.isEmpty ? .gray : .blue)
+                    .foregroundColor(canvasVM.scene.models.isEmpty ? theme.textSecondary : .blue)
             }
             .disabled(canvasVM.scene.models.isEmpty)
             Text(animationVM.isPlaying ? "Playing" : "Anim").font(.system(size: 9))
@@ -250,6 +253,6 @@ struct CADModeView: View {
             Toggle("Snap", isOn: $toolVM.gridSnapEnabled).toggleStyle(.switch).font(.caption)
             Spacer()
             Button("Mediciones") { showMeasurements.toggle() }.font(.caption)
-        }.padding(.horizontal).padding(.vertical, 4).background(Color.black.opacity(0.6))
+        }.padding(.horizontal).padding(.vertical, 4).background(theme.surface)
     }
 }

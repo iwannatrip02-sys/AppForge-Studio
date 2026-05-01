@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct HybridModeView: View {
+    @EnvironmentObject var themeManager: ThemeManager
     @ObservedObject var canvasVM: CanvasViewModel
     var renderer: SatinRenderer
     @ObservedObject var toolVM: ToolViewModel
@@ -24,15 +25,15 @@ struct HybridModeView: View {
                 ForEach(ActiveMode.allCases, id: \.self) { m in
                     Button(action: { activeMode = m }) {
                         Text(m.rawValue).font(.caption).padding(.horizontal, 16).padding(.vertical, 6)
-                            .background(activeMode == m ? Color.accentColor : Color.gray.opacity(0.3))
-                            .foregroundColor(.white).cornerRadius(8)
+                            .background(activeMode == m ? Color.accentColor : themeManager.currentTheme.surfaceSecondary)
+                            .foregroundColor(themeManager.currentTheme.textPrimary).cornerRadius(8)
                     }
                 }
                 Spacer()
                 Button(action: { showLayers.toggle() }) {
                     Image(systemName: "square.3.layers.3d")
                 }
-            }.padding(.horizontal).padding(.vertical, 6).background(Color.black.opacity(0.8))
+            }.padding(.horizontal).padding(.vertical, 6).background(themeManager.currentTheme.surface)
 
             ContentView(canvasVM: canvasVM, renderer: renderer, brushEngine: toolVM.brushEngine, isPaintMode: activeMode == .paint || activeMode == .animate)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -73,6 +74,8 @@ struct HybridModeView: View {
                         Text("Animación").font(.caption).bold()
                         Spacer()
                         Button(action: { showTimeline.toggle() }) {
+                            Image(systemName: "timeline.selection")
+                        }
                         Button(action: {
                             if let firstMesh = canvasVM.scene.models.first?.meshes.first {
                                 var m = firstMesh
@@ -82,11 +85,9 @@ struct HybridModeView: View {
                             Image(systemName: "square.grid.3x3.topleft.filled")
                         }
                         .disabled(canvasVM.scene.models.isEmpty || subdivisionVM.isSubdividing)
-                            Image(systemName: "timeline.selection")
-                        }
                     }
                 }
-            }.padding(.horizontal).padding(.vertical, 4).background(Color.gray.opacity(0.2))
+            }.padding(.horizontal).padding(.vertical, 4).background(themeManager.currentTheme.surfaceSecondary)
         }
     }
 }

@@ -1,10 +1,13 @@
 import SwiftUI
 
 struct ColorPickerView: View {
+    @EnvironmentObject var themeManager: ThemeManager
     @Binding var selectedColor: Color
     @Binding var brushSize: Float
     @Binding var brushStrength: Float
-    
+
+    private var theme: AppTheme { themeManager.currentTheme }
+
     let palette: [(String, Color)] = [
         ("Rojo", .red), ("Naranja", .orange), ("Amarillo", .yellow),
         ("Verde", .green), ("Azul", .blue), ("Indigo", .indigo),
@@ -16,7 +19,7 @@ struct ColorPickerView: View {
         VStack(spacing: 10) {
             Text("Selector de Color")
                 .font(.caption)
-                .foregroundColor(.white)
+                .foregroundColor(theme.textPrimary)
             
             LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 6) {
                 ForEach(palette, id: \.0) { _, color in
@@ -25,7 +28,7 @@ struct ColorPickerView: View {
                         .frame(width: 26, height: 26)
                         .overlay(
                             Circle()
-                                .stroke(selectedColor == color ? Color.white : Color.clear, lineWidth: 2)
+                                .stroke(selectedColor == color ? theme.textPrimary : Color.clear, lineWidth: 2)
                         )
                         .onTapGesture { selectedColor = color }
                 }
@@ -34,20 +37,20 @@ struct ColorPickerView: View {
             HStack {
                 Text("Tam: \(String(format: "%.2f", brushSize))")
                     .font(.caption2)
-                    .foregroundColor(.white)
+                    .foregroundColor(theme.textPrimary)
                 Slider(value: $brushSize, in: 0.01...0.5)
                     .tint(.accentColor)
             }
             HStack {
                 Text("Fza: \(String(format: "%.1f", brushStrength))")
                     .font(.caption2)
-                    .foregroundColor(.white)
+                    .foregroundColor(theme.textPrimary)
                 Slider(value: $brushStrength, in: 0.1...1.0)
                     .tint(.accentColor)
             }
         }
         .padding()
-        .background(Color(.systemGray6).opacity(0.15))
+        .background(theme.surfaceSecondary)
         .cornerRadius(12)
     }
 }

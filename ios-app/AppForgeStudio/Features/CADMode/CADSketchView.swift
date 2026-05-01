@@ -6,6 +6,7 @@ struct CADSketchView: View {
     @State private var showConstraints: Bool = false
     @State private var extrudeDistance: Float = 0.1
     @Binding var meshResult: Mesh?
+    @EnvironmentObject var themeManager: ThemeManager
     
     var body: some View {
         VStack(spacing: 0) {
@@ -36,8 +37,8 @@ struct CADSketchView: View {
                     Text(tool.rawValue)
                         .font(.system(size: 11))
                         .padding(.horizontal, 6).padding(.vertical, 3)
-                        .background(selectedTool == tool ? Color.blue : Color.gray.opacity(0.3))
-                        .foregroundColor(.white).cornerRadius(5)
+                        .background(selectedTool == tool ? Color.blue : themeManager.currentTheme.surfaceSecondary)
+                        .foregroundColor(themeManager.currentTheme.textPrimary).cornerRadius(5)
                 }
             }
             Spacer()
@@ -46,7 +47,7 @@ struct CADSketchView: View {
             }
         }
         .padding(.horizontal, 6).padding(.vertical, 3)
-        .background(Color.black.opacity(0.8))
+        .background(themeManager.currentTheme.surface)
     }
     
     private var canvas: some View {
@@ -103,24 +104,25 @@ struct CADSketchView: View {
             Button("Constraints") { showConstraints.toggle() }.controlSize(.small)
         }
         .padding(.horizontal, 8).padding(.vertical, 3)
-        .background(Color.black.opacity(0.6))
+        .background(themeManager.currentTheme.surface)
     }
 }
 
 struct GridView2: View {
     let gridSize: Float
     let canvasSize: CGSize
+    @EnvironmentObject var themeManager: ThemeManager
     var body: some View {
         Canvas { ctx, size in
             let sp = CGFloat(gridSize * 200)
             guard sp > 3 else { return }
             for x in stride(from: 0, through: size.width, by: sp) {
                 var p = Path(); p.move(to: CGPoint(x: x, y: 0)); p.addLine(to: CGPoint(x: x, y: size.height))
-                ctx.stroke(p, with: .color(.gray.opacity(0.2)), lineWidth: 0.5)
+                ctx.stroke(p, with: .color(themeManager.currentTheme.border), lineWidth: 0.5)
             }
             for y in stride(from: 0, through: size.height, by: sp) {
                 var p = Path(); p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: size.width, y: y))
-                ctx.stroke(p, with: .color(.gray.opacity(0.2)), lineWidth: 0.5)
+                ctx.stroke(p, with: .color(themeManager.currentTheme.border), lineWidth: 0.5)
             }
         }
     }
@@ -129,6 +131,7 @@ struct GridView2: View {
 struct EntityView2: View {
     let entity: SketchEntity
     let points: [SketchPoint]
+    @EnvironmentObject var themeManager: ThemeManager
     var body: some View {
         Canvas { ctx, size in
             func sc(_ p: SIMD2<Float>) -> CGPoint {
@@ -137,7 +140,7 @@ struct EntityView2: View {
             switch entity {
             case .point(let p):
                 let cp = sc(p.position)
-                ctx.fill(Path(ellipseIn: CGRect(x: cp.x-3, y: cp.y-3, w: 6, h: 6)), with: .color(.white))
+                ctx.fill(Path(ellipseIn: CGRect(x: cp.x-3, y: cp.y-3, w: 6, h: 6)), with: .color(themeManager.currentTheme.textPrimary))
             case .line(let l):
                 if let s = points.first(where: { $0.id == l.start }), let e = points.first(where: { $0.id == l.end }) {
                     var p = Path(); p.move(to: sc(s.position)); p.addLine(to: sc(e.position))

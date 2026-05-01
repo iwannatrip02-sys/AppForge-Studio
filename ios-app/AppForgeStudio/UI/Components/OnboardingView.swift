@@ -1,150 +1,170 @@
 import SwiftUI
 
+private let animationDuration: Double = 0.5
+private let onboardingCurve = Animation.timingCurve(0.22, 1, 0.36, 1, duration: animationDuration)
+
 struct OnboardingView: View {
+    @EnvironmentObject var themeManager: ThemeManager
     @Binding var isOnboardingComplete: Bool
+
+    private var theme: AppTheme { themeManager.currentTheme }
     @State private var currentPage = 0
-    
+    @State private var showTutorial = false
+    @State private var tutorialStep = 0
+    @State private var animateStart = false
+    @Namespace private var page0NS
+    @Namespace private var page1NS
+    @Namespace private var page2NS
+    @Namespace private var page3NS
+    @Namespace private var page4NS
+
+    private let totalPages = 5
+
+    private func namespace(for page: Int) -> Namespace.ID {
+        switch page {
+        case 0: return page0NS
+        case 1: return page1NS
+        case 2: return page2NS
+        case 3: return page3NS
+        case 4: return page4NS
+        default: return page0NS
+        }
+    }
+
     var body: some View {
         ZStack {
-            Color.black.edgesIgnoringSafeArea(.all)
-            
-            VStack {
-                // Skip button
+            theme.background.edgesIgnoringSafeArea(.all)
+
+            VStack(spacing: 0) {
                 HStack {
                     Spacer()
                     Button(action: {
                         UserDefaults.standard.set(true, forKey: "onboardingComplete")
-                        withAnimation { isOnboardingComplete = true }
+                        withAnimation(.easeInOut(duration: 0.3)) { isOnboardingComplete = true }
                     }) {
                         Text("Saltar")
                             .font(.caption)
-                            .foregroundColor(.gray.opacity(0.7))
+                            .foregroundColor(theme.textSecondary.opacity(0.7))
                             .padding(.horizontal, 16)
                             .padding(.vertical, 8)
-                            .background(Color.gray.opacity(0.15))
+                            .background(theme.surfaceSecondary)
                             .cornerRadius(8)
                     }
                     .padding(.trailing, 20)
                     .padding(.top, 16)
                 }
-                
-                TabView(selection: $currentPage) {
-                    // Page 1: Welcome
-                    VStack(spacing: 24) {
-                        Spacer()
-                        Image(systemName: "cube.transparent")
-                            .font(.system(size: 72))
-                            .foregroundColor(.accentColor)
-                        Text("Bienvenido a AppForge Studio")
-                            .font(.title.bold())
-                            .foregroundColor(.white)
-                        Text("Crea modelos 3D, esculpe, pinta y anima")
-                            .font(.body)
-                            .foregroundColor(.gray)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 40)
-                        Spacer()
-                    }
-                    .tag(0)
-                    .transition(.scale.combined(with: .opacity))
-                    
-                    // Page 2: Modes
-                    VStack(spacing: 24) {
-                        Spacer()
-                        Image(systemName: "square.3.layers.3d")
-                            .font(.system(size: 72))
-                            .foregroundColor(.accentColor)
-                        Text("Modos de Trabajo")
-                            .font(.title.bold())
-                            .foregroundColor(.white)
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack { Image(systemName: "pencil.tip").frame(width: 28); Text("CAD: Modelado parametrico preciso").font(.body).foregroundColor(.gray) }
-                            HStack { Image(systemName: "hand.draw").frame(width: 28); Text("Esculpir: Escultura digital intuitiva").font(.body).foregroundColor(.gray) }
-                            HStack { Image(systemName: "paintpalette").frame(width: 28); Text("Pintar: Pintura 3D con pinceles").font(.body).foregroundColor(.gray) }
-                            HStack { Image(systemName: "film").frame(width: 28); Text("Animacion: Keyframes y timeline").font(.body).foregroundColor(.gray) }
+
+                GeometryReader { geometry in
+                    ZStack {
+                        ForEach(0..<totalPages, id: \.self) { index in
+                            pageContent(for: index)
+                                .frame(width: geometry.size.width)
+                                .offset(x: CGFloat(index - currentPage) * geometry.size.width * 0.85)
+                                .opacity(index == currentPage ? 1 : 0.4)
+                                .scaleEffect(index == currentPage ? 1 : 0.88)
+                                .blur(radius: index == currentPage ? 0 : 4)
+                                .matchedGeometryEffect(id: "page-\(index)", in: namespace(for: index))
                         }
-                        .padding(.horizontal, 40)
-                        Spacer()
                     }
-                    .tag(1)
-                    .transition(.scale.combined(with: .opacity))
-                    
-                    // Page 3: Export
-                    VStack(spacing: 24) {
-                        Spacer()
-                        Image(systemName: "square.and.arrow.up.fill")
-                            .font(.system(size: 72))
-                            .foregroundColor(.accentColor)
-                        Text("Exporta a Impresion 3D")
-                            .font(.title.bold())
-                            .foregroundColor(.white)
-                        Text("Exporta tus modelos a STL, OBJ, STEP o USDZ para imprimirlos o compartirlos")
-                            .font(.body)
-                            .foregroundColor(.gray)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 40)
-                        Button(action: {
-                            UserDefaults.standard.set(true, forKey: "onboardingComplete")
-                            withAnimation { isOnboardingComplete = true }
-                        }) {
-                            HStack {
-                                Text("Comenzar")
-                                    .font(.headline)
-                                Image(systemName: "arrow.right")
-                                    .font(.headline)
-                            }
-                            .padding(.horizontal, 40)
-                            .padding(.vertical, 12)
-                            .background(Color.accentColor)
-                            .foregroundColor(.white)
-                            .cornerRadius(10)
-                        }
-                        Spacer()
-                    }
-                    .tag(2)
-                    .transition(.scale.combined(with: .opacity))
+                    .animation(.easeInOut(duration: animationDuration), value: currentPage)
                 }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                .animation(.spring(response: 0.5, dampingFraction: 0.8), value: currentPage)
-                
-                // Page indicators
+
                 HStack(spacing: 8) {
-                    ForEach(0..<3) { index in
+                    ForEach(0..<totalPages, id: \.self) { index in
                         Circle()
-                            .fill(currentPage == index ? Color.accentColor : Color.gray.opacity(0.4))
-                            .frame(width: currentPage == index ? 10 : 8, height: currentPage == index ? 10 : 8)
-                            .animation(.spring(response: 0.3), value: currentPage)
+                            .fill(index == currentPage ? theme.textPrimary : theme.textSecondary.opacity(0.4))
+                            .frame(width: index == currentPage ? 10 : 8, height: index == currentPage ? 10 : 8)
+                            .matchedGeometryEffect(id: "indicator-\(index)", in: namespace(for: index))
+                            .onTapGesture {
+                                withAnimation(.easeInOut(duration: animationDuration)) {
+                                    currentPage = index
+                                }
+                            }
                     }
+                }
+                .padding(.vertical, 20)
+
+                Button(action: {
+                    if currentPage < totalPages - 1 {
+                        withAnimation(onboardingCurve) {
+                            currentPage += 1
+                        }
+                    } else {
+                        UserDefaults.standard.set(true, forKey: "onboardingComplete")
+                        withAnimation(.easeInOut(duration: 0.5)) {
+                            isOnboardingComplete = true
+                        }
+                    }
+                }) {
+                    Text(currentPage < totalPages - 1 ? "Continuar" : "Comenzar")
+                        .font(.headline)
+                        .foregroundColor(theme.textPrimary)
+                        .padding(.horizontal, 40)
+                        .padding(.vertical, 14)
+                        .background(Color.blue)
+                        .cornerRadius(16)
                 }
                 .padding(.bottom, 40)
-                
-                // Navigation buttons
-                HStack(spacing: 20) {
-                    if currentPage > 0 {
-                        Button(action: { withAnimation { currentPage -= 1 } }) {
-                            Text("Atras")
-                                .font(.headline)
-                                .padding(.horizontal, 24)
-                                .padding(.vertical, 10)
-                                .background(Color.gray.opacity(0.3))
-                                .foregroundColor(.white)
-                                .cornerRadius(8)
-                        }
-                    }
-                    if currentPage < 2 {
-                        Button(action: { withAnimation { currentPage += 1 } }) {
-                            Text("Siguiente")
-                                .font(.headline)
-                                .padding(.horizontal, 24)
-                                .padding(.vertical, 10)
-                                .background(Color.accentColor)
-                                .foregroundColor(.white)
-                                .cornerRadius(8)
-                        }
-                    }
-                }
-                .padding(.bottom, 60)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func pageContent(for page: Int) -> some View {
+        VStack(spacing: 24) {
+            Spacer()
+
+            Image(systemName: pageIcon(for: page))
+                .font(.system(size: 80))
+                .foregroundColor(.blue)
+                .matchedGeometryEffect(id: "icon-\(page)", in: namespace(for: page))
+
+            Text(pageTitle(for: page))
+                .font(.title2.bold())
+                .foregroundColor(theme.textPrimary)
+                .matchedGeometryEffect(id: "title-\(page)", in: namespace(for: page))
+
+            Text(pageDescription(for: page))
+                .font(.body)
+                .foregroundColor(theme.textSecondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
+                .matchedGeometryEffect(id: "desc-\(page)", in: namespace(for: page))
+
+            Spacer()
+        }
+    }
+
+    private func pageIcon(for page: Int) -> String {
+        switch page {
+        case 0: return "cube.transparent"
+        case 1: return "hand.draw"
+        case 2: return "paintpalette"
+        case 3: return "film.stack"
+        case 4: return "square.and.arrow.down"
+        default: return "star"
+        }
+    }
+
+    private func pageTitle(for page: Int) -> String {
+        switch page {
+        case 0: return "Modelado 3D"
+        case 1: return "Escultura Digital"
+        case 2: return "Pintura"
+        case 3: return "Animacion"
+        case 4: return "Exportacion"
+        default: return ""
+        }
+    }
+
+    private func pageDescription(for page: Int) -> String {
+        switch page {
+        case 0: return "Crea modelos 3D complejos con herramientas CAD profesionales directamente en tu iPad."
+        case 1: return "Esculpe detalles finos con pinceles digitales, subdivision y herramientas de arcilla."
+        case 2: return "Pinta directamente sobre tus modelos 3D con capas, texturas y efectos."
+        case 3: return "Anima tus creaciones con keyframes, curvas de easing y timeline interactivo."
+        case 4: return "Exporta a STL, OBJ, STEP y mas para impresion 3D o sharing."
+        default: return ""
         }
     }
 }
