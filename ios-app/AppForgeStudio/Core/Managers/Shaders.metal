@@ -30,7 +30,7 @@ vertex VertexOut vertex_main(VertexIn in [[stage_in]], constant Uniforms &unifor
     VertexOut out;
     float4 worldPos = uniforms.modelMatrix * float4(in.position.xyz, 1.0);
     out.position = uniforms.projectionMatrix * uniforms.viewMatrix * worldPos;
-    out.worldNormal = normalize((uniforms.modelMatrix * float4(in.normal, 0.0)).xyz);
+    out.worldNormal = normalize((transpose(inverse(float4x4(uniforms.modelMatrix))) * float4(in.normal, 0.0)).xyz);
     out.uv = in.uv;
     out.color = in.color;
     out.worldPosition = worldPos.xyz;

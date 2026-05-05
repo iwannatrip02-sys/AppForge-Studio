@@ -23,16 +23,16 @@ class SatinRenderer: NSObject, ObservableObject {
     // MARK: - Animation Connection
     var animationEngine: AnimationEngine?
     var onTransformsApplied: (([String: simd_float4x4]) -> Void)?
-    private var lastFrameTime: CFTimeInterval = 0
+    private var lastFrameTime: Double = 0
 
     func updateAnimation() {
         guard let engine = animationEngine, engine.isPlaying else { return }
         let now = CACurrentMediaTime()
         if lastFrameTime == 0 { lastFrameTime = now }
-        let deltaTime = Float(now - lastFrameTime)
+        let deltaTime = Double(now - lastFrameTime)
         lastFrameTime = now
 
-        let transforms = engine.evaluateAnimation(deltaTime: deltaTime)
+        let transforms = engine.evaluateAnimation(deltaTime: Float(deltaTime))
         onTransformsApplied?(transforms)
         engine.objectWillChange.send()
 
