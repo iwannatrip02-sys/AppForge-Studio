@@ -1,43 +1,65 @@
-# Decisiones Arquitectonicas - AppForge Studio
+# Decisiones de arquitectura
 
-## 2026-04-13: Satin como motor de render
-Se adopto Satin v0.3.0 como framework Metal para SwiftUI. Alternativa SceneKit descartada por menor control sobre shaders.
+## 2026-05-05: Implementación CAD paramétrico
 
-## 2026-04-13: OCCT como motor CAD
-Se adopto OCCTSwift (bindings Swift para Open CASCADE Technology) para operaciones booleanas, fillet, extrude, revolve. Alternativa SceneKit descartada por falta de CAD parametrico.
+**Decisión:** Se implementó solver Gauss-Seidel propio en Swift en vez de wrapper C API de SolveSpace.
 
-## 2026-04-13: Arquitectura CAD + Sculpt
-Ver docs/arquitectura_cad_sculpt.md para detalles de la separacion de modos.
+**Razón:** Evita dependencia de librería C externa, acelera time-to-build, permite ite-rar rápido en fase de planning. Si en producción no converge bien, se migra a SolveSpace C API via XCFramework.
 
-## 2026-04-29: Pipeline CI/CD Windows -> iPad
-**Contexto:** Solo PC Windows + iPad como dispositivo de prueba. No hay Mac.
-**Decision:** GitHub Actions + AltStore.
-- Workflow build-ios.yml: runner macos-14 (gratuito), Xcode 15.4
-- .ipa sin firma (CODE_SIGNING_ALLOWED=NO) para AltStore
-- Apple ID gratuito: firma 7 dias, autorefresco si PC encendido
-- TrollStore descartado: iPadOS 26+ no compatible
-- OCCTSwift no incluible hasta SPM package
+**Archivos creados (8):**
+- `Sources/CADCore/GeometryEntity.swift` — tipos point/line/circle/arc/nurbs
+- `Sources/CADCore/GeometryConstraint.swift` — 9 tipos de constraint
+- `Sources/CADCore/SolveSpaceSolver.swift` — solver Gauss-Seidel 100 iter
+- `Sources/CADCore/CADHistoryTree.swift` — undo/redo con CADOperation
+- `Sources/CADCore/GeometryConstraintManager.swift` — singleton con notificaciones
+- `Sources/CADCore/CADSketchEngine.swift` — motor de bocetos paramétricos
+- `Sources/CADCore/ExtrudeEngine.swift` — extrusión 2D→3D
+- `Sources/CADSketchView.swift` — UI SwiftUI completa
 
-## 2026-04-30 06:44 UTC - Bug Fix: Vertex Count Mismatch
-**Problema:** SatinMesh.swift:26 y Model3D.swift:23,36 usaban divisor 8 pero PaintRenderer stride=13 floats (pos4+normal3+tex2+color4). Impacto: Metal dibujaba ~62% de vertices.
-**Fix:** Cambiado divisor de 8 a 13 en SatinMesh.swift x1 y Model3D.swift x2.
+**Pendientes:**
+- CAD-8: Integrar CADSketchView con CADModeView (no encontrado en disco)
+- CAD-9: Conectar GeometryConstraintManager.shared con Scene3D (no encontrado en disco)
+- CAD-10: Verificar Package.swift incluya Sources/CADCore/*
 
-## 2026-04-30 12:13 UTC - Conexion AnimationEngine-SatinRenderer
-**Contexto:** AnimationEngine tenia keyframes pero no conectado al render loop.
-**Decision:** evaluate(at:) en AnimationEngine con interpolacion simd. Integrar en SatinRenderer.update() con deltaTime CACurrentMediaTime.
-
-## 2026-05-02 12:52 UTC - Documentacion completa de canonicos
-**Contexto:** Los canonicos (GOTCHI.md, BRAIN.md, TODO.md, DECISIONS.md) estaban desactualizados y no reflejaban los modulos reales en disco.
-**Decision:** Actualizar los 4 canonicos con informacion real de archivos.
-
-## 2026-05-04 02:35 UTC - Correcciones de calidad y conexion playback
-**Contexto:** ExportViewModel tenia case fbx duplicado, ExportService no tenia ExportToFBX real, AnimationPlaybackController existia pero no conectado a SatinRenderer.
-**Decision:** (1) Fusionado case fbx duplicado en ExportViewModel. (2) Implementado exportToFBX() real con writer ASCII FBX 7.4.0. (3) Creado AnimationPlaybackController con CADisplayLink. (4) Integrado AnimationPlaybackController en SatinRenderer.update() y AnimationModeView. Pendiente: revisar scene graph, subscription manager, y asegurar compilacion completa.
-## 2026-05-04 — Mantener arquitectura actual: SatinRenderer como dispatcher central con animationEngine + playbackController. No refactorizar a capa separada de animación.
-**Razón:** El código existente de SatinRenderer ya tiene updateAnimation() con evaluateAnimation, playbackController.tick() y applyTransformsToScene() funcionales. Crear una capa separada sería sobrediseño para el alcance actual y retrasaría la entrega.
+## 2026-05-07 — Mantener ambos GeometryConstraintManager como archivos separados con distintas responsabilidades
+**Razón:** Sources/CADCore/GeometryConstraintManager.swift usa SolverSwift para resolver constraints 2D puros. Core/Managers/GeometryConstraintManager.swift es ObservableObject con closures para UI 3D. Son roles distintos: uno es solver interno, otro es manager de UI. No deben fusionarse.
+**Alternativas descartadas:**
+- Fusionar en un solo archivo (complejidad innecesaria)
+- Eliminar Core/Managers/ (lo usa la UI para constraints visuales)
+**Impacto:** medium
 
 
-## 2026-05-04 — BLOQUEO FASE C: No es posible compilar AppForge Studio en Windows. Se requiere macOS con Xcode 15+. Código Swift/Metal verificado sin errores de sintaxis.
-**Razón:** Swift Toolchain no disponible en Windows 11. Proyecto iOS usa Satin v0.3.0 via SPM y Metal shaders que solo compilan en macOS/Xcode.
-**Impacto:** Compilación nativa bloqueada en este entorno. Alternativa: push a GitHub para compilar en macOS remoto.
+## 2026-05-07 — Refactorizar modulo CAD: unificar enums, eliminar duplicados, conectar constraints
+**Razón:** 5 bugs estructurales bloquean compilacion: CADTool incompleto con 10+ casos faltantes, CADSketchEngine duplicado en 2 rutas, constraints duales desconectados, CADHistoryTree legacy, y pipeline sketch-extrusion sin integracion real. Corregir en una sola pasada con code_agent antes de avanzar a nuevas features.
+**Alternativas descartadas:**
+- Parche parcial archivo por archivo (tardaria 3+ turnos)
+- Ignorar y seguir con nuevas features (acumularia deuda tecnica)
+**Impacto:** high
+
+
+## 2026-05-07 — Ruta híbrida de compilación para AppForge Studio: Macly.io (~$30/mes) como Mac cloud primario + GitHub Actions self-hosted runner en cualquier Mac disponible + Xcode Cloud free tier (50h/mes) como respaldo
+**Razón:** Tras investigar 8 fuentes: Swift Package Manager no soporta Metal shaders nativamente (bug conocido #8930), MetalCompilerPlugin existe como workaround pero es limitado. La opción más barata viable es Macly.io (~$1/día), muy por debajo de los $299/año de Shapr3D. Además, GitHub Actions con self-hosted runner en cualquier Mac es completamente gratis. Se documentó todo en docs/ruta-compilacion-gratuita.md
+**Alternativas descartadas:**
+- Compilar solo con SPM en Linux (Metal no funciona fuera de Apple Silicon)
+- Swift Playgrounds en iPad (limitado, no soporta Metal nativo complejo)
+- Solo Xcode Cloud (50h/mes insuficientes para desarrollo intensivo)
+**Impacto:** high
+
+
+## 2026-05-07 — Migrar Satin de s1ddok (repo eliminado) a Hi-Rez/Satin (repo oficial activo)
+**Razón:** s1ddok/Satin ya no existe (HTTP 404). Hi-Rez/Satin es el repo oficial y mantenido, con iOS 17+ support y SPM. Requirió cambiar swift-tools-version a 6.0, refactorizar GeometryData->VertexBufferAttribute y BasicMaterial->BasicColorMaterial. API Object es compatible (expandida).
+**Alternativas descartadas:**
+- Mantener s1ddok/Satin (imposible, repo eliminado)
+- Reescribir Satin manualmente desde cero (demasiado esfuerzo)
+- Usar Metal directamente sin Satin (pérdida de abstracciones valiosas)
+**Impacto:** high
+
+
+## 2026-05-07 — AppForge Studio será open-source con monetización por publicidad no intrusiva + modelo open-core
+**Razón:** Ningún competidor (Shapr3D $299/año, Fusion 360 $545/año, Nomad Sculpt $14.99) unifica paint 3D + sculpt + CAD paramétrico + animación en iPad. La ventaja diferencial de AppForge es ser la única app iOS que integra todo esto. El modelo open-source con ads recompensados ($10-15 eCPM) + suscripción premium sin ads ($4.99/mes) permite competir gratis contra software caro mientras se genera revenue sostenible, siguiendo el modelo Blender Foundation pero adaptado a iPad.
+**Alternativas descartadas:**
+- SaaS/web-only (pierde ventaja iPad + Apple Pencil)
+- Pago único tipo Nomad ($14.99 — deja mucho dinero en mesa)
+- Suscripción pura tipo Shapr3D ($299/año — contradictory al ser open-source)
+**Impacto:** high
 

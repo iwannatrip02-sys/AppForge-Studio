@@ -12,14 +12,15 @@ jobs:
       - uses: actions/checkout@v4
       
       - name: Setup Xcode
-        run: sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer
+        run: sudo xcode-select -s /Applications/Xcode_16.1.app/Contents/Developer
+      
+      - name: Generate Xcode Project
+        run: cd ios-app/AppForgeStudio && swift package generate-xcodeproj
       
       - name: Build
         run: |
           cd ios-app/AppForgeStudio
-          xcodebuild -scheme AppForgeStudio -sdk iphoneos -configuration Release clean build \
-            CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
-            -derivedDataPath ../build
+          xcodebuild -project AppForgeStudio.xcodeproj -scheme AppForgeStudio -sdk iphoneos -configuration Release clean build CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO -derivedDataPath ../build
       
       - name: Package .app
         run: |

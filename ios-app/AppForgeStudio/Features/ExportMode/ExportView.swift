@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import QuickLook
 
 struct CircularProgressView: View {
     @EnvironmentObject var themeManager: ThemeManager
@@ -57,6 +58,8 @@ struct ExportView: View {
     @State private var exportProgress: Double = 0
     @State private var exportSuccess = false
     @State private var rotationAngle: Double = 0
+    @State private var showARPreview = false
+    @State private var arUSDZURL: URL?
 
     var body: some View {
         ZStack {
@@ -143,6 +146,24 @@ struct ExportView: View {
                 }.padding(.horizontal)
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
                 .animation(.easeOut(duration: 0.5).delay(0.6), value: exportVM.selectedModel != nil)
+
+                // AR QuickLook button
+                if exportVM.selectedFormat == .usdz {
+                    Button(action: {
+                        if let model = exportVM.selectedModel {
+                            if let url = exportVM.prepareUSDZForAR(model: model, exportService: exportVM.exportService) {
+                                arUSDZURL = url
+                                showARPreview = true
+                            }
+                        }
+                    }) {
+                        Label("Ver en AR", systemImage: "arkit")
+                            .font(.headline).foregroundColor(theme.textPrimary)
+                            .frame(maxWidth: .infinity).padding(.vertical, 14)
+                            .background(Color.green).cornerRadius(12)
+                    }.padding(.horizontal)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
             }
 
             // Success overlay
@@ -164,6 +185,12 @@ struct ExportView: View {
             }
         }.fileExporter(isPresented: $showFileExporter, document: exportVM.document, contentType: .data, defaultFilename: exportFileName) { result in
             if case .success = result { }
+        }
+        .sheet(isPresented: $showARPreview) {
+            if let url = arUSDZURL {
+                ARQuickLookView(usdzURL: url)
+                    .edgesIgnoringSafeArea(.all)
+            }
         }
     }
 }

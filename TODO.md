@@ -1,63 +1,40 @@
 # AppForge Studio — TODO.md
-> Actualizado: 2026-05-04 | Prioridades basadas en code review externo
+> Actualizado: 2026-05-11 16:57 UTC
 
-## FOCO ACTUAL — Corregir bugs críticos antes de CI
+## Foco actual
+- Generar .ipa sin firma para AltStore + Beta TestFlight v0.9
 
-## BUGS APLICADOS (commit b6766b4)
+## Completados (sesion actual)
+- [x] USDZ para AR QuickLook (ARQuickLookView + ExportView + sheet)
+- [x] Internacionalizacion ES/EN (Localizable.xcstrings es + en)
+- [x] Animacion de morph targets entre mallas (MorphEngine + AnimationEngine + tests)
+- [x] IBL para PBR: diffuse irradiance + specular prefilter + BRDF LUT (IBLPipeline.swift implementado)
+- [x] CAD-8: ConstraintOverlayView integrado en CADModeView
 
-- [x] **BUG1** — Agregar padding a GPUPBRMaterial, GPUDirectionalLight, GPUPointLight en SatinRenderer.swift (`var _pad: Float = 0` tras cada float3)
-- [x] **BUG2** — Eliminar `updateAnimation()` al inicio de `SatinRenderer.render(in:)` (ya se llama en Coordinator.draw)
-- [x] **BUG3** — Cambiar `[UInt16]` a `[UInt32]` en createBuffersFromMeshes() y `.uint16` a `.uint32` en drawIndexedPrimitives
-- [x] **BUG5** — Fix normal matrix en Shaders.metal: usar `transpose(inverse(float3x3(modelMatrix)))` en vertex_main y pbr_vertex_main
-- [x] **BUG6** — Fix stroke aspect ratio: pasar viewport aspect como uniform en lugar de `center.w`
-- [x] **BUG9** — Desacoplar applyTransformsToScene() de rebuildSceneFrom(): pasar modelMatrix como uniform, no reconstruir buffers
+## Completados (sesiones anteriores)
+- [x] BUG1-9: padding GPU structs, updateAnimation, UInt32, normal matrix, stroke aspect, grab deformer, currentMode, Package.swift, deltaTime Double
+- [x] CAD-1 a CAD-7: sistema CAD completo (entities, solver, history, manager, sketch, extrude, UI)
+- [x] Fase 1A-7: pinceles, sculpt, subdivision, boolean CAD, animation, export, tests, cache, dark mode, CI/CD
+- [x] FBX/Collada/STEP export, Material Editor PBR, analisis competitivo
 
-## ALTA PRIORIDAD
-
-- [x] **BUG7** — Fix grab deformer: agregar `dragDelta: SIMD3<Float>` a SculptPoint, usar en case .grab
-- [x] **BUG8** — Fix currentMode en CanvasViewModel: no hardcodear .hybrid
-- [x] **BUG4** — Package.swift: mattrajca -> s1ddok/Satin.git
-- [x] **BUG2** — SatinRenderer.swift: deltaTime Double en vez de Float
-- [x] **BUG5** — Shaders.metal: normal matrix con inverse(transpose)
-- [ ] **SIGUIENTE** — Push a CI y verificar build en macos-14/Xcode 16.1 y verificar que build-ios.yml pasa en macos-14/Xcode 16.1
-- [ ] Fix smooth deformer: Laplacian averaging (promediar vecinos en radio, no mover hacia brush center)
-
-## MEDIA PRIORIDAD
-
-- [ ] IBL para PBR: diffuse irradiance + specular prefilter + BRDF LUT
-- [ ] Soporte de texture maps en PBRMaterialUniforms (albedo/roughness/metallic/normal)
-- [ ] Tangent space en PBRShaders.metal para normal maps
-- [ ] Beta testing: AltStore + TestFlight
-- [ ] Animación de morph targets entre mallas
-- [ ] USDZ para AR QuickLook
-- [ ] Internacionalización
-
-## COMPLETADO
-
-- [x] Fase 1A: Sistema pinceles (BrushStroke, PaintRenderer, Shaders.metal 4 tipos)
-- [x] Fase 1B: PincelRenderer Metal GPU
-- [x] Fase 2A: SculptEngine 8 deformadores
-- [x] Fase 2B: SubdivisionEngine Catmull-Clark
-- [x] Fase 3A: CAD booleano (OCCTEngine)
-- [x] Fase 3B: CAD historial (CADHistoryTree undo/redo 50 pasos)
-- [x] Fase 3C: GeometryConstraintManager con solver Gauss-Seidel
-- [x] Fase 4: AnimationEngine keyframes + 7 easings + SatinRenderer
-- [x] Fase 5: ExportService OBJ/STL/USDZ/STEP/GLTF
-- [x] Fase 6: Tests unitarios (23 casos)
-- [x] Fase 7: ModelCacheService + dark mode + LoadingScreenView + haptics + onboarding
-- [x] CI/CD GitHub Actions (build-ios.yml, macos-14, Xcode 16.1)
-- [x] AltStore deploy scripts
-- [x] SimdTransform + selectedTransform en CanvasViewModel
-- [x] Material Editor PBR (MaterialEditorView, MaterialEditorViewModel, presets)
-- [x] Análisis competitivo vs Shapr3D/Nomad Sculpt
-- [x] FBX y Collada export
-- [x] Exportación STEP vía OCCTEngine
-
-## BLOQUEOS
-
-- **Compilación local** — Swift Toolchain no disponible en Windows 11. Workaround: push a GitHub CI.
-
-- [ ] Ejecutar suite de 23 tests en GitHub Actions
-- [ ] Validar render loop (paint+sculpt+CAD+animation) en simulador
+## Pendientes inmediatos (para iPad)
+- [ ] **CAD-9** — Conectar GeometryConstraintManager.shared con Scene3D.constraintManager
 - [ ] Generar .ipa sin firma para AltStore
+- [ ] Ejecutar suite de tests en GitHub Actions
 - [ ] Beta TestFlight v0.9
+- [ ] Validar render loop (paint+sculpt+CAD+animation) en simulador
+
+## Pendientes Fase 8-10
+- [ ] Fase 8: Integrar OCCTSwift como kernel CAD parametrico
+- [ ] Fase 8: Sketch 2D con PencilKit + snapping inteligente
+- [ ] Fase 8: Extrusion/Revolucion/Sweep con preview Metal
+- [ ] Fase 8: Timeline parametrico DAG con undo/redo
+- [ ] Fase 9: Gestos intuitivos (pinch-to-extrude, tap-drag selection)
+- [ ] Fase 9: Constraints automaticas (paralelismo, concentricidad, tangencia)
+- [ ] Fase 10: Boolean operations en GPU (compute shaders)
+- [ ] Fase 10: Assemblies con jerarquia de componentes
+- [ ] Soporte de texture maps en PBRMaterialUniforms
+- [ ] Tangent space en PBRShaders.metal para normal maps
+
+## Notas
+- Compilacion local: Swift Toolchain no disponible en Windows 11. Workaround: push a GitHub CI o generar .ipa via xcodebuild en macOS.
