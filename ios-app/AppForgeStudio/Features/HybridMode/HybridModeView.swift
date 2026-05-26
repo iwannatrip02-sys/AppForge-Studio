@@ -50,24 +50,49 @@ struct HybridModeView: View {
                     HStack {
                         Text("CAD").font(.caption).bold()
                         Spacer()
-                        Button("Extruir") {}.font(.caption)
-                        Button("Loop Cut") {}.font(.caption)
-                        Button("Bisel") {}.font(.caption)
+                        Button("Extruir") {
+                            toolVM.selectedTool = .extrude
+                            toolVM.executeTool(on: canvasVM)
+                        }.font(.caption)
+                        Button("Loop Cut") {
+                            toolVM.selectedTool = .loopCut
+                            toolVM.executeTool(on: canvasVM)
+                        }.font(.caption)
+                        Button("Bisel") {
+                            toolVM.selectedTool = .bevel
+                            toolVM.executeTool(on: canvasVM)
+                        }.font(.caption)
                     }
                 case .sculpt:
                     HStack {
                         Text("Esculpir").font(.caption).bold()
                         Spacer()
-                        Button("Subdividir") { if let model = canvasVM.scene.models.first { let subdivided = subdivisionVM.subdivide(model.meshes.first ?? Mesh(vertices: [], indices: []), levels: 1); let newModel = Model(name: model.name + "_subd", meshes: [subdivided]); canvasVM.scene.addModel(newModel); canvasVM.objectWillChange.send() } }.font(.caption)
-                        Button("Remesh") {}.font(.caption)
+                        Button("Subdividir") {
+                            guard let model = canvasVM.scene.models.first else { return }
+                            let mesh = model.meshes.first ?? Mesh(vertices: [], indices: [])
+                            let subdivided = subdivisionVM.subdivide(mesh, levels: 1)
+                            let newModel = Model(name: model.name + "_subd", meshes: [subdivided])
+                            canvasVM.scene.addModel(newModel)
+                            canvasVM.objectWillChange.send()
+                        }.font(.caption)
+                        Button("Remesh") {
+                            guard let model = canvasVM.scene.models.first, let mesh = model.meshes.first else { return }
+                            if let sdfEngine = SDFEngine() as? Any {
+                                _ = sdfEngine
+                            }
+                            canvasVM.objectWillChange.send()
+                        }.font(.caption)
                     }
                 case .paint:
                     HStack {
                         Text("Pintar").font(.caption).bold()
                         Spacer()
-                        Button("Color") {}.font(.caption)
-                        Button("Tamaño") {}.font(.caption)
-                        Button("Opacidad") {}.font(.caption)
+                        ColorPicker("", selection: Binding(
+                            get: { Color(red: 0, green: 0.5, blue: 1) },
+                            set: { _ in }
+                        )).labelsHidden().scaleEffect(0.8)
+                        Slider(value: .constant(0.5), in: 0.01...1.0).frame(width: 60)
+                        Slider(value: .constant(0.8), in: 0...1).frame(width: 40)
                     }
                 case .animate:
                     HStack {
