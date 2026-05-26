@@ -22,6 +22,9 @@ packages:
   Satin:
     url: https://github.com/Hi-Rez/Satin.git
     from: 13.0.0
+  OCCTSwift:
+    url: https://github.com/gsdali/OCCTSwift.git
+    from: 1.0.0
 
 targets:
   AppForgeStudio:
@@ -70,6 +73,7 @@ targets:
         ENABLE_USER_SCRIPT_SANDBOXING: "NO"
     dependencies:
       - package: Satin
+      - package: OCCTSwift
     preBuildScripts:
       - name: Generate Info.plist
         script: |

@@ -48,7 +48,8 @@ jobs:
       - name: Build for iOS (iPad)
         working-directory: ios-app/AppForgeStudio
         run: |
-          if [ -f "AppForgeStudio.xcodeproj/project.pbxproj" ]; then
+          echo "=== Starting build ==="
+          if [ -d "AppForgeStudio.xcodeproj" ]; then
             xcodebuild build \
               -project AppForgeStudio.xcodeproj \
               -scheme AppForgeStudio \
@@ -57,24 +58,25 @@ jobs:
               CODE_SIGN_IDENTITY="" \
               CODE_SIGNING_REQUIRED=NO \
               CODE_SIGNING_ALLOWED=NO \
-              2>&1 | xcpretty || xcodebuild build \
-              -project AppForgeStudio.xcodeproj \
-              -scheme AppForgeStudio \
-              -destination 'generic/platform=iOS' \
-              -configuration Debug \
-              CODE_SIGN_IDENTITY="" \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGNING_ALLOWED=NO 2>&1 | tail -100
+              2>&1 | tee build.log
+            echo "=== Build exit code: $? ==="
+            echo "=== Last 50 lines of build log ==="
+            tail -50 build.log
           else
-            swift build --configuration debug 2>&1 | tail -100
+            echo "No xcodeproj found, trying swift build..."
+            swift build --configuration debug 2>&1 | tee build.log
+            echo "=== Last 50 lines ==="
+            tail -50 build.log
           fi
 
-      - name: Upload build log on failure
-        if: failure()
+      - name: Upload build log
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-log
-          path: ~/Library/Logs/**/*.log
+          name: build-log-${{ github.run_id }}
+          path: |
+            ios-app/AppForgeStudio/build.log
+            ~/Library/Logs/**/*.log
 
       - name: Create .app artifact
         if: success()
