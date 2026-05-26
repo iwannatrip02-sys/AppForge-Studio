@@ -86,7 +86,12 @@ class SatinRenderer: NSObject, ObservableObject {
     private var sceneObjectCount: Int = 0
 
     func updateAnimation() {
-        playbackController?.tick(deltaTime: Float(deltaTime))
+        let now = CACurrentMediaTime()
+        if lastFrameTime == 0 { lastFrameTime = now }
+        let deltaTime = Float(now - lastFrameTime)
+        lastFrameTime = now
+
+        playbackController?.tick(deltaTime: deltaTime)
         guard let engine = animationEngine else { return }
 
         if playbackController != nil {
@@ -95,10 +100,6 @@ class SatinRenderer: NSObject, ObservableObject {
         }
 
         guard engine.isPlaying else { return }
-        let now = CACurrentMediaTime()
-        if lastFrameTime == 0 { lastFrameTime = now }
-        let deltaTime = Float(now - lastFrameTime)
-        lastFrameTime = now
 
         let transforms = engine.evaluateAnimation(deltaTime: deltaTime)
         guard !transforms.isEmpty else { return }

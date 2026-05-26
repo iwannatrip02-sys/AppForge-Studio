@@ -4,6 +4,12 @@ import QuartzCore
 import Combine
 import OSLog
 
+extension simd_float4x4 {
+    init(_ quat: simd_quatf) {
+        self = simd_matrix4x4(quat)
+    }
+}
+
 // MARK: - Keyframe
 struct Keyframe<T> {
     let time: Float

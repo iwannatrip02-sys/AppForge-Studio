@@ -219,10 +219,6 @@ class OCCTEngine {
         let box = shape.boundingBox()
         return (box.min, box.max, box.size)
     }
-    func measureBoundingBox(_ shape: Shape) -> (min: SIMD3<Double>, max: SIMD3<Double>, size: SIMD3<Double>) {
-        let box = shape.boundingBox()
-        return (box.min, box.max, box.size)
-    }
 
     // MARK: - STEP Export
 

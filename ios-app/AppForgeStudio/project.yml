@@ -21,7 +21,7 @@ settings:
 packages:
   Satin:
     url: https://github.com/Hi-Rez/Satin.git
-    from: 0.4.0
+    from: 13.0.0
 
 targets:
   AppForgeStudio:
@@ -100,8 +100,8 @@ targets:
     <string>1</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
-    <key>UILaunchStoryboardName</key>
-    <string>LaunchScreen</string>
+    <key>UILaunchScreen</key>
+    <dict/>
     <key>UISupportedInterfaceOrientations~ipad</key>
     <array>
         <string>UIInterfaceOrientationLandscapeLeft</string>
@@ -116,3 +116,14 @@ targets:
 </plist>
 EOF
           fi
+
+  AppForgeStudioTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    settings:
+      base:
+        INFOPLIST_FILE: AppForgeStudio/Info.plist
+    dependencies:
+      - target: AppForgeStudio

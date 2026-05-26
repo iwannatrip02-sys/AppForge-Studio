@@ -329,24 +329,7 @@ class ExportService {
         let asset = MDLAsset()
         for mesh in model.meshes {
             let allocator = MTKMeshBufferAllocator(device: device)
-            let vertexData = mesh.vertices.withUnsafeBytes { Data($0) }
-            let indexData = mesh.indices.withUnsafeBytes { Data($0) }
-            let vtxBuffer = allocator.newBuffer(with: vertexData, type: .vertex)
-            let idxBuffer = allocator.newBuffer(with: indexData, type: .index)
-            let vertexCount = mesh.vertices.count
-            let indexCount = mesh.indices.count
-            let mdlMesh = MDLMesh(
-                vertexBuffer: vtxBuffer,
-                vertexCount: vertexCount,
-                descriptor: MDLVertexDescriptor(),
-                submeshes: [MDLSubmesh(
-                    indexBuffer: idxBuffer,
-                    indexCount: indexCount,
-                    indexType: .uInt32,
-                    geometryType: .triangles,
-                    material: nil
-                )]
-            )
+            let mdlMesh = MDLMesh(submesh: mesh, allocator: allocator)
             asset.add(mdlMesh)
         }
         return asset

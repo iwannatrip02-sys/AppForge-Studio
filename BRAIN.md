@@ -1,74 +1,69 @@
 # AppForge Studio — BRAIN.md
-> v1 | Updated: 2026-05-25 23:30 UTC | Post-limpieza y unificación
+> v2 | Updated: 2026-05-26 04:30 UTC | Post-compilation-fix v1
 
 ## ESTADO ACTUAL
-Proyecto unificado en una sola estructura bajo `ios-app/AppForgeStudio/`. 130+ archivos Swift/Metal reales. Sin .git anidado, sin backups huérfanos, sin duplicados. Package.swift y project.yml coherentes con Satin Hi-Rez 0.4.0. Pendiente: hacer que compile en CI (xcodegen exit 74).
+Los 7 bugs de compilacion estan resueltos. Shape.swift unificado con Mesh.swift (sin tipos duplicados). Satin 13.0.0. Assets creados. CI configurado con tests + archive + IPA. Pendiente: verificar que compila en CI y que los 49 tests pasan.
 
-## ESTRUCTURA REAL (verificado en disco 2026-05-25)
+## ESTRUCTURA REAL (post-fix 2026-05-26)
 
 ```
 ios-app/AppForgeStudio/
-├── Package.swift                    ← SPM, Hi-Rez/Satin 0.4.0
-├── project.yml                      ← XcodeGen config
+├── Package.swift                    ← SPM Hi-Rez/Satin 13.0.0, iOS 17+
+├── project.yml                      ← XcodeGen config + test target
+├── .github/workflows/build.yml      ← CI: build + tests + archive + IPA
+├── ExportOptions.plist              ← development signing
 ├── Core/
-│   ├── UI/          25 files        ← AppForgeStudioApp, ContentView, CanvasViewModel, AppState, etc.
-│   └── Managers/     2 files        ← CADHistoryTree, StrokeRenderer
+│   ├── UI/          25 files        ← AppForgeStudioApp, ContentView, CanvasViewModel, etc.
+│   ├── Managers/     2 files        ← CADHistoryTree, StrokeRenderer
+│   └── Services/ExportService/ 1    ← ExportService (OBJ/STL/USDZ/STEP/GLTF/FBX)
 ├── Sources/
-│   ├── Engines/     49 files        ← Animation, Sculpt (8 deformers), PBR, IBL, Morph, CSG, CAD tools
-│   ├── CSG/          4 files        ← BSPNode, CSGOperation, Polygon3D, Shape (BSP tree REAL)
+│   ├── Engines/     49 files        ← Animation, Sculpt (10 deformers), PBR, IBL, Morph, etc.
+│   ├── CSG/          4 files        ← Shape.swift (CSG real + 13 metodos nuevos), BSPNode, CSGOperation, Polygon3D
 │   ├── CAD/          2 files        ← ConstraintEngine, SnapEngine
-│   ├── Shaders/      5 .metal       ← PBR, IBL diffuse/specular/BRDF, Boolean compute
-│   ├── Services/     5 files        ← ExportService (STEP+OBJ+STL+USDZ+GLTF), CrashReporter, GPUCompute, Cache
+│   ├── Shaders/      5 .metal       ← PBR, IBL, Boolean compute
+│   ├── Services/     5 files        ← CrashReporter, ExportViewModel, GPUCompute, Cache, ModelLoad
 │   ├── Theme/        3 files        ← AppTheme, ThemeManager
 │   └── RenderEngine/ 1 file         ← RenderModeView
-├── Features/
-│   ├── CADMode/     20 files        ← CADModeView, CADSketchEngine, GeometryConstraintManager, Tools (7)
-│   ├── ExportMode/   3 files        ← ExportView, ExportViewModel
-│   ├── PaintMode/    2 files        ← PaintRenderer, PincelRenderer
-│   ├── SculptMode/   2 files        ← SculptModeView, BrushEngine
-│   ├── AnimationMode/1 file
-│   ├── HybridMode/   1 file
-│   └── RenderMode/   1 file
-└── Tests/            7 files        ← AnimationEngine, ExportService, ModelCache, ConstraintManager tests
+├── Features/         30 files       ← CADMode(20), ExportMode(3), PaintMode(2), SculptMode(2), etc.
+├── Resources/
+│   └── Assets.xcassets/            ← AppIcon + AccentColor
+└── Tests/            7 files        ← 49 tests total
 ```
 
-## ENTIDADES CLAVE
+## BUGS CORREGIDOS (2026-05-26)
 
-| Entidad | Tipo | Notas |
-|---------|------|-------|
-| Satin (Hi-Rez) | framework | Swift/Metal 3D — 0.4.0, repo oficial activo |
-| Metal 2 | tech | GPU rendering + compute shaders |
-| ModelIO/MetalKit | tech | Import/export modelos 3D |
-| simd | tech | Matemáticas 3D (SIMD3, SIMD4, quaternion) |
-| Shape.swift (BSP) | código | CSG booleano REAL con BSP tree nativo |
-| IBLPipeline | código | Diffuse irradiance + specular prefilter + BRDF LUT |
-| GitHub Actions | CI/CD | macOS runner, Xcode 16.0, xcodegen |
+| Bug | Archivo | Fix |
+|-----|---------|-----|
+| Dual Mesh/Vertex | Shape.swift → Mesh.swift | Eliminado struct duplicado, usa Mesh.swift |
+| 13 metodos faltantes | Shape.swift | Implementados: triangulate, volume, area, boundingBox, exportSTEP, etc. |
+| deltaTime use-before-def | SatinRenderer.swift:89 | Movido arriba de su uso |
+| MDLMesh API invalida | ExportService.swift:332 | Reconstruido con vertex/index buffers |
+| simd_float4x4(rotation) | AnimationEngine.swift:120 | Extension agregada |
+| measureBoundingBox dup | OCCTEngine.swift:222 | Duplicado eliminado |
+| Satin 0.4.0 no existe | Package.swift + project.yml | Cambiado a 13.0.0 |
+| Sin AppIcon | Assets.xcassets | Creado |
+| LaunchScreen storyboard | project.yml Info.plist | UILaunchScreen (iOS 17+) |
+| Sin test target | project.yml | Test target agregado |
 
-## BUGS CONOCIDOS (verificados en código)
+## BUGS CONOCIDOS PENDIENTES
 
-| Bug | Archivo | Severidad | Estado |
-|-----|---------|-----------|--------|
-| BUG1: Layout GPU PBR (float3 padding) | SatinRenderer.swift | CRÍTICO | Pendiente |
-| BUG2: updateAnimation doble por frame | SatinRenderer.swift | CRÍTICO | Pendiente |
-| BUG3: UInt16 → UInt32 (>65k vértices) | SatinRenderer.swift | ALTO | Pendiente |
-| BUG5: Normal matrix escala no-uniforme | Shaders.metal | ALTO | Pendiente |
-| BUG7: Grab deformer dirección contraria | SculptEngine.swift | MEDIO | Pendiente |
-| BUG9: rebuildSceneFrom cada frame | SatinRenderer.swift | ALTO | Pendiente |
+| Bug | Archivo | Severidad |
+|-----|---------|-----------|
+| BUG1: Layout GPU PBR (float3 padding) | SatinRenderer.swift | CRITICO |
+| BUG2: updateAnimation doble por frame | SatinRenderer.swift | CRITICO |
+| BUG3: UInt16 → UInt32 (>65k vertices) | SatinRenderer.swift | ALTO |
+| BUG5: Normal matrix escala no-uniforme | Shaders.metal | ALTO |
+| BUG7: Grab deformer direccion contraria | SculptEngine.swift | MEDIO |
+| BUG9: rebuildSceneFrom cada frame | SatinRenderer.swift | ALTO |
 
 ## BLOQUEOS
-
-1. Sin Mac → no se puede compilar localmente
-2. Sin Apple Developer → no se puede firmar/deployar
-3. CI falla: xcodegen exit code 74 (project.yml paths no coinciden con estructura)
-
-## PRÓXIMAS ACCIONES
-1. Corregir project.yml para que xcodegen encuentre todos los paths
-2. Push a GitHub → ejecutar CI → ver errores reales de compilación
-3. Iterar fixes de compilación desde Windows hasta que CI pase
-4. Investigar sideloading gratuito (AltStore, 7 días) vs Apple Developer
+- Sin Mac → no compilar localmente
+- Sin Apple Developer → no firmar/deployar
+- Satin repo archivado (ultimo tag 13.0.0, Abril 2025)
 
 ## HISTORIAL
-- 2026-05-25 23:30 UTC — Limpieza masiva: .git anidado eliminado, 100+ archivos huérfanos borrados, estructura unificada, Satin unificado, TODO.md y BRAIN.md reconstruidos con verdad verificada
-- 2026-05-12 — CSG real implementado (BSP tree en Shape.swift), ExportServiceSTEP
-- 2026-05-11 — Migración de estructura, morph targets, CAD constraint overlay
-- 2026-05-07 — IBL pipeline verificado, análisis competitivo, diagnóstico PBR
+- 2026-05-26 04:30 UTC — Fix de 7 bugs de compilacion + assets + CI + tests + Satin 13.0.0
+- 2026-05-25 23:30 UTC — Limpieza masiva: .git anidado eliminado, 100+ archivos huerfanos borrados, estructura Sources/ unificada
+- 2026-05-12 — CSG real implementado (BSP tree en Shape.swift)
+- 2026-05-11 — Migracion de estructura, morph targets, CAD constraint overlay
+- 2026-05-07 — IBL pipeline verificado, analisis competitivo

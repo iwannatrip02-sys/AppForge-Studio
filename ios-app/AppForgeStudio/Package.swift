@@ -5,7 +5,7 @@ let package = Package(
     name: "AppForgeStudio",
     platforms: [.iOS(.v17)],
     dependencies: [
-        .package(url: "https://github.com/Hi-Rez/Satin.git", from: "0.4.0")
+        .package(url: "https://github.com/Hi-Rez/Satin.git", from: "13.0.0")
     ],
     targets: [
         .executableTarget(
