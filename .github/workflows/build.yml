@@ -100,7 +100,6 @@ jobs:
               -scheme AppForgeStudio \
               -sdk iphonesimulator \
               -destination 'generic/platform=iOS Simulator' \
-              -arch arm64 \
               -configuration Debug \
               CODE_SIGN_IDENTITY="" \
               CODE_SIGNING_REQUIRED=NO \
