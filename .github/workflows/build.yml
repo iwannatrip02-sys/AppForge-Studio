@@ -68,7 +68,7 @@ jobs:
             swift package resolve
           fi
 
-      - name: Build for iOS (iPad)
+      - name: Build for iOS (iPad Simulator)
         working-directory: ios-app/AppForgeStudio
         run: |
           echo "=== Starting build ==="
@@ -76,42 +76,24 @@ jobs:
             xcodebuild build \
               -project AppForgeStudio.xcodeproj \
               -scheme AppForgeStudio \
-              -destination 'generic/platform=iOS' \
+              -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M4),OS=18.4' \
               -configuration Debug \
               CODE_SIGN_IDENTITY="" \
               CODE_SIGNING_REQUIRED=NO \
               CODE_SIGNING_ALLOWED=NO \
               2>&1 | tee build.log
             echo "=== Build exit code: $? ==="
-            echo "=== Last 50 lines of build log ==="
-            tail -50 build.log
-          else
-            echo "No xcodeproj found, trying swift build..."
-            swift build --configuration debug 2>&1 | tee build.log
             echo "=== Last 50 lines ==="
             tail -50 build.log
+          else
+            echo "No xcodeproj found"
+            exit 1
           fi
 
-      - name: Upload build log
+      - name: Upload build log (always)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-log-${{ github.run_id }}
           path: |
             ios-app/AppForgeStudio/build.log
-            ~/Library/Logs/**/*.log
-
-      - name: Create .app artifact
-        if: success()
-        working-directory: ios-app/AppForgeStudio
-        run: |
-          mkdir -p artifacts
-          find ~/Library/Developer/Xcode/DerivedData -name "*.app" -path "*/Build/Products/*" -exec cp -R {} artifacts/ \; 2>/dev/null || echo "No .app found"
-          ls -la artifacts/ 2>/dev/null || echo "No artifacts"
-
-      - name: Upload .app artifact
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: AppForgeStudio-iOS
-          path: ios-app/AppForgeStudio/artifacts/
