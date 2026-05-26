@@ -68,6 +68,15 @@ jobs:
             swift package resolve
           fi
 
+      - name: Install iOS Simulator runtime
+        run: |
+          echo "=== Available runtimes ==="
+          xcrun simctl list runtimes
+          echo "=== Downloading iOS 18.4 Simulator ==="
+          xcodebuild -downloadPlatform iOS 2>&1 | tail -5 || true
+          echo "=== Runtimes after install ==="
+          xcrun simctl list runtimes
+
       - name: Build for iOS (iPad Simulator)
         working-directory: ios-app/AppForgeStudio
         run: |
@@ -76,14 +85,14 @@ jobs:
             xcodebuild build \
               -project AppForgeStudio.xcodeproj \
               -scheme AppForgeStudio \
-              -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M4),OS=18.4' \
+              -sdk iphonesimulator \
+              -destination 'generic/platform=iOS Simulator' \
               -configuration Debug \
               CODE_SIGN_IDENTITY="" \
               CODE_SIGNING_REQUIRED=NO \
               CODE_SIGNING_ALLOWED=NO \
               2>&1 | tee build.log
             echo "=== Build exit code: $? ==="
-            echo "=== Last 50 lines ==="
             tail -50 build.log
           else
             echo "No xcodeproj found"
