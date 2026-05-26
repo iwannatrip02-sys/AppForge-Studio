@@ -3,7 +3,6 @@ import simd
 import ModelIO
 import MetalKit
 import OSLog
-import OCCTSwift
 
 enum ExportFormat: String, CaseIterable {
     case obj = "OBJ"

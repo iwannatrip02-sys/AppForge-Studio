@@ -1,13 +1,15 @@
 import Foundation
+import simd
+import OCCTSwift
 
-/// Analytic edge fillet and chamfer via OCCT TKOffset (B-rep).
+/// Edge fillet and chamfer via OCCT TKOffset.
 @MainActor
 final class FilletEngine {
     private let engine = OCCTEngine.shared
     
     func fillet(_ shape: CADShape, radius: Double, quality: MeshQuality = .medium) -> Mesh {
         let result = engine.fillet(shape, radius: radius)
-        return OCCTBridge.toMesh(result, quality: quality)
+        return result?.appforgeMesh(quality: quality) ?? shape.appforgeMesh(quality: quality)
     }
 }
 
@@ -15,11 +17,10 @@ final class FilletEngine {
 final class ChamferEngine {
     private let engine = OCCTEngine.shared
     
-    func chamfer(_ shape: CADShape, radius: Double, quality: MeshQuality = .medium) -> Mesh {
-        let result = engine.chamfer(shape, radius: radius)
-        return OCCTBridge.toMesh(result, quality: quality)
+    func chamfer(_ shape: CADShape, distance: Double, quality: MeshQuality = .medium) -> Mesh {
+        let result = engine.chamfer(shape, distance: distance)
+        return result?.appforgeMesh(quality: quality) ?? shape.appforgeMesh(quality: quality)
     }
 }
 
-/// Bevel alias — delegates to chamfer engine.
 typealias BevelEngine = ChamferEngine

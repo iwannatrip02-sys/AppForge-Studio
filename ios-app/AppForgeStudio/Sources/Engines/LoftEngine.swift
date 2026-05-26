@@ -1,15 +1,15 @@
 import Foundation
 import simd
+import OCCTSwift
 
-/// Loft, shell, and sweep operations via OCCT B-rep.
+/// Loft, shell, sweep, and revolve via OCCT B-rep.
 @MainActor
 final class LoftEngine {
     private let engine = OCCTEngine.shared
     
-    func loft(profiles: [(points: [SIMD3<Double>], position: SIMD3<Double>)],
-              quality: MeshQuality = .medium) -> Mesh {
-        let result = engine.loft(profiles)
-        return OCCTBridge.toMesh(result, quality: quality)
+    func loft(profiles: [Wire], solid: Bool = true, quality: MeshQuality = .medium) -> Mesh {
+        let result = engine.loft(profiles: profiles, solid: solid)
+        return result?.appforgeMesh(quality: quality) ?? Mesh(vertices: [], indices: [])
     }
 }
 
@@ -19,7 +19,7 @@ final class ShellEngine {
     
     func shell(_ shape: CADShape, thickness: Double, quality: MeshQuality = .medium) -> Mesh {
         let result = engine.shell(shape, thickness: thickness)
-        return OCCTBridge.toMesh(result, quality: quality)
+        return result?.appforgeMesh(quality: quality) ?? shape.appforgeMesh(quality: quality)
     }
 }
 
@@ -27,9 +27,8 @@ final class ShellEngine {
 final class SweepEngine {
     private let engine = OCCTEngine.shared
     
-    func sweep(_ shape: CADShape, along path: [SIMD3<Double>],
-               quality: MeshQuality = .medium) -> Mesh {
-        let result = engine.sweep(shape, along: path)
-        return OCCTBridge.toMesh(result, quality: quality)
+    func sweep(profile: Wire, along path: Wire, quality: MeshQuality = .medium) -> Mesh {
+        let result = engine.sweep(profile: profile, along: path)
+        return result?.appforgeMesh(quality: quality) ?? Mesh(vertices: [], indices: [])
     }
 }
