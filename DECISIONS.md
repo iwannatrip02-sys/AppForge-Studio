@@ -63,3 +63,19 @@
 - Suscripción pura tipo Shapr3D ($299/año — contradictory al ser open-source)
 **Impacto:** high
 
+
+## 2026-05-11 — Plan de Fases 8-10: orden de implementacion
+**Razón:** Primero Apple Pencil (diferencia competitiva contra Shapr3D), luego OCCTSwift + extrusion (kernel CAD real), luego timeline, gestos, constraints auto, benchmark, boolean GPU, assemblies. Cada fase produce codigo verificable y tests.
+**Alternativas descartadas:**
+- Empezar con OCCTSwift (mas riesgoso, sin UX visible de retorno)
+- Saltar benchmark (necesario para validar contra Shapr3D)
+**Impacto:** high
+
+
+## 2026-05-11 — Restauracion masiva de backup_sources/ a Sources/
+**Razón:** Las 5 subcarpetas de Sources/ estan vacias. Todo el codigo real (CAD, animacion, shaders Metal, UI, export, escultura) esta en backup_sources/ en un unico directorio plano. Es la causa raiz de por que el proyecto solo tiene 1 archivo Swift activo en lugar de 48+.
+**Alternativas descartadas:**
+- Dejarlo asi y escribir nuevo codigo (perderia 67 archivos existentes)
+- Restaurar manualmente archivo por archivo (ineficiente, 67 operaciones)
+**Impacto:** high
+

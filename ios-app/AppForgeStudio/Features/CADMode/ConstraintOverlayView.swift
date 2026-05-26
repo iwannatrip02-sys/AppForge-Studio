@@ -2,6 +2,8 @@ import SwiftUI
 
 struct ConstraintOverlayView: View {
     @ObservedObject var constraintManager: GeometryConstraintManager
+    var snapPoints: [SnapPoint] = []
+    var activeSnapPoint: SnapPoint? = nil
     @State private var showOverlay: Bool = true
 
     private var iconMap: [ConstraintType: String] {
@@ -20,7 +22,7 @@ struct ConstraintOverlayView: View {
     }
 
     private var activeConstraints: [GeometryConstraint] {
-        constraintManager.constraints.filter { $0.isActive }
+        constraintManager.getActiveConstraints()
     }
 
     private var overlayColor: Color {
@@ -47,6 +49,13 @@ struct ConstraintOverlayView: View {
             }
 
             if showOverlay {
+                if !snapPoints.isEmpty {
+                    SnapIndicatorView(
+                        snapPoints: snapPoints,
+                        activeSnapPoint: activeSnapPoint
+                    )
+                }
+
                 if activeConstraints.isEmpty {
                     Text("No active constraints")
                         .font(.caption2)
@@ -89,6 +98,55 @@ struct ConstraintOverlayView: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 2)
             }
+        }
+    }
+}
+
+struct SnapIndicatorView: View {
+    let snapPoints: [SnapPoint]
+    var activeSnapPoint: SnapPoint?
+
+    private let snapColor = Color(red: 0, green: 122/255.0, blue: 1)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Snap Points (\(snapPoints.count))")
+                .font(.system(size: 9))
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 8)
+
+            GeometryReader { geometry in
+                ZStack {
+                    ForEach(snapPoints) { point in
+                        let isActive = point.id == activeSnapPoint?.id
+
+                        Circle()
+                            .fill(isActive ? snapColor : snapColor.opacity(0.4))
+                            .frame(width: isActive ? 10 : 6, height: isActive ? 10 : 6)
+                            .position(point.screenPosition)
+                    }
+
+                    if let active = activeSnapPoint {
+                        ForEach(snapPoints.filter { $0.id != active.id }) { point in
+                            Path { path in
+                                path.move(to: active.screenPosition)
+                                path.addLine(to: point.screenPosition)
+                            }
+                            .stroke(
+                                snapColor.opacity(0.25),
+                                style: StrokeStyle(
+                                    lineWidth: 0.5,
+                                    dash: [3, 3]
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+            .frame(height: 100)
+            .background(Color.black.opacity(0.03))
+            .cornerRadius(6)
+            .padding(.horizontal, 8)
         }
     }
 }

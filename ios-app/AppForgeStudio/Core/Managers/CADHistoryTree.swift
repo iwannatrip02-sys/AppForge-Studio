@@ -91,6 +91,12 @@ class CADHistoryTree: ObservableObject {
     // MARK: - Push operation
     
     @discardableResult
+    func beginOperation(_ name: String, params: [String: Double] = [:]) -> CADNode {
+        let op = CADOperation(type: .unknown, description: name, parameters: params)
+        return pushOperation(op)
+    }
+
+    @discardableResult
     func pushOperation(_ op: CADOperation, parentID: UUID? = nil) -> CADNode {
         let node = CADNode(operation: op)
         if let parentID = parentID, let parent = findNode(with: parentID, in: rootNodes) {

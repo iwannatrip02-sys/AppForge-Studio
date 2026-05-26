@@ -1,0 +1,9 @@
+"app_name" = "AppForge Studio";
+"mode_cad" = "CAD";
+"mode_sculpt" = "Esculpir";
+"mode_paint" = "Pintar";
+"mode_render" = "Render";
+"mode_animate" = "Animacion";
+"export" = "Exportar";
+"undo" = "Deshacer";
+"redo" = "Rehacer";

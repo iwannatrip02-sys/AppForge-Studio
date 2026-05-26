@@ -1,0 +1,105 @@
+name: Build AppForgeStudio for iPad
+
+on:
+  push:
+    branches: ["main", "develop"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+    inputs:
+      export_type:
+        description: 'Tipo de exportacion'
+        required: true
+        default: 'development'
+        type: choice
+        options:
+          - development
+          - ad-hoc
+          - app-store
+
+jobs:
+  build:
+    name: Build AppForgeStudio
+    runs-on: macos-14
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Select Xcode version
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.0.app
+          xcodebuild -version
+          swift --version
+
+      - name: Install XcodeGen
+        run: |
+          brew install xcodegen
+          xcodegen --version
+
+      - name: Generate Xcode project
+        run: |
+          xcodegen generate
+          echo "Xcode project generated:"
+          ls -la *.xcodeproj
+
+      - name: Show resolved package graph
+        run: |
+          xcodebuild -resolvePackageDependencies -project AppForgeStudio.xcodeproj -scheme AppForgeStudio -destination 'generic/platform=iOS' 2>&1 | head -50
+
+      - name: Build for iOS (iPad)
+        run: |
+          xcodebuild build \
+            -project AppForgeStudio.xcodeproj \
+            -scheme AppForgeStudio \
+            -destination 'generic/platform=iOS' \
+            -configuration Debug \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | xcpretty && exit ${PIPESTATUS[0]}
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: ~/Library/Logs/*.log
+
+      - name: Create .app artifact
+        if: success()
+        run: |
+          mkdir -p artifacts
+          find ~/Library/Developer/Xcode/DerivedData -name "*.app" -path "*/Build/Products/*" -exec cp -R {} artifacts/ \;
+          ls -la artifacts/
+
+      - name: Upload .app artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AppForgeStudio-iOS
+          path: artifacts/
+          compression-level: 9
+
+  export-ipa:
+    name: Export IPA (signed)
+    needs: build
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-14
+
+    steps:
+      - name: Download .app artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: AppForgeStudio-iOS
+
+      - name: Export IPA
+        run: |
+          mkdir -p export
+          xcodebuild -exportArchive \
+            -exportPath export/ \
+            -exportOptionsPlist ExportOptions.plist \
+            -allowProvisioningUpdates

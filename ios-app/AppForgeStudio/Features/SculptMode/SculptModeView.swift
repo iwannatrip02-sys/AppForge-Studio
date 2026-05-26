@@ -1,9 +1,12 @@
 import SwiftUI
+import OSLog
 
+private let logger = Logger(subsystem: "com.appforgestudio", category: "SculptModeView")
 struct SculptModeView: View {
     @EnvironmentObject var themeManager: ThemeManager
     @ObservedObject var canvasVM: CanvasViewModel
     var renderer: SatinRenderer
+    var animationVM: AnimationEngine?
     @ObservedObject var toolVM: ToolViewModel
     @ObservedObject var subdivisionVM: SubdivisionEngine
 

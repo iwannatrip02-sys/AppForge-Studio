@@ -1,5 +1,7 @@
 import Foundation
+import OSLog
 
+private let logger = Logger(subsystem: "com.appforgestudio", category: "LoopCutEngine")
 class LoopCutEngine {
     
     func loopCut(mesh: inout Mesh, edgeLoop: [(Int, Int)]) -> Bool {

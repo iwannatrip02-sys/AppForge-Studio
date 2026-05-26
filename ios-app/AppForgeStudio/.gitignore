@@ -1,0 +1,22 @@
+# Xcode
+*.xcworkspace
+*.xcuserdata
+DerivedData/
+.build/
+
+# macOS
+.DS_Store
+*.swp
+*.swo
+
+# XcodeGen generated
+*.xcodeproj/
+!*.xcodeproj/project.pbxproj
+
+# IPA exports
+export/
+*.ipa
+*.dSYM.zip
+
+# Logs
+*.log

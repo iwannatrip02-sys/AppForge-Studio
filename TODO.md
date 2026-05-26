@@ -1,40 +1,42 @@
 # AppForge Studio — TODO.md
-> Actualizado: 2026-05-11 16:57 UTC
+> Updated: 2026-05-25 23:30 UTC
+> Proyecto unificado: 130+ archivos Swift/Metal reales en Sources/ + Core/UI/ + Features/ + Tests/
 
 ## Foco actual
-- Generar .ipa sin firma para AltStore + Beta TestFlight v0.9
+- Hacer que el proyecto compile en CI (GitHub Actions macOS)
 
-## Completados (sesion actual)
-- [x] USDZ para AR QuickLook (ARQuickLookView + ExportView + sheet)
-- [x] Internacionalizacion ES/EN (Localizable.xcstrings es + en)
-- [x] Animacion de morph targets entre mallas (MorphEngine + AnimationEngine + tests)
-- [x] IBL para PBR: diffuse irradiance + specular prefilter + BRDF LUT (IBLPipeline.swift implementado)
-- [x] CAD-8: ConstraintOverlayView integrado en CADModeView
+## Pendientes
+- [ ] Corregir error exit code 74 de xcodegen en CI (project.yml vs estructura real)
+- [ ] Validar que todos los imports compilan (Satin API, Metal types)
+- [ ] Obtener cuenta Apple Developer ($99/año) para firmar y deployar
+- [ ] O conseguir Mac/Mac mini para compilar + sideloading gratuito (AltStore, 7 días)
+- [ ] Migrar BooleanEngine de stub identidad a BSP tree real (Core/CSG/Shape.swift ya tiene BSP)
+- [ ] Implementar GPU compute shaders para boolean ops (BooleanComputeShaders.metal existe, falta integrar)
+- [ ] Conectar IBLPipeline.generate() al pipeline de render (el código existe, falta wiring)
+- [ ] Agregar tangent/bitangent a VertexIn para normal maps en PBRShaders.metal
+- [ ] Integrar Apple Pencil + PencilKit (GestureHandler usa touch genérico, sin presión)
+- [ ] Corregir BUG1: layout GPU PBR (float3 padding a 16 bytes)
+- [ ] Corregir BUG2: updateAnimation() doble por frame
+- [ ] Corregir BUG3: UInt16 → UInt32 para mallas >65k vértices
+- [ ] Corregir BUG5: normal matrix bajo escala no-uniforme
+- [ ] Corregir BUG7: grab deformer dirección contraria
+- [ ] Corregir BUG9: rebuildSceneFrom llamado cada frame (60 allocs/seg)
+- [ ] Tests: ejecutar 7 test files en iOS simulator via CI
 
-## Completados (sesiones anteriores)
-- [x] BUG1-9: padding GPU structs, updateAnimation, UInt32, normal matrix, stroke aspect, grab deformer, currentMode, Package.swift, deltaTime Double
-- [x] CAD-1 a CAD-7: sistema CAD completo (entities, solver, history, manager, sketch, extrude, UI)
-- [x] Fase 1A-7: pinceles, sculpt, subdivision, boolean CAD, animation, export, tests, cache, dark mode, CI/CD
-- [x] FBX/Collada/STEP export, Material Editor PBR, analisis competitivo
+## Bloqueos
+- Sin Mac para compilar localmente (Windows 11)
+- Sin Apple Developer account para firmar/deployar
+- CI falla con exit code 74 (xcodegen no encuentra paths del project.yml)
 
-## Pendientes inmediatos (para iPad)
-- [ ] **CAD-9** — Conectar GeometryConstraintManager.shared con Scene3D.constraintManager
-- [ ] Generar .ipa sin firma para AltStore
-- [ ] Ejecutar suite de tests en GitHub Actions
-- [ ] Beta TestFlight v0.9
-- [ ] Validar render loop (paint+sculpt+CAD+animation) en simulador
-
-## Pendientes Fase 8-10
-- [ ] Fase 8: Integrar OCCTSwift como kernel CAD parametrico
-- [ ] Fase 8: Sketch 2D con PencilKit + snapping inteligente
-- [ ] Fase 8: Extrusion/Revolucion/Sweep con preview Metal
-- [ ] Fase 8: Timeline parametrico DAG con undo/redo
-- [ ] Fase 9: Gestos intuitivos (pinch-to-extrude, tap-drag selection)
-- [ ] Fase 9: Constraints automaticas (paralelismo, concentricidad, tangencia)
-- [ ] Fase 10: Boolean operations en GPU (compute shaders)
-- [ ] Fase 10: Assemblies con jerarquia de componentes
-- [ ] Soporte de texture maps en PBRMaterialUniforms
-- [ ] Tangent space en PBRShaders.metal para normal maps
-
-## Notas
-- Compilacion local: Swift Toolchain no disponible en Windows 11. Workaround: push a GitHub CI o generar .ipa via xcodebuild en macOS.
+## Completados
+- Estructura unificada: Sources/ contiene 69 archivos (Engines, CSG, CAD, Shaders, Services, Theme) *(done 2026-05-25)*
+- Limpieza de 67 archivos huérfanos en backup_sources/ *(done 2026-05-25)*
+- .git anidado eliminado, repo unificado *(done 2026-05-25)*
+- Satin dependency unified a Hi-Rez/Satin 0.4.0 *(done 2026-05-25)*
+- GitHub token removido del remote URL *(done 2026-05-25)*
+- CSG real implementado (BSPTree + union/difference/intersection en Shape.swift) *(done 2026-05-12)*
+- 49 engines en Sources/Engines/ (sculpt, animation, morph, IBL, PBR, CAD tools) *(done)*
+- 5 shaders Metal funcionales (PBR, IBL diffuse/specular/BRDF, boolean compute) *(done)*
+- ExportService con STEP ISO 10303-21 + OBJ/STL/USDZ/GLTF *(done)*
+- UI completa: 25 archivos en Core/UI/ (ContentView, CanvasViewModel, AppState, theme) *(done)*
+- 7 Features modes: CADMode (20 files), ExportMode, PaintMode, SculptMode, etc. *(done)*

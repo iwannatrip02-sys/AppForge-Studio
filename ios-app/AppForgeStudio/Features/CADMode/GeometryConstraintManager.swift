@@ -114,6 +114,10 @@ class GeometryConstraintManager: ObservableObject {
     var constraintCount: Int { constraints.count }
     var activeConstraintCount: Int { constraints.filter { $0.isActive }.count }
 
+    func getActiveConstraints() -> [GeometryConstraint] {
+        return constraints.filter { $0.isActive }
+    }
+
     // MARK: - 3D Constraint Solving Engine
 
     func resolveConstraints() {

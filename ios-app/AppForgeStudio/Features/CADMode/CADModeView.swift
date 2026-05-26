@@ -1,5 +1,6 @@
 import SwiftUI
 import OSLog
+import CoreGraphics
 
 private let logger = Logger(subsystem: "com.appforgestudio", category: "CADModeView")
 
@@ -14,6 +15,8 @@ struct CADModeView: View {
     @ObservedObject var toolVM: ToolViewModel
     @ObservedObject var animationVM: AnimationEngine
     @StateObject private var sketchEngine = CADSketchEngine()
+    @StateObject private var constraintEngine = ConstraintEngine()
+    @StateObject private var assemblyEngine = AssemblyEngine()
     @EnvironmentObject var themeManager: ThemeManager
 
     private var theme: AppTheme { themeManager.currentTheme }
@@ -26,6 +29,14 @@ struct CADModeView: View {
     @State private var filletRadius: Float = 0.05
     @State private var showStepExportAlert: Bool = false
     @State private var stepExportMessage: String = ""
+    @State private var cursorScreenPosition: CGPoint = .zero
+    @State private var snapPoints: [SnapPoint] = []
+    @State private var showSnapOverlay: Bool = false
+    @State private var showExtrudeSheet: Bool = false
+    @State private var extrudeDistance: Float = 0.1
+    @State private var isExtruding: Bool = false
+    @State private var showCADTimeline: Bool = false
+    @State private var csgStatusMessage: String = ""
 
     private var isSketchTool: Bool {
         selectedTool.isSketchTool
@@ -66,8 +77,50 @@ struct CADModeView: View {
                 if selectedTab == .model {
                     toolbarSection
                     parameterBar
-                    ContentView(canvasVM: canvasVM, renderer: renderer)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    ZStack {
+                        ContentView(canvasVM: canvasVM, renderer: renderer)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        SnapGuideOverlay(
+                            snapPoints: snapPoints,
+                            cursorScreenPosition: cursorScreenPosition,
+                            isActive: showSnapOverlay && toolVM.gridSnapEnabled
+                        )
+                        PencilForceOverlay { force, location in
+                            if force > 0.7 && !sketchEngine.entities.isEmpty && !isExtruding {
+                                extrudeDistance = force * 2.0
+                                performExtrusion()
+                            }
+                        }
+                    }
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                cursorScreenPosition = value.location
+                                let worldPos = SIMD3<Float>(
+                                    Float(value.location.x / 300 - 0.5) * 4,
+                                    Float(1 - value.location.y / 400 - 0.5) * 3,
+                                    0
+                                )
+                                let direction = SIMD3<Float>(0, 0, -1)
+                                constraintEngine.scene = canvasVM.scene
+                                let found = constraintEngine.findSnapPoints(
+                                    position: worldPos,
+                                    direction: direction
+                                )
+                                snapPoints = found
+                                showSnapOverlay = !found.isEmpty
+                            }
+                            .onEnded { _ in
+                                constraintEngine.clearSnapState()
+                                snapPoints = []
+                                showSnapOverlay = false
+                            }
+                    )
+                    .onTapGesture(count: 2) {
+                        HapticService.shared.medium()
+                        canvasVM.resetView()
+                        canvasVM.objectWillChange.send()
+                    }
                     bottomBar
                 } else {
                     parametricView
@@ -90,6 +143,10 @@ struct CADModeView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(stepExportMessage)
+        }
+        .sheet(isPresented: $showCADTimeline) {
+            CADTimelineView(historyTree: sketchEngine.historyTree)
+                .environmentObject(themeManager)
         }
     }
 
@@ -154,7 +211,11 @@ struct CADModeView: View {
             .listStyle(.plain)
 
             Divider()
-            ConstraintOverlayView(constraintManager: sketchEngine.constraintManager)
+            ConstraintOverlayView(
+                constraintManager: sketchEngine.constraintManager,
+                snapPoints: snapPoints,
+                activeSnapPoint: constraintEngine.currentSnapPoint
+            )
                 .padding(.horizontal, 8)
         }
     }
@@ -198,7 +259,9 @@ struct CADModeView: View {
             HapticService.shared.light()
             selectedTool = tool
             toolVM.selectedTool = tool
-            if tool != .select && tool != .move && tool != .rotate && tool != .scale {
+            if tool == .booleanUnion || tool == .booleanSubtract || tool == .booleanIntersect {
+                startCSGOperation(tool)
+            } else if tool != .select && tool != .move && tool != .rotate && tool != .scale {
                 executeSelectedTool()
             }
         }) {
@@ -226,6 +289,28 @@ struct CADModeView: View {
     private var parameterBar: some View {
         VStack(spacing: 0) {
             switch selectedTool {
+            case .extrude:
+                HStack {
+                    Text("Dist:").font(.caption).foregroundColor(theme.textPrimary)
+                    Slider(value: $extrudeDistance, in: 0.01...2.0)
+                        .frame(width: 120)
+                    Text(String(format: "%.2f", extrudeDistance))
+                        .font(.caption).foregroundColor(theme.textPrimary).frame(width: 35)
+                    Spacer()
+                    if isExtruding {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Button("Extruir") {
+                            performExtrusion()
+                        }
+                        .font(.caption)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .disabled(sketchEngine.entities.isEmpty)
+                    }
+                }
+                .padding(.horizontal, 10).padding(.vertical, 3)
+                .background(Color.blue.opacity(0.15))
             case .fillet:
                 HStack {
                     Text("Radio:").font(.caption).foregroundColor(theme.textPrimary)
@@ -298,30 +383,12 @@ struct CADModeView: View {
                 }
                 .padding(.horizontal, 10).padding(.vertical, 3)
                 .background(Color.yellow.opacity(0.12))
-            case .booleanUnion:
-                HStack {
-                    Text("Union con copia desplazada +0.15 en X")
-                        .font(.caption).foregroundColor(theme.textPrimary)
-                    Spacer()
-                    Button("Ejecutar") { executeSelectedTool() }
-                        .font(.caption)
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                }
-                .padding(.horizontal, 10).padding(.vertical, 3)
-                .background(Color.cyan.opacity(0.12))
+            case .booleanUnion, .booleanSubtract, .booleanIntersect:
+                csgParameterBar
             case .measure:
-                HStack {
-                    Text("Medicion via OCCT (CSG real)")
-                        .font(.caption).foregroundColor(theme.textPrimary)
-                    Spacer()
-                    Button("Medir") { executeSelectedTool() }
-                        .font(.caption)
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                }
-                .padding(.horizontal, 10).padding(.vertical, 3)
-                .background(Color.mint.opacity(0.12))
+                MeasureTool(toolVM: toolVM, canvasVM: canvasVM)
+                    .padding(.horizontal, 10).padding(.vertical, 3)
+                    .background(Color.mint.opacity(0.12))
             default:
                 EmptyView()
             }
@@ -341,7 +408,48 @@ struct CADModeView: View {
             .disabled(canvasVM.scene.models.isEmpty)
             Text(animationVM.isPlaying ? "Playing" : "Anim").font(.system(size: 9))
 
+            theme.border.frame(width: 1, height: 16).padding(.horizontal, 3)
+
+            Button(action: { performBooleanUnion() }) {
+                Image(systemName: "square.on.square")
+                    .font(.system(size: 11))
+                    .foregroundColor(canvasVM.scene.models.count >= 2 ? .cyan : theme.textSecondary)
+            }
+            .disabled(canvasVM.scene.models.count < 2)
+            .help("Boolean Union")
+
+            Button(action: { performBooleanSubtract() }) {
+                Image(systemName: "square.slash")
+                    .font(.system(size: 11))
+                    .foregroundColor(canvasVM.scene.models.count >= 2 ? .orange : theme.textSecondary)
+            }
+            .disabled(canvasVM.scene.models.count < 2)
+            .help("Boolean Subtract")
+
+            Button(action: { performBooleanIntersect() }) {
+                Image(systemName: "square.on.circle")
+                    .font(.system(size: 11))
+                    .foregroundColor(canvasVM.scene.models.count >= 2 ? .purple : theme.textSecondary)
+            }
+            .disabled(canvasVM.scene.models.count < 2)
+            .help("Boolean Intersect")
+
+            Button(action: { performGroupAssembly() }) {
+                Image(systemName: "rectangle.3.group")
+                    .font(.system(size: 11))
+                    .foregroundColor(canvasVM.scene.models.count >= 2 ? .green : theme.textSecondary)
+            }
+            .disabled(canvasVM.scene.models.count < 2)
+            .help("Agrupar Assembly")
+
             Spacer()
+
+            Button(action: { showCADTimeline = true }) {
+                Image(systemName: "timeline.selection")
+                    .font(.system(size: 11))
+                    .foregroundColor(.blue)
+            }
+            .help("Timeline CAD")
 
             Button(action: { exportToSTEP() }) {
                 Image(systemName: "square.and.arrow.up")
@@ -355,6 +463,12 @@ struct CADModeView: View {
     private var bottomBar: some View {
         HStack {
             Toggle("Snap", isOn: $toolVM.gridSnapEnabled).toggleStyle(.switch).font(.caption)
+            Button(action: { showSnapOverlay.toggle() }) {
+                Image(systemName: showSnapOverlay ? "scope" : "dot.scope")
+                    .font(.system(size: 11))
+                    .foregroundColor(showSnapOverlay ? .blue : theme.textSecondary)
+            }
+            .help("Toggle snap guides")
             Spacer()
             Button("Mediciones") { showMeasurements.toggle() }.font(.caption)
         }.padding(.horizontal).padding(.vertical, 4).background(theme.surface)
@@ -386,7 +500,7 @@ struct CADModeView: View {
 
             let exportService = ExportServiceSTEP()
 
-            let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            guard let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
             let outputURL = documentsDir.appendingPathComponent("export_\(UUID().uuidString.prefix(8)).stp")
 
             do {
@@ -400,7 +514,7 @@ struct CADModeView: View {
         } else {
             let exportService = ExportServiceSTEP()
 
-            let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            guard let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
             let outputURL = documentsDir.appendingPathComponent("sketch_\(UUID().uuidString.prefix(8)).stp")
 
             do {
@@ -410,6 +524,323 @@ struct CADModeView: View {
             } catch {
                 stepExportMessage = "Export failed: \(error.localizedDescription)"
                 showStepExportAlert = true
+            }
+        }
+    }
+
+    private func performExtrusion() {
+        guard !sketchEngine.entities.isEmpty else { return }
+        isExtruding = true
+
+        sketchEngine.closeProfile()
+        sketchEngine.logOperation(type: .extrude, description: "Extrusion de sketch", parameters: ["distance": Double(extrudeDistance)])
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let mesh = ExtrusionEngine.extrudeSketch(sketchEngine.entities, points: sketchEngine.points, distance: extrudeDistance)
+
+            DispatchQueue.main.async {
+                isExtruding = false
+                if let mesh = mesh {
+                    extrudedMesh = mesh
+                    selectedTool = .select
+                }
+            }
+        }
+    }
+
+    private func cycleTool(direction: Int) {
+        let allTools: [CADTool] = [.select, .move, .rotate, .scale,
+                                    .extrude, .loopCut, .bevel, .booleanUnion, .booleanSubtract,
+                                    .booleanIntersect, .fillet, .chamfer, .shell, .loft, .sweep, .measure,
+                                    .line, .circle, .rectangle, .arc, .dimension, .constraint]
+        guard let currentIndex = allTools.firstIndex(of: selectedTool) else { return }
+        let newIndex = (currentIndex + direction + allTools.count) % allTools.count
+        selectedTool = allTools[newIndex]
+        toolVM.selectedTool = selectedTool
+        HapticService.shared.selection()
+    }
+
+    private func performBooleanUnion() {
+        guard canvasVM.scene.models.count >= 2 else { return }
+        let meshA = canvasVM.scene.models[0].meshes.first ?? Mesh()
+        let meshB = canvasVM.scene.models[1].meshes.first ?? Mesh()
+        guard !meshA.vertices.isEmpty, !meshB.vertices.isEmpty else { return }
+
+        sketchEngine.logOperation(type: .booleanUnion, description: "Union de 2 modelos")
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let engine = BooleanEngine()
+            let result = engine.booleanUnion(a: meshA, b: meshB)
+            DispatchQueue.main.async {
+                let model = Model(name: "Union_\(UUID().uuidString.prefix(8))", meshes: [result])
+                canvasVM.scene.addModel(model)
+                canvasVM.objectWillChange.send()
+            }
+        }
+    }
+
+    private func performBooleanSubtract() {
+        guard canvasVM.scene.models.count >= 2 else { return }
+        let meshA = canvasVM.scene.models[0].meshes.first ?? Mesh()
+        let meshB = canvasVM.scene.models[1].meshes.first ?? Mesh()
+        guard !meshA.vertices.isEmpty, !meshB.vertices.isEmpty else { return }
+
+        sketchEngine.logOperation(type: .booleanSubtract, description: "Diferencia de 2 modelos")
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let engine = BooleanEngine()
+            let result = engine.booleanDifference(a: meshA, b: meshB)
+            DispatchQueue.main.async {
+                let model = Model(name: "Subtract_\(UUID().uuidString.prefix(8))", meshes: [result])
+                canvasVM.scene.addModel(model)
+                canvasVM.objectWillChange.send()
+            }
+        }
+    }
+
+    private func performBooleanIntersect() {
+        guard canvasVM.scene.models.count >= 2 else { return }
+        let meshA = canvasVM.scene.models[0].meshes.first ?? Mesh()
+        let meshB = canvasVM.scene.models[1].meshes.first ?? Mesh()
+        guard !meshA.vertices.isEmpty, !meshB.vertices.isEmpty else { return }
+
+        sketchEngine.logOperation(type: .booleanIntersect, description: "Interseccion de 2 modelos")
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let engine = BooleanEngine()
+            let result = engine.booleanIntersection(a: meshA, b: meshB)
+            DispatchQueue.main.async {
+                let model = Model(name: "Intersect_\(UUID().uuidString.prefix(8))", meshes: [result])
+                canvasVM.scene.addModel(model)
+                canvasVM.objectWillChange.send()
+            }
+        }
+    }
+
+    private func performGroupAssembly() {
+        guard canvasVM.scene.models.count >= 2 else { return }
+        let modelIDs = canvasVM.scene.models.map { $0.id }
+        assemblyEngine.createAssembly(name: "Group_\(UUID().uuidString.prefix(8))", modelIDs: modelIDs)
+        sketchEngine.logOperation(type: .booleanUnion, description: "Assembly agrupado (\(modelIDs.count) modelos)")
+    }
+
+    private func startCSGOperation(_ tool: CADTool) {
+        toolVM.csgActiveOperation = tool
+        toolVM.csgShapeAIndex = nil
+        toolVM.csgShapeBIndex = nil
+        csgStatusMessage = "Select Shape A"
+    }
+
+    private func resetCSGSelection() {
+        toolVM.csgActiveOperation = nil
+        toolVM.csgShapeAIndex = nil
+        toolVM.csgShapeBIndex = nil
+        csgStatusMessage = ""
+        selectedTool = .select
+        toolVM.selectedTool = .select
+    }
+
+    private func cycleCSGShape(_ which: String) {
+        let count = canvasVM.scene.models.count
+        guard count > 0 else { return }
+        if which == "A" {
+            let current = toolVM.csgShapeAIndex ?? -1
+            var next = (current + 1) % count
+            if next == toolVM.csgShapeBIndex { next = (next + 1) % count }
+            toolVM.csgShapeAIndex = next
+            csgStatusMessage = toolVM.csgShapeBIndex != nil ? "Ready to execute" : "Select Shape B"
+        } else {
+            let current = toolVM.csgShapeBIndex ?? -1
+            var next = (current + 1) % count
+            if next == toolVM.csgShapeAIndex { next = (next + 1) % count }
+            toolVM.csgShapeBIndex = next
+            csgStatusMessage = toolVM.csgShapeAIndex != nil ? "Ready to execute" : "Select Shape A"
+        }
+    }
+
+    private func performCSGWithSelectedShapes() {
+        guard let idxA = toolVM.csgShapeAIndex,
+              let idxB = toolVM.csgShapeBIndex,
+              idxA < canvasVM.scene.models.count,
+              idxB < canvasVM.scene.models.count,
+              idxA != idxB,
+              let meshA = canvasVM.scene.models[idxA].meshes.first,
+              let meshB = canvasVM.scene.models[idxB].meshes.first
+        else { return }
+
+        csgStatusMessage = "Applying..."
+        let operation = selectedTool
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            let engine = BooleanEngine()
+            let result: Mesh
+            switch operation {
+            case .booleanUnion:
+                result = engine.booleanUnion(a: meshA, b: meshB)
+            case .booleanSubtract:
+                result = engine.booleanDifference(a: meshA, b: meshB)
+            case .booleanIntersect:
+                result = engine.booleanIntersection(a: meshA, b: meshB)
+            default:
+                return
+            }
+            DispatchQueue.main.async {
+                let name = "\(operation.rawValue)_\(UUID().uuidString.prefix(8))"
+                let model = Model(name: name, meshes: [result])
+                self.canvasVM.scene.addModel(model)
+                self.canvasVM.objectWillChange.send()
+                self.sketchEngine.logOperation(type: .booleanUnion, description: "CSG \(operation.rawValue) de 2 modelos")
+                self.resetCSGSelection()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var csgParameterBar: some View {
+        let modelCount = canvasVM.scene.models.count
+        let shapeADisplay: String = {
+            if let idx = toolVM.csgShapeAIndex, idx < modelCount {
+                return canvasVM.scene.models[idx].name
+            }
+            return "---"
+        }()
+        let shapeBDisplay: String = {
+            if let idx = toolVM.csgShapeBIndex, idx < modelCount {
+                return canvasVM.scene.models[idx].name
+            }
+            return "---"
+        }()
+        let bothSelected = toolVM.csgShapeAIndex != nil && toolVM.csgShapeBIndex != nil
+
+        let csgLabel: String = {
+            switch selectedTool {
+            case .booleanUnion: return "Union"
+            case .booleanSubtract: return "Subtract"
+            case .booleanIntersect: return "Intersect"
+            default: return "CSG"
+            }
+        }()
+        let bgColor: Color = {
+            switch selectedTool {
+            case .booleanUnion: return Color.cyan.opacity(0.12)
+            case .booleanSubtract: return Color.orange.opacity(0.12)
+            case .booleanIntersect: return Color.purple.opacity(0.12)
+            default: return Color.cyan.opacity(0.12)
+            }
+        }()
+
+        VStack(spacing: 2) {
+            HStack {
+                Text("CSG \(csgLabel)")
+                    .font(.caption).bold().foregroundColor(theme.textPrimary)
+                Spacer()
+                Text(csgStatusMessage)
+                    .font(.caption2)
+                    .foregroundColor(bothSelected ? .green : .yellow)
+            }
+            HStack {
+                Text("A:").font(.caption2).foregroundColor(theme.textSecondary)
+                Button(action: { cycleCSGShape("A") }) {
+                    HStack(spacing: 2) {
+                        Image(systemName: "chevron.left").font(.system(size: 6))
+                        Text(shapeADisplay)
+                            .font(.caption)
+                            .lineLimit(1)
+                            .frame(minWidth: 50)
+                        Image(systemName: "chevron.right").font(.system(size: 6))
+                    }
+                }
+                .disabled(modelCount < 2)
+
+                Text("B:").font(.caption2).foregroundColor(theme.textSecondary)
+                Button(action: { cycleCSGShape("B") }) {
+                    HStack(spacing: 2) {
+                        Image(systemName: "chevron.left").font(.system(size: 6))
+                        Text(shapeBDisplay)
+                            .font(.caption)
+                            .lineLimit(1)
+                            .frame(minWidth: 50)
+                        Image(systemName: "chevron.right").font(.system(size: 6))
+                    }
+                }
+                .disabled(modelCount < 2)
+
+                Spacer()
+
+                Button("Ejecutar") { performCSGWithSelectedShapes() }
+                    .font(.caption)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(!bothSelected)
+
+                Button(action: { resetCSGSelection() }) {
+                    Image(systemName: "xmark.circle")
+                        .font(.caption)
+                        .foregroundColor(theme.textSecondary)
+                }
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 3)
+        .background(bgColor)
+        .onAppear {
+            if csgStatusMessage.isEmpty {
+                csgStatusMessage = "Select Shape A"
+            }
+        }
+    }
+}
+
+struct PencilForceOverlay: UIViewRepresentable {
+    var onPencilForce: ((CGFloat, CGPoint) -> Void)?
+
+    func makeUIView(context: Context) -> PencilForceView {
+        let view = PencilForceView()
+        view.onPencilForce = onPencilForce
+        view.isUserInteractionEnabled = true
+        view.backgroundColor = .clear
+        return view
+    }
+
+    func updateUIView(_ uiView: PencilForceView, context: Context) {
+        uiView.onPencilForce = onPencilForce
+    }
+}
+
+private class PencilForceView: UIView {
+    var onPencilForce: ((CGFloat, CGPoint) -> Void)?
+    private let feedbackGen = UIImpactFeedbackGenerator(style: .light)
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        feedbackGen.prepare()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        feedbackGen.prepare()
+    }
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        return nil
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesMoved(touches, with: event)
+        guard let touch = touches.first, touch.type == .pencil else { return }
+        let force = max(0, min(1, touch.force / touch.maximumPossibleForce))
+        let location = touch.location(in: self)
+        onPencilForce?(force, location)
+
+        if force > 0.5 {
+            feedbackGen.impactOccurred(intensity: CGFloat(force))
+        }
+
+        if let coalesced = event?.coalescedTouches(for: touch) {
+            for ct in coalesced {
+                let cforce = max(0, min(1, ct.force / ct.maximumPossibleForce))
+                let cloc = ct.location(in: self)
+                onPencilForce?(cforce, cloc)
             }
         }
     }
@@ -475,6 +906,11 @@ private func executeCADTool(_ tool: CADTool, canvasVM: CanvasViewModel, toolVM: 
             let model = Model(name: "Sweep_\(UUID().uuidString.prefix(8))", meshes: [sweptMesh])
             canvasVM.scene.addModel(model)
         }
+
+    case .booleanUnion, .booleanSubtract, .booleanIntersect:
+        toolVM.csgActiveOperation = tool
+        toolVM.csgShapeAIndex = nil
+        toolVM.csgShapeBIndex = nil
 
     default:
         break

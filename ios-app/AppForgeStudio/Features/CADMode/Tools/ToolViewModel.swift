@@ -14,6 +14,9 @@ class ToolViewModel: ObservableObject {
     @Published var chamferRadius: Float = 0.05
     @Published var shellThickness: Float = 0.02
     @Published var sweepHeight: Float = 0.5
+    @Published var csgShapeAIndex: Int? = nil
+    @Published var csgShapeBIndex: Int? = nil
+    @Published var csgActiveOperation: CADTool? = nil
     
     let extrusion = ExtrusionEngine()
     let bevel = BevelEngine()
@@ -39,7 +42,7 @@ class ToolViewModel: ObservableObject {
                 let i0 = Int(mesh.indices[0]), i1 = Int(mesh.indices[1])
                 _ = bevel.bevel(mesh: &mesh, edgeIndices: [(i0, i1)], bevelSize: 0.05, segments: 2)
             }
-        case .boolean:
+        case .booleanUnion:
             var offsetMesh = mesh
             for i in 0..<offsetMesh.vertices.count {
                 offsetMesh.vertices[i].position.x += 0.15
@@ -92,4 +95,4 @@ class ToolViewModel: ObservableObject {
             break
         }
     }
-    
+}

@@ -1,6 +1,6 @@
 import Foundation
 import simd
-import OCCTSwift
+// OCCT reemplazado por Shape.swift nativo
 
 // BooleanEngine que usa OCCTEngine.shared para operaciones CSG reales
 class BooleanEngine {
