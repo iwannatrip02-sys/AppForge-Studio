@@ -8,9 +8,10 @@ import OSLog
 private let logger = Logger(subsystem: "com.appforgestudio", category: "AppState")
 @MainActor
 class AppState: ObservableObject {
-    @Published var selectedMode: AppMode = .hybrid
-    @Published var showExport = false
+    @Published var selectedMode: AppMode = .cad
+    @Published var isLoading: Bool = true
     @Published var isDarkMode: Bool = true
+    @Published var showExport: Bool = false
     
     func toggleDarkMode() {
         isDarkMode.toggle()
@@ -60,8 +61,8 @@ class AppState: ObservableObject {
 
     enum AppMode: String, CaseIterable {
         case cad = "CAD"
-        case sculpt = "Esculpir"
-        case hybrid = "Hybrid"
+        case sculpt = "Sculpt"
+        case paint = "Paint"
         case animation = "Animation"
         case render = "Render"
     }
