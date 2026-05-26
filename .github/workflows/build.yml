@@ -68,6 +68,19 @@ jobs:
             swift package resolve
           fi
 
+      - name: Patch SatinCore C++ narrowing errors (Triangulator.mm)
+        run: |
+          TRIANGULATOR=$(find /Users/runner/Library/Developer/Xcode/DerivedData -name Triangulator.mm -path "*/Satin/*" 2>/dev/null | head -1)
+          if [ -f "$TRIANGULATOR" ]; then
+            echo "Found: $TRIANGULATOR"
+            sed -i '' 's/\.i0 = v1->index, \.i1 = v2->index, \.i2 = v3->index/.i0 = static_cast<uint32_t>(v1->index), .i1 = static_cast<uint32_t>(v2->index), .i2 = static_cast<uint32_t>(v3->index)/g' "$TRIANGULATOR"
+            sed -i '' 's/\.i0 = v1->index/.i0 = static_cast<uint32_t>(v1->index)/g' "$TRIANGULATOR"
+            sed -i '' 's/\.index = index/.index = static_cast<int>(index)/g' "$TRIANGULATOR"
+            echo "Patched successfully"
+          else
+            echo "Triangulator.mm not found, continuing..."
+          fi
+
       - name: Install iOS Simulator runtime
         run: |
           echo "=== Available runtimes ==="
@@ -87,6 +100,7 @@ jobs:
               -scheme AppForgeStudio \
               -sdk iphonesimulator \
               -destination 'generic/platform=iOS Simulator' \
+              -arch arm64 \
               -configuration Debug \
               CODE_SIGN_IDENTITY="" \
               CODE_SIGNING_REQUIRED=NO \
