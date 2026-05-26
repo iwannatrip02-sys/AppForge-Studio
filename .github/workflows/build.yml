@@ -13,8 +13,8 @@ on:
 jobs:
   build:
     name: Build AppForgeStudio
-    runs-on: macos-14
-    timeout-minutes: 45
+    runs-on: macos-15
+    timeout-minutes: 60
 
     steps:
       - name: Checkout code
@@ -24,21 +24,30 @@ jobs:
         run: |
           echo "=== Available Xcodes ==="
           ls -d /Applications/Xcode*.app 2>/dev/null
-          echo "=== Current Xcode ==="
-          xcode-select -p
+          echo "=== Default Swift ==="
           swift --version
-          echo "=== Trying Xcode 16.x ==="
-          for xcode in /Applications/Xcode_16*.app; do
+          echo "=== Trying to find Swift 6.1+ ==="
+          FOUND=false
+          for xcode in /Applications/Xcode_16*.app /Applications/Xcode_17*.app /Applications/Xcode.app; do
             if [ -d "$xcode" ]; then
-              echo "Found: $xcode"
-              sudo xcode-select -s "$xcode"
-              echo "Selected: $(xcode-select -p)"
-              swift --version
-              break
+              sudo xcode-select -s "$xcode" 2>/dev/null || true
+              SWIFT_VER=$(swift --version 2>/dev/null | head -1)
+              echo "Tried $xcode: $SWIFT_VER"
+              if echo "$SWIFT_VER" | grep -qE 'version (6\.[1-9]|[7-9])'; then
+                FOUND=true
+                echo "=== Using $xcode ($SWIFT_VER) ==="
+                break
+              fi
             fi
           done
-          echo "=== Final Swift version ==="
-          swift --version
+          if [ "$FOUND" = false ]; then
+            echo "=== Installing Swift 6.1 manually ==="
+            curl -sL https://download.swift.org/swift-6.1-release/xcode/swift-6.1-RELEASE/swift-6.1-RELEASE-osx.pkg -o /tmp/swift.pkg
+            sudo installer -pkg /tmp/swift.pkg -target /
+            export TOOLCHAINS=swift
+            swift --version
+          fi
+          echo "=== Final: $(swift --version | head -1) ==="
 
       - name: Install XcodeGen
         run: brew install xcodegen
