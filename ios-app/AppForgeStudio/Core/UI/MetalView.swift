@@ -93,6 +93,7 @@ struct MetalView: UIViewRepresentable {
         var onTouch3D: ((SIMD3<Float>, SIMD3<Float>) -> Void)?
         var onObjectSelected: ((Int?) -> Void)?
         var onSculptStroke: ((SculptPoint) -> Void)?
+        var onPinchExtrude: ((Float, Float) -> Void)?  // (distance, taper)
         
         private var lastPanLocation: CGPoint = .zero
         private var orbitSpherical: (theta: Float, phi: Float, radius: Float) = (0, .pi / 4, 5.0)
@@ -187,6 +188,28 @@ struct MetalView: UIViewRepresentable {
             default: break
             }
         }
+        
+        /// Shapr3D signature: two-finger vertical drag = extrude, horizontal = taper angle.
+        /// Works when a sketch profile is selected in CAD mode.
+        private var isExtruding: Bool = false
+        private var extrudeBaseDistance: Float = 0
+        
+        @objc private func handlePinchExtrude(_ gesture: UIPanGestureRecognizer) {
+            guard gesture.numberOfTouches >= 2 else { return }
+            let translation = gesture.translation(in: gesture.view)
+            
+            switch gesture.state {
+            case .began:
+                isExtruding = true
+                extrudeBaseDistance = 0
+            case .changed:
+                let distance = Float(-translation.y) * 0.2  // Up = extrude up
+                let taper = Float(translation.x) * 0.05      // Side = taper angle
+                onPinchExtrude?(distance, taper)
+            case .ended, .cancelled:
+                isExtruding = false
+            default: break
+            }
         
         @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
             let location = gesture.location(in: gesture.view)
