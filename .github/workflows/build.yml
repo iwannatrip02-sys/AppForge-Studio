@@ -20,13 +20,24 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Select Xcode
+      - name: Select Xcode (Swift 6.1+ required)
         run: |
-          # List available Xcode versions
-          ls -d /Applications/Xcode*.app 2>/dev/null || echo "No Xcode apps found"
-          # Use default Xcode (macOS-14 has at least Xcode 16.x)
-          echo "Current Xcode path: $(xcode-select -p)"
-          xcodebuild -version
+          echo "=== Available Xcodes ==="
+          ls -d /Applications/Xcode*.app 2>/dev/null
+          echo "=== Current Xcode ==="
+          xcode-select -p
+          swift --version
+          echo "=== Trying Xcode 16.x ==="
+          for xcode in /Applications/Xcode_16*.app; do
+            if [ -d "$xcode" ]; then
+              echo "Found: $xcode"
+              sudo xcode-select -s "$xcode"
+              echo "Selected: $(xcode-select -p)"
+              swift --version
+              break
+            fi
+          done
+          echo "=== Final Swift version ==="
           swift --version
 
       - name: Install XcodeGen
