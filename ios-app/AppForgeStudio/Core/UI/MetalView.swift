@@ -6,6 +6,7 @@ import QuartzCore
 import OSLog
 
 private let logger = Logger(subsystem: "com.appforgestudio", category: "MetalView")
+
 func perspective_fov(fov: Float, aspect: Float, near: Float, far: Float) -> float4x4 {
     let y = 1.0 / tan(fov * 0.5)
     let x = y / aspect
@@ -43,11 +44,21 @@ struct MetalView: UIViewRepresentable {
     @Binding var strokes: [BrushStroke]
     var renderer: SatinRenderer
     var animationEngine: AnimationEngine?
-    var playbackController: AnimationPlaybackController? = nil
+    var playbackController: AnimationPlaybackController?
     var onTouch3D: ((SIMD3<Float>, SIMD3<Float>) -> Void)?
+    var onObjectSelected: ((Int?) -> Void)?
+    var onSculptStroke: ((SculptPoint) -> Void)?
     var metalBackground: UIColor = .darkGray
     
-    func makeCoordinator() -> Coordinator { Coordinator(scene: $scene, strokes: $strokes, renderer: renderer, onTouch3D: onTouch3D, animationEngine: animationEngine) }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            scene: $scene, strokes: $strokes,
+            renderer: renderer, onTouch3D: onTouch3D,
+            onObjectSelected: onObjectSelected,
+            onSculptStroke: onSculptStroke,
+            animationEngine: animationEngine
+        )
+    }
     
     func makeUIView(context: Context) -> MTKView {
         let v = MTKView()
@@ -56,7 +67,11 @@ struct MetalView: UIViewRepresentable {
         v.backgroundColor = metalBackground
         v.enableSetNeedsDisplay = true
         v.isPaused = false
+        v.isMultipleTouchEnabled = true
+        
         renderer.updateScene(scene)
+        context.coordinator.setupGestures(v)
+        
         return v
     }
     
@@ -68,22 +83,186 @@ struct MetalView: UIViewRepresentable {
         uiView.setNeedsDisplay()
     }
     
-    class Coordinator: NSObject, MTKViewDelegate {
+    // MARK: - Coordinator
+    
+    class Coordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDelegate {
         var renderer: SatinRenderer
         var animationEngine: AnimationEngine?
         @Binding var scene: Scene3D
         @Binding var strokes: [BrushStroke]
         var onTouch3D: ((SIMD3<Float>, SIMD3<Float>) -> Void)?
+        var onObjectSelected: ((Int?) -> Void)?
+        var onSculptStroke: ((SculptPoint) -> Void)?
         
-        init(scene: Binding<Scene3D>, strokes: Binding<[BrushStroke]>, renderer: SatinRenderer, onTouch3D: ((SIMD3<Float>, SIMD3<Float>) -> Void)?, animationEngine: AnimationEngine? = nil) {
+        private var lastPanLocation: CGPoint = .zero
+        private var orbitSpherical: (theta: Float, phi: Float, radius: Float) = (0, .pi / 4, 5.0)
+        private var panTarget: SIMD3<Float> = .zero
+        private var isOrbiting = false
+        private var isPanning = false
+        private var isSculpting = false
+        private var currentBrush: BrushType = .grab
+        
+        init(scene: Binding<Scene3D>, strokes: Binding<[BrushStroke]>,
+             renderer: SatinRenderer,
+             onTouch3D: ((SIMD3<Float>, SIMD3<Float>) -> Void)?,
+             onObjectSelected: ((Int?) -> Void)?,
+             onSculptStroke: ((SculptPoint) -> Void)?,
+             animationEngine: AnimationEngine? = nil) {
             self._scene = scene
             self._strokes = strokes
             self.renderer = renderer
             self.onTouch3D = onTouch3D
+            self.onObjectSelected = onObjectSelected
+            self.onSculptStroke = onSculptStroke
             self.animationEngine = animationEngine
         }
         
-        func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+        // MARK: - Gesture Setup
+        
+        func setupGestures(_ view: MTKView) {
+            let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+            pan.delegate = self
+            pan.maximumNumberOfTouches = 2
+            view.addGestureRecognizer(pan)
+            
+            let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+            pinch.delegate = self
+            view.addGestureRecognizer(pinch)
+            
+            let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+            tap.delegate = self
+            view.addGestureRecognizer(tap)
+        }
+        
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            true
+        }
+        
+        // MARK: - Gesture Handlers
+        
+        @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+            let location = gesture.location(in: gesture.view)
+            let translation = gesture.translation(in: gesture.view)
+            
+            switch gesture.state {
+            case .began:
+                lastPanLocation = location
+                isOrbiting = (gesture.numberOfTouches == 1)
+                isPanning = (gesture.numberOfTouches == 2)
+                
+            case .changed:
+                let dx = Float(translation.x) * 0.005
+                let dy = Float(translation.y) * 0.005
+                
+                if isOrbiting {
+                    orbitSpherical.theta += dx
+                    orbitSpherical.phi -= dy
+                    orbitSpherical.phi = max(0.1, min(.pi - 0.1, orbitSpherical.phi))
+                    updateCameraOrbit()
+                } else if isPanning {
+                    panTarget.x -= dx * orbitSpherical.radius * 0.5
+                    panTarget.y += dy * orbitSpherical.radius * 0.5
+                    updateCameraOrbit()
+                }
+                
+                gesture.setTranslation(.zero, in: gesture.view)
+                
+            case .ended, .cancelled:
+                isOrbiting = false
+                isPanning = false
+                isSculpting = false
+                
+            default: break
+            }
+        }
+        
+        @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+            let scale = Float(gesture.scale)
+            switch gesture.state {
+            case .changed:
+                orbitSpherical.radius /= max(0.1, scale)
+                orbitSpherical.radius = max(0.5, min(50.0, orbitSpherical.radius))
+                updateCameraOrbit()
+                gesture.scale = 1.0
+            default: break
+            }
+        }
+        
+        @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+            let location = gesture.location(in: gesture.view)
+            guard let view = gesture.view as? MTKView else { return }
+            let size = view.bounds.size
+            
+            let rayOrigin = scene.camera.position
+            let aspect = Float(size.width / max(size.height, 1))
+            let ndc = SIMD2<Float>(
+                (2.0 * Float(location.x) / Float(size.width) - 1.0) * aspect,
+                1.0 - 2.0 * Float(location.y) / Float(size.height)
+            )
+            let fovRad = scene.camera.fov * .pi / 180
+            let halfH = tan(fovRad * 0.5)
+            let halfW = halfH * aspect
+            
+            let forward = simd_normalize(scene.camera.target - scene.camera.position)
+            let right = simd_normalize(simd_cross(forward, scene.camera.up))
+            let up = simd_cross(right, forward)
+            
+            let rayDir = simd_normalize(forward + right * ndc.x * halfW + up * ndc.y * halfH)
+            
+            var closestDist: Float = .greatestFiniteMagnitude
+            var closestIndex: Int?
+            
+            for (i, model) in scene.models.enumerated() {
+                for mesh in model.meshes {
+                    for j in stride(from: 0, to: mesh.indices.count, by: 3) {
+                        guard j + 2 < mesh.indices.count else { break }
+                        let i0 = Int(mesh.indices[j])
+                        let i1 = Int(mesh.indices[j+1])
+                        let i2 = Int(mesh.indices[j+2])
+                        guard i0 < mesh.vertices.count, i1 < mesh.vertices.count, i2 < mesh.vertices.count else { continue }
+                        if let hit = rayTriangleIntersect(
+                            rayOrigin: rayOrigin, rayDir: rayDir,
+                            v0: mesh.vertices[i0].position,
+                            v1: mesh.vertices[i1].position,
+                            v2: mesh.vertices[i2].position
+                        ) {
+                            let dist = simd_distance(rayOrigin, hit)
+                            if dist < closestDist {
+                                closestDist = dist
+                                closestIndex = i
+                            }
+                        }
+                    }
+                }
+            }
+            
+            onObjectSelected?(closestIndex)
+            if let hitPos = closestIndex != nil ? scene.models[closestIndex!].position : nil {
+                onTouch3D?(hitPos, rayDir)
+            }
+        }
+        
+        // MARK: - Camera
+        
+        private func updateCameraOrbit() {
+            let theta = orbitSpherical.theta
+            let phi = orbitSpherical.phi
+            let r = orbitSpherical.radius
+            
+            let x = panTarget.x + r * sin(phi) * cos(theta)
+            let y = panTarget.y + r * cos(phi)
+            let z = panTarget.z + r * sin(phi) * sin(theta)
+            
+            scene.camera.position = SIMD3<Float>(x, y, z)
+            scene.camera.target = panTarget
+        }
+        
+        // MARK: - MTKViewDelegate
+        
+        func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+            let aspect = Float(size.width / max(size.height, 1))
+            renderer.aspectRatio = aspect
+        }
         
         func draw(in view: MTKView) {
             renderer.updateScene(scene)
