@@ -1,0 +1,41 @@
+{
+  "sourceLanguage" : "es",
+  "strings" : {
+    "Deshacer" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Undo" } }
+      }
+    },
+    "Rehacer" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Redo" } }
+      }
+    },
+    "Resetear vista" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reset View" } }
+      }
+    },
+    "Herramienta %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Tool %@" } }
+      }
+    },
+    "No hay modelo para exportar" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No model to export" } }
+      }
+    },
+    "Formato no soportado" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unsupported format" } }
+      }
+    },
+    "Error al escribir: %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Write error: %@" } }
+      }
+    }
+  },
+  "version" : "1.0"
+}

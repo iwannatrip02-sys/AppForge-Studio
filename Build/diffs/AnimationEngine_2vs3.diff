@@ -1,0 +1,153 @@
+--- C:\Users\USUARIO\Projects\appforge-studio\ios-app\AppForgeStudio\Core\Managers\AnimationEngine.swift
++++ C:\Users\USUARIO\Projects\appforge-studio\ios-app\AppForgeStudio\Sources\AnimationEngine\AnimationEngine.swift
+@@ -2,6 +2,7 @@
+ import simd
+ import QuartzCore
+ import Combine
++import OSLog
+ 
+ // MARK: - Keyframe
+ struct Keyframe<T> {
+@@ -93,6 +94,8 @@
+ // MARK: - AnimationEngine
+ @MainActor
+ class AnimationEngine: ObservableObject {
++    private let logger = Logger(subsystem: "com.appforgestudio", category: "AnimationEngine")
++
+     @Published var isPlaying = false
+     @Published var currentTime: Float = 0
+     @Published var selectedClipName: String = ""
+@@ -123,6 +126,7 @@
+     }
+ 
+     var onFrame: ((Float, [String: simd_float4x4]) -> Void)?
++    var onFrameTick: (() -> Void)?
+ 
+     init() {}
+ 
+@@ -215,28 +219,39 @@
+ 
+     func evaluateAnimation(deltaTime: Float) -> [String: simd_float4x4] {
+         let duration = currentClipDuration
+-        guard duration > 0 else { return [:] }
++        guard duration > 0, isPlaying else { return [:] }
+ 
+         var newTime = currentTime + deltaTime
+ 
+         if let clip = clips[selectedClipName], clip.loop {
+             newTime = newTime.truncatingRemainder(dividingBy: duration)
+             if newTime < 0 { newTime += duration }
++        } else if newTime >= duration {
++            newTime = duration
++            isPlaying = false
+         } else {
+-            newTime = max(0, min(newTime, duration))
++            newTime = max(0, newTime)
+         }
+ 
+         currentTime = newTime
+         let transforms = evaluate(at: newTime)
+         currentTransforms = transforms
+         onFrame?(currentTime, transforms)
++        onFrameTick?()
+         return transforms
+     }
+ 
+     func evaluate(at time: Float) -> [String: simd_float4x4] {
+         var result: [String: simd_float4x4] = [:]
+ 
+-        let groups = Dictionary(grouping: keyframes) { $0.modelName }
++        let relevantKeyframes: [KeyframeEntry]
++        if !selectedClipName.isEmpty {
++            relevantKeyframes = keyframes.filter { $0.modelName == selectedClipName }
++        } else {
++            relevantKeyframes = keyframes
++        }
++
++        let groups = Dictionary(grouping: relevantKeyframes) { $0.modelName }
+ 
+         for (modelName, entries) in groups {
+             let positionKeys = entries.filter { $0.type == "posicion" }.sorted { $0.time < $1.time }
+@@ -271,12 +286,22 @@
+         }
+ 
+         guard let p = prev, let n = next else {
+-            if let p = prev { return p.positionValue }
+-            if let n = next { return n.positionValue }
++            if let p = prev {
++                logger.warning("Position interpolation at time \(time): using last previous key at \(p.time)")
++                return p.positionValue
++            }
++            if let n = next {
++                logger.warning("Position interpolation at time \(time): using first next key at \(n.time)")
++                return n.positionValue
++            }
++            logger.warning("Position interpolation at time \(time): no keys available, returning zero")
+             return keys.last?.positionValue ?? .zero
+         }
+ 
+-        if p.time == n.time { return p.positionValue }
++        if p.time == n.time {
++            logger.warning("Zero division avoided in position interpolation at time \(time)")
++            return p.positionValue
++        }
+         let rawT = (time - p.time) / (n.time - p.time)
+         let t = p.easingEnum.apply(rawT)
+         return simd_mix(p.positionValue, n.positionValue, t)
+@@ -295,12 +320,22 @@
+         }
+ 
+         guard let p = prev, let n = next else {
+-            if let p = prev { return p.rotationValue }
+-            if let n = next { return n.rotationValue }
++            if let p = prev {
++                logger.warning("Rotation interpolation at time \(time): using last previous key at \(p.time)")
++                return p.rotationValue
++            }
++            if let n = next {
++                logger.warning("Rotation interpolation at time \(time): using first next key at \(n.time)")
++                return n.rotationValue
++            }
++            logger.warning("Rotation interpolation at time \(time): no keys available, returning identity")
+             return keys.last?.rotationValue ?? simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+         }
+ 
+-        if p.time == n.time { return p.rotationValue }
++        if p.time == n.time {
++            logger.warning("Zero division avoided in rotation interpolation at time \(time)")
++            return p.rotationValue
++        }
+         let rawT = (time - p.time) / (n.time - p.time)
+         let t = p.easingEnum.apply(rawT)
+         return simd_slerp(p.rotationValue, n.rotationValue, t)
+@@ -319,17 +354,26 @@
+         }
+ 
+         guard let p = prev, let n = next else {
+-            if let p = prev { return p.scaleValue }
+-            if let n = next { return n.scaleValue }
++            if let p = prev {
++                logger.warning("Scale interpolation at time \(time): using last previous key at \(p.time)")
++                return p.scaleValue
++            }
++            if let n = next {
++                logger.warning("Scale interpolation at time \(time): using first next key at \(n.time)")
++                return n.scaleValue
++            }
++            logger.warning("Scale interpolation at time \(time): no keys available, returning identity")
+             return keys.last?.scaleValue ?? SIMD3<Float>(1, 1, 1)
+         }
+ 
+-        if p.time == n.time { return p.scaleValue }
++        if p.time == n.time {
++            logger.warning("Zero division avoided in scale interpolation at time \(time)")
++            return p.scaleValue
++        }
+         let rawT = (time - p.time) / (n.time - p.time)
+         let t = p.easingEnum.apply(rawT)
+         return simd_mix(p.scaleValue, n.scaleValue, t)
+     }
+-}
+ 
+ // MARK: - simd_float4x4 Extensions
+ private extension simd_float4x4 {

@@ -1,0 +1,30 @@
+--- C:\Users\USUARIO\Projects\appforge-studio\ios-app\AppForgeStudio\Core\Managers\PaintRenderer.swift
++++ C:\Users\USUARIO\Projects\appforge-studio\ios-app\AppForgeStudio\Sources\RenderEngine\PaintRenderer.swift
+@@ -1,7 +1,9 @@
+ import Foundation
+ import Metal
+ import MetalKit
++import OSLog
+ 
++private let logger = Logger(subsystem: "com.appforgestudio", category: "PaintRenderer")
+ class PaintRenderer {
+     let device: MTLDevice
+     let commandQueue: MTLCommandQueue?
+@@ -12,7 +14,7 @@
+     
+     init?(device: MTLDevice) {
+         self.device = device
+-        guard let commandQueue = device.makeCommandQueue() else { print("Warning: Could not create command queue. Paint disabled."); self.commandQueue = nil; return nil; }; self.commandQueue = commandQueue
++        guard let commandQueue = device.makeCommandQueue() else { logger.info("Warning: Could not create command queue. Paint disabled."); self.commandQueue = nil; return nil; }; self.commandQueue = commandQueue
+         guard setupPipelines() else { return nil }
+         setupDepthState()
+         createPaintTexture(width: 2048, height: 2048)
+@@ -20,7 +22,7 @@
+     
+     private func setupPipelines() -> Bool {
+         guard let library = device.makeDefaultLibrary() else {
+-            print("Warning: No Metal library found. Paint rendering disabled.")
++            logger.info("Warning: No Metal library found. Paint rendering disabled.")
+             return false
+         }
+         
