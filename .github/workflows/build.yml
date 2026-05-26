@@ -1,0 +1,92 @@
+name: Build AppForgeStudio for iPad
+
+on:
+  push:
+    branches: ["main", "develop"]
+    paths:
+      - 'ios-app/AppForgeStudio/**'
+      - '.github/workflows/build.yml'
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build AppForgeStudio
+    runs-on: macos-14
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.0.app
+          xcodebuild -version
+          swift --version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: ios-app/AppForgeStudio
+        run: |
+          xcodegen generate
+          echo "=== Generated project ==="
+          ls -la *.xcodeproj 2>/dev/null || echo "No xcodeproj found"
+
+      - name: Resolve SPM dependencies (OCCTSwift + Satin)
+        working-directory: ios-app/AppForgeStudio
+        run: |
+          if [ -f "*.xcodeproj/project.pbxproj" ]; then
+            xcodebuild -resolvePackageDependencies -project AppForgeStudio.xcodeproj -scheme AppForgeStudio -destination 'generic/platform=iOS'
+          else
+            swift package resolve
+          fi
+
+      - name: Build for iOS (iPad)
+        working-directory: ios-app/AppForgeStudio
+        run: |
+          if [ -f "AppForgeStudio.xcodeproj/project.pbxproj" ]; then
+            xcodebuild build \
+              -project AppForgeStudio.xcodeproj \
+              -scheme AppForgeStudio \
+              -destination 'generic/platform=iOS' \
+              -configuration Debug \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=NO \
+              2>&1 | xcpretty || xcodebuild build \
+              -project AppForgeStudio.xcodeproj \
+              -scheme AppForgeStudio \
+              -destination 'generic/platform=iOS' \
+              -configuration Debug \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=NO 2>&1 | tail -100
+          else
+            swift build --configuration debug 2>&1 | tail -100
+          fi
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: ~/Library/Logs/**/*.log
+
+      - name: Create .app artifact
+        if: success()
+        working-directory: ios-app/AppForgeStudio
+        run: |
+          mkdir -p artifacts
+          find ~/Library/Developer/Xcode/DerivedData -name "*.app" -path "*/Build/Products/*" -exec cp -R {} artifacts/ \; 2>/dev/null || echo "No .app found"
+          ls -la artifacts/ 2>/dev/null || echo "No artifacts"
+
+      - name: Upload .app artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AppForgeStudio-iOS
+          path: ios-app/AppForgeStudio/artifacts/
