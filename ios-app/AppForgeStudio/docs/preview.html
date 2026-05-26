@@ -1,186 +1,114 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AppForge Studio v2.0 — Preview</title>
+<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=1024"><title>AppForge Studio v2.0 — Shapr3D-style</title>
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { background: #1a1a2e; font-family: -apple-system, sans-serif; color: #e0e0e0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
-.preview { width: 1024px; height: 768px; background: #16213e; border-radius: 16px; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.5); border: 1px solid #2a2a4a; }
-.toolbar { height: 48px; background: #1a1a3e; display: flex; align-items: center; padding: 0 12px; gap: 8px; border-bottom: 1px solid #2a2a4a; }
-.toolbar .btn { padding: 6px 12px; border-radius: 6px; border: 1px solid #3a3a5a; background: #2a2a4a; color: #ccc; font-size: 12px; cursor: pointer; }
-.toolbar .btn.active { background: #3b82f6; border-color: #3b82f6; color: white; }
-.toolbar .btn.danger { background: transparent; border-color: #ef4444; color: #ef4444; }
-.toolbar .separator { width: 1px; height: 24px; background: #3a3a5a; margin: 0 4px; }
-.main { flex: 1; display: flex; }
-.viewport { flex: 1; background: radial-gradient(ellipse at center, #1a2744 0%, #0f172a 100%); position: relative; }
-.viewport .grid { position: absolute; inset: 0; background-image: linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px); background-size: 40px 40px; }
-.viewport .box3d { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotateX(20deg) rotateY(-30deg); width: 200px; height: 200px; perspective: 800px; }
-.viewport .box3d .face { position: absolute; width: 200px; height: 200px; border: 1px solid rgba(59,130,246,0.5); background: rgba(59,130,246,0.08); }
-.viewport .box3d .front { transform: translateZ(100px); background: rgba(59,130,246,0.15); }
-.viewport .box3d .back { transform: rotateY(180deg) translateZ(100px); }
-.viewport .box3d .right { transform: rotateY(90deg) translateZ(100px); }
-.viewport .box3d .left { transform: rotateY(-90deg) translateZ(100px); }
-.viewport .box3d .top { transform: rotateX(90deg) translateZ(100px); }
-.viewport .box3d .bottom { transform: rotateX(-90deg) translateZ(100px); }
-.viewport .gizmo { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) translate(100px, -80px); }
-.viewport .gizmo .arrow { position: absolute; width: 2px; height: 60px; background: #ef4444; top: 0; left: 0; transform-origin: bottom center; }
-.viewport .gizmo .arrow.x { background: #ef4444; transform: rotate(0deg); }
-.viewport .gizmo .arrow.y { background: #22c55e; transform: rotate(90deg); }
-.viewport .gizmo .arrow.z { background: #3b82f6; transform: rotate(-45deg); width: 1px; opacity: 0.7; }
-.view-cube { position: absolute; bottom: 20px; right: 20px; width: 90px; height: 90px; perspective: 400px; }
-.view-cube .vc { width: 90px; height: 90px; transform-style: preserve-3d; }
-.view-cube .vc .vc-face { position: absolute; width: 90px; height: 90px; border: 1px solid rgba(255,255,255,0.15); background: rgba(30,30,50,0.5); display: flex; align-items: center; justify-content: center; font-size: 10px; color: rgba(255,255,255,0.4); border-radius: 4px; }
-.view-cube .vc .vc-front { transform: translateZ(45px); } 
-.view-cube .vc .vc-back { transform: rotateY(180deg) translateZ(45px); }
-.view-cube .vc .vc-right { transform: rotateY(90deg) translateZ(45px); }
-.view-cube .vc .vc-left { transform: rotateY(-90deg) translateZ(45px); }
-.view-cube .vc .vc-top { transform: rotateX(90deg) translateZ(45px); }
-.view-cube .vc .vc-bottom { transform: rotateX(-90deg) translateZ(45px); }
-.sidebar { width: 260px; background: #12122a; border-left: 1px solid #2a2a4a; display: flex; flex-direction: column; }
-.sidebar .section { padding: 12px; border-bottom: 1px solid #1a1a3a; }
-.sidebar .section h3 { font-size: 11px; text-transform: uppercase; color: #666; margin-bottom: 8px; letter-spacing: 1px; }
-.sidebar .section .row { display: flex; gap: 4px; flex-wrap: wrap; }
-.sidebar .tool-chip { padding: 4px 10px; border-radius: 4px; border: 1px solid #2a2a4a; font-size: 11px; color: #aaa; cursor: pointer; }
-.sidebar .tool-chip.active { background: #3b82f6; border-color: #3b82f6; color: white; }
-.sidebar .param { margin: 6px 0; }
-.sidebar .param label { font-size: 10px; color: #777; display: block; margin-bottom: 2px; }
-.sidebar .param input { width: 100%; accent-color: #3b82f6; }
-.sidebar .status { font-size: 10px; color: #555; padding: 8px 12px; background: #0a0a1a; border-radius: 4px; margin-top: auto; }
-.bottom-bar { height: 44px; background: #1a1a3e; display: flex; align-items: center; padding: 0 12px; gap: 8px; border-top: 1px solid #2a2a4a; }
-.bottom-bar .mode { padding: 6px 16px; border-radius: 6px; border: 1px solid #3a3a5a; font-size: 12px; cursor: pointer; color: #999; }
-.bottom-bar .mode.active { background: #3b82f6; border-color: #3b82f6; color: white; }
-.info-overlay { position: absolute; top: 12px; left: 12px; display: flex; flex-direction: column; gap: 4px; }
-.info-overlay .chip { padding: 4px 10px; border-radius: 4px; background: rgba(0,0,0,0.6); font-size: 10px; color: #888; border: 1px solid rgba(255,255,255,0.05); }
-.info-overlay .chip span { color: #3b82f6; }
-.annotation { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) translate(120px, -50px); background: rgba(0,0,0,0.8); padding: 6px 10px; border-radius: 4px; font-size: 10px; color: #aaa; border: 1px solid #333; pointer-events: none; }
-.annotation::before { content: ""; position: absolute; left: -20px; top: 50%; width: 16px; height: 1px; background: #555; }
-</style>
-</head>
-<body>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0D1117;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#E6EDF3;display:flex;justify-content:center;align-items:center;min-height:100vh}
+.preview{width:1100px;height:750px;background:#0D1117;display:flex;border-radius:12px;overflow:hidden;box-shadow:0 0 60px rgba(0,0,0,0.6)}
+.left-bar{width:52px;background:#161B22;display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:2px;border-right:1px solid #30363D}
+.left-bar .logo{color:#3B82F6;font-size:22px;margin-bottom:16px}
+.left-bar .tool{width:40px;height:40px;display:flex;align-items:center;justify-content:center;color:#8B949E;font-size:16px;border-radius:8px;cursor:pointer}
+.left-bar .tool.active{background:rgba(59,130,246,0.2);color:#fff}
+.left-bar .divider{width:24px;height:1px;background:#30363D;margin:8px 0}
+.main{flex:1;display:flex}
+.viewport{flex:1;background:radial-gradient(ellipse at 40% 40%, #1a2744 0%, #0D1117 100%);position:relative}
+.viewport .grid{position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,0.02) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.02) 1px,transparent 1px);background-size:50px 50px;background-position:center}
+.viewport .box3d{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotateX(25deg) rotateY(-35deg);width:180px;height:140px;perspective:800px;transform-style:preserve-3d}
+.viewport .box3d .face{position:absolute;border:1px solid rgba(59,130,246,0.3);background:rgba(59,130,246,0.06)}
+.viewport .box3d .front{width:180px;height:140px;transform:translateZ(60px);background:rgba(59,130,246,0.1)}
+.viewport .box3d .top{width:180px;height:120px;transform:rotateX(90deg) translateZ(-70px);transform-origin:top}
+.viewport .box3d .right{width:120px;height:140px;transform:rotateY(90deg) translateZ(90px);transform-origin:right}
+.stats{position:absolute;top:12px;right:12px;display:flex;gap:6px}
+.stats .badge{padding:3px 8px;border-radius:3px;background:rgba(22,27,34,0.9);font-size:9px;color:#484F58;font-weight:500}
+.floating-tools{position:absolute;bottom:70px;left:16px;background:rgba(28,35,51,0.95);border-radius:10px;padding:10px 12px;border:1px solid #30363D;box-shadow:0 8px 24px rgba(0,0,0,0.5)}
+.floating-tools .t-label{font-size:11px;font-weight:600;color:#E6EDF3;margin-bottom:6px}
+.floating-tools .params{display:flex;gap:4px}
+.floating-tools .chip{padding:3px 8px;border-radius:4px;font-size:10px;color:#8B949E;background:#21262D;cursor:pointer}
+.floating-tools .chip.active{background:#3B82F6;color:#fff}
+.right-panel{width:220px;background:#161B22;border-left:1px solid #30363D;padding:12px;overflow-y:auto}
+.right-panel h3{font-size:10px;text-transform:uppercase;color:#484F58;margin-bottom:8px;letter-spacing:1px}
+.right-panel .prop-group{margin-bottom:14px}
+.right-panel .prop-group label{font-size:10px;color:#8B949E;display:block;margin-bottom:3px}
+.right-panel .prop-group .value{font-size:11px;color:#E6EDF3;font-weight:500;text-align:right}
+.right-panel .prop-group .row{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.right-panel input[type=range]{width:100%;accent-color:#3B82F6;margin:4px 0}
+.right-panel select{background:#21262D;color:#E6EDF3;border:1px solid #30363D;border-radius:4px;padding:2px 6px;font-size:10px}
+.bottom-bar{position:absolute;bottom:0;left:0;right:0;height:48px;background:rgba(22,27,34,0.95);border-top:1px solid #30363D;display:flex;align-items:center;padding:0 12px}
+.bottom-bar .mode{display:flex;flex-direction:column;align-items:center;justify-content:center;width:56px;height:40px;border-radius:8px;cursor:pointer;color:#8B949E;font-size:9px;gap:1px}
+.bottom-bar .mode .icon{font-size:16px}
+.bottom-bar .mode.active{color:#fff;background:rgba(59,130,246,0.1)}
+.bottom-bar .spacer{flex:1}
+.bottom-bar .toggle{width:36px;height:36px;display:flex;align-items:center;justify-content:center;color:#484F58;font-size:14px;cursor:pointer}
+.tooltip{position:absolute;background:#1C2333;color:#E6EDF3;padding:4px 8px;border-radius:4px;font-size:9px;pointer-events:none;white-space:nowrap}
+</style></head><body>
 <div class="preview">
-  <!-- TOP TOOLBAR -->
-  <div class="toolbar">
-    <div class="btn" style="font-weight:bold;font-size:13px;">AppForge Studio</div>
-    <div class="separator"></div>
-    <div class="btn">↩ Undo</div>
-    <div class="btn">↪ Redo</div>
-    <div class="separator"></div>
-    <div class="btn active">📐 Seleccionar</div>
-    <div class="btn">📏 Medir</div>
-    <div class="separator"></div>
-    <div class="btn">📥 Import</div>
-    <div class="btn">📤 Export</div>
-    <div style="flex:1"></div>
-    <div class="btn" style="font-size:10px;">Grid: 1mm</div>
-    <div class="btn" style="font-size:10px;">Snap ✓</div>
-    <div class="btn danger" style="font-size:10px;">🗑</div>
+  <div class="left-bar">
+    <div class="logo">◇</div>
+    <div class="tool active" title="Select">↖</div>
+    <div class="tool" title="Sketch">✎</div>
+    <div class="tool" title="Extrude">↑</div>
+    <div class="tool" title="Revolve">↻</div>
+    <div class="tool" title="Fillet">◐</div>
+    <div class="tool" title="Chamfer">◺</div>
+    <div class="tool" title="Shell">▣</div>
+    <div class="divider"></div>
+    <div class="tool" title="Import">↓</div>
+    <div class="tool" title="Export">↑</div>
   </div>
-
-  <!-- MAIN: VIEWPORT + SIDEBAR -->
-  <div class="main">
+  <div style="flex:1;position:relative">
     <div class="viewport">
       <div class="grid"></div>
-      <!-- 3D object preview -->
       <div class="box3d">
         <div class="face front"></div>
-        <div class="face back"></div>
-        <div class="face right"></div>
-        <div class="face left"></div>
         <div class="face top"></div>
-        <div class="face bottom"></div>
+        <div class="face right"></div>
       </div>
-      <!-- Gizmo arrows -->
-      <div class="gizmo">
-        <div class="arrow x" style="transform: translateX(-1px)"></div>
-        <div class="arrow y" style="transform: translateX(1px) rotate(90deg)"></div>
-        <div class="arrow z" style="transform: translateX(-2px) rotate(-45deg); height:30px;"></div>
+      <div class="stats">
+        <span class="badge">OCCT 8.0</span>
+        <span class="badge">60 FPS</span>
+        <span class="badge">PBR</span>
       </div>
-      <!-- Annotations -->
-      <div class="annotation" style="margin-top:-10px;">Gizmos 3D (drag para mover)</div>
-      <div class="annotation" style="margin-top:40px;margin-left:-40px;">Objeto 3D (B-rep OCCT)</div>
-      <!-- ViewCube -->
-      <div class="view-cube">
-        <div class="vc" style="transform: rotateX(-20deg) rotateY(30deg);">
-          <div class="vc-face vc-front">FRONT</div>
-          <div class="vc-face vc-back">BACK</div>
-          <div class="vc-face vc-right">RIGHT</div>
-          <div class="vc-face vc-left">LEFT</div>
-          <div class="vc-face vc-top">TOP</div>
-          <div class="vc-face vc-bottom">BOT</div>
+      <div class="floating-tools">
+        <div class="t-label">Extrude</div>
+        <div style="display:flex;gap:20px;font-size:10px;color:#8B949E;margin-top:4px">
+          <div>Distance <span style="color:#E6EDF3;font-weight:500;margin-left:4px">25.0 mm</span></div>
+          <div>Direction <span style="color:#E6EDF3;font-weight:500;margin-left:4px">Y+</span></div>
+          <div>Taper <span style="color:#E6EDF3;font-weight:500;margin-left:4px">0°</span></div>
         </div>
       </div>
-      <!-- Info chips -->
-      <div class="info-overlay">
-        <div class="chip">Vertices: <span>12,448</span></div>
-        <div class="chip">Triangles: <span>24,896</span></div>
-        <div class="chip">Kernel: <span>OCCT 8.0</span></div>
-        <div class="chip">Render: <span>Metal PBR</span></div>
-      </div>
-    </div>
-
-    <!-- SIDEBAR -->
-    <div class="sidebar">
-      <div class="section">
-        <h3>🔧 Herramientas CAD</h3>
-        <div class="row">
-          <div class="tool-chip active">Selec</div>
-          <div class="tool-chip">Sketch</div>
-          <div class="tool-chip">Extruir</div>
-          <div class="tool-chip">Revolve</div>
-          <div class="tool-chip">Fillet</div>
-          <div class="tool-chip">Chamfer</div>
-          <div class="tool-chip">Shell</div>
-          <div class="tool-chip">Loft</div>
-          <div class="tool-chip">Sweep</div>
-          <div class="tool-chip">Boolean</div>
-        </div>
-      </div>
-      <div class="section">
-        <h3>📐 Parámetros</h3>
-        <div class="param"><label>Extrude: 25.0 mm</label><input type="range" value="60"></div>
-        <div class="param"><label>Fillet: 2.5 mm</label><input type="range" value="30"></div>
-        <div class="param"><label>Chamfer: 1.0 mm</label><input type="range" value="15"></div>
-        <div class="param"><label>Shell: 2.0 mm</label><input type="range" value="40"></div>
-      </div>
-      <div class="section">
-        <h3>📦 CSG Boolean</h3>
-        <div class="row">
-          <div class="tool-chip active">Shape A</div>
-          <div class="tool-chip">Shape B</div>
-          <div class="tool-chip" style="background:#22c55e;color:white;font-weight:bold;">+ Union</div>
-          <div class="tool-chip">- Subtract</div>
-          <div class="tool-chip">&amp; Intersect</div>
-        </div>
-      </div>
-      <div class="section">
-        <h3>🎨 Modo</h3>
-        <div class="row" style="flex-direction:column;gap:4px;">
-          <div class="tool-chip active">Shaded</div>
-          <div class="tool-chip">Wireframe</div>
-          <div class="tool-chip">Shaded + Edges</div>
-          <div class="tool-chip">X-Ray</div>
-        </div>
-      </div>
-      <div class="status">
-        OCCT 8.0.0 · Satin 13.0.0 · iOS 17+<br>
-        Metal PBR + IBL · 60 FPS
+      <div class="bottom-bar">
+        <div class="toggle" style="color:#3B82F6">☰</div>
+        <div class="spacer"></div>
+        <div class="mode active"><span class="icon">▣</span>CAD</div>
+        <div class="mode"><span class="icon">🖐</span>Sculpt</div>
+        <div class="mode"><span class="icon">🎨</span>Paint</div>
+        <div class="mode"><span class="icon">▶</span>Animate</div>
+        <div class="mode"><span class="icon">📷</span>Render</div>
+        <div class="spacer"></div>
+        <div class="toggle" style="color:#3B82F6">☰</div>
       </div>
     </div>
   </div>
-
-  <!-- BOTTOM MODE BAR -->
-  <div class="bottom-bar">
-    <div class="mode active">📐 CAD</div>
-    <div class="mode">🖐 Esculpir</div>
-    <div class="mode">🎨 Pintar</div>
-    <div class="mode">🎬 Animar</div>
-    <div class="mode">📤 Exportar</div>
-    <div class="mode">⚙ Render</div>
-    <div style="flex:1"></div>
-    <div class="btn" style="font-size:10px;">Foco: Extrusión paramétrica + Boolean</div>
+  <div class="right-panel">
+    <h3>Properties</h3>
+    <div class="prop-group">
+      <div class="row"><label>Distance</label><span class="value">25.0 mm</span></div>
+      <input type="range" value="60">
+    </div>
+    <div class="prop-group">
+      <div class="row"><label>Direction</label>
+        <select><option>Y+</option><option>Y-</option><option>X+</option></select>
+      </div>
+    </div>
+    <div class="prop-group">
+      <div class="row"><label>Taper Angle</label><span class="value">0°</span></div>
+      <input type="range" value="0">
+    </div>
+    <div style="height:1px;background:#30363D;margin:10px 0"></div>
+    <div class="prop-group">
+      <div class="row"><label>Both Sides</label><input type="checkbox" style="accent-color:#3B82F6"></div>
+    </div>
+    <div class="prop-group">
+      <div class="row"><label>Solid</label><input type="checkbox" checked style="accent-color:#3B82F6"></div>
+    </div>
   </div>
 </div>
-</body>
-</html>
+</body></html>
