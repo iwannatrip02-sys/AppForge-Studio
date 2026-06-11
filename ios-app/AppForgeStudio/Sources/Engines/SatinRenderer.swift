@@ -85,6 +85,8 @@ class SatinRenderer: NSObject, ObservableObject {
     func setSculptEngine(_ engine: SculptEngine) {
         self.sculptEngine = engine
     }
+    /// Number of times rebuildSceneFrom() has been called. Testability hook (F0 regression test).
+    private(set) var rebuildCount: Int = 0
     private var lastFrameTime: CFTimeInterval = 0
     private var sceneObjectCount: Int = 0
     private var modelNameToObject: [String: Object] = [:]
@@ -563,6 +565,7 @@ class SatinRenderer: NSObject, ObservableObject {
     }
 
     private func rebuildSceneFrom(_ scene3D: Scene3D) {
+        rebuildCount += 1
         scene = Object()
         sceneObjectCount = scene3D.models.count
         pbrRenderables.removeAll()

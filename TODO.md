@@ -1,5 +1,5 @@
 # AppForge Studio — TODO.md
-> Updated: 2026-05-26 04:30 UTC
+> Updated: 2026-05-29 02:06 UTC
 > Post-compilation-fix v1: los 7 bugs de compilacion resueltos. Satin 13.0.0. Shape unificado sin conflictos de tipos.
 
 ## Foco actual
@@ -21,6 +21,8 @@
 - [ ] Corregir BUG5: normal matrix bajo escala no-uniforme
 - [ ] Corregir BUG7: grab deformer dirección contraria
 - [ ] Corregir BUG9: rebuildSceneFrom llamado cada frame (60 allocs/seg)
+- Actualizar GOTCHI.md: Stack local dice Satin 0.3.0 pero Package.swift usa 13.0.0
+- Resolver Hi-Rez-Satin/ untracked: es symlink roto, submodule, o archivo corrupto?
 
 ## Bloqueos
 - Sin Mac para compilar localmente (Windows 11)
