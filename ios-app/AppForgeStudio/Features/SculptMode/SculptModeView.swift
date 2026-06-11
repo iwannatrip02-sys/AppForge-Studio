@@ -42,6 +42,35 @@ struct SculptModeView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             HStack(spacing: 12) {
+                // Undo/Redo buttons connected to SculptEngine
+                Button(action: {
+                    var verts = canvasVM.currentMesh.vertices
+                    if renderer.sculptEngine?.undo(&verts) == true {
+                        var mesh = canvasVM.currentMesh
+                        mesh.vertices = verts
+                        canvasVM.currentMesh = mesh  // triggers GPU upload via setter
+                    }
+                }) {
+                    Image(systemName: "arrow.uturn.backward")
+                        .font(.system(size: 14))
+                }
+                .disabled(!(renderer.sculptEngine?.canUndo ?? false))
+                .opacity((renderer.sculptEngine?.canUndo ?? false) ? 1.0 : 0.4)
+
+                Button(action: {
+                    var verts = canvasVM.currentMesh.vertices
+                    if renderer.sculptEngine?.redo(&verts) == true {
+                        var mesh = canvasVM.currentMesh
+                        mesh.vertices = verts
+                        canvasVM.currentMesh = mesh
+                    }
+                }) {
+                    Image(systemName: "arrow.uturn.forward")
+                        .font(.system(size: 14))
+                }
+                .disabled(!(renderer.sculptEngine?.canRedo ?? false))
+                .opacity((renderer.sculptEngine?.canRedo ?? false) ? 1.0 : 0.4)
+
                 if subdivisionVM.isSubdividing {
                     ProgressView(value: subdivisionVM.progress).frame(width: 80)
                 } else {
