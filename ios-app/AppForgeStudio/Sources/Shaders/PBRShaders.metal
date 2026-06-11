@@ -1,6 +1,9 @@
 #include <metal_stdlib>
 using namespace metal;
 
+// Forward declaration (defined below, used in the PBR fragment shader)
+float2 brdfIBL(float NdotV, float roughness, texture2d<float> brdfLUT, sampler s);
+
 struct VertexIn {
     float4 position [[attribute(0)]];
     float3 normal [[attribute(1)]];
