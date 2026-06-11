@@ -41,7 +41,6 @@ targets:
       - path: Features/ExportMode
       - path: Features/AnimationMode
       - path: Features/HybridMode
-      - path: Features/RenderMode
       - path: Sources/Engines
       - path: Sources/CSG
       - path: Sources/CAD
