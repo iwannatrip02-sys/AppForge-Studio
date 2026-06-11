@@ -134,7 +134,16 @@ jobs:
         continue-on-error: true
         working-directory: ios-app/AppForgeStudio
         run: |
+          echo "=== Re-applying SatinCore narrowing patch (SPM may have refreshed checkouts) ==="
+          for TRIANGULATOR in $(find /Users/runner/Library/Developer/Xcode/DerivedData -name Triangulator.mm -path "*/Satin/*" 2>/dev/null); do
+            echo "Patching: $TRIANGULATOR"
+            sed -i '' 's/\.i0 = v1->index, \.i1 = v2->index, \.i2 = v3->index/.i0 = static_cast<uint32_t>(v1->index), .i1 = static_cast<uint32_t>(v2->index), .i2 = static_cast<uint32_t>(v3->index)/g' "$TRIANGULATOR"
+            sed -i '' 's/\.i0 = v1->index/.i0 = static_cast<uint32_t>(v1->index)/g' "$TRIANGULATOR"
+            sed -i '' 's/\.index = index/.index = static_cast<int>(index)/g' "$TRIANGULATOR"
+            grep -c "static_cast<uint32_t>" "$TRIANGULATOR" || echo "WARNING: patch produced no static_cast"
+          done
           echo "=== Archiving for device (unsigned) ==="
+          set -o pipefail
           xcodebuild archive \
             -project AppForgeStudio.xcodeproj \
             -scheme AppForgeStudio \
@@ -146,7 +155,8 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             -archivePath AppForgeStudio.xcarchive \
             2>&1 | tee archive.log
-          echo "=== Archive exit code: $? ==="
+          ARCHIVE_EXIT=$?
+          echo "=== Archive exit code: $ARCHIVE_EXIT ==="
           tail -30 archive.log
           echo "=== Packaging unsigned IPA ==="
           mkdir -p Payload
