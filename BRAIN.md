@@ -64,8 +64,19 @@ ios-app/AppForgeStudio/
 | BUG1: Layout GPU PBR (float3 padding) | SatinRenderer.swift | CRITICO |
 | BUG2: updateAnimation doble por frame | SatinRenderer.swift | CRITICO |
 | BUG5: Normal matrix escala no-uniforme | Shaders.metal | ALTO |
-| BUG7: Grab deformer direccion contraria | SculptEngine.swift | MEDIO |
-| BUG9: rebuildSceneFrom cada frame | SatinRenderer.swift | ALTO |
+| BUG7: Grab deformer direccion contraria | SculptEngine.swift | CORREGIDO F0 — usa dragDelta con fallback |
+| BUG9: rebuildSceneFrom cada frame | SatinRenderer.swift | CORREGIDO F0 — transforms in-place, rebuild solo con structureChanged |
+
+## RIESGOS (F2 wave)
+
+### R2 — Non-PBR sculpt geometry refresh
+- **Descripción:** El path de sculpt en render(in:) ahora actualiza geometría de objetos Satin non-PBR in-place via `refreshNonPBRObjectGeometry(for:)`, siguiendo el mismo patrón de asignación de propiedades que `buildObject(from:)` (geometry.vertexBuffer, geometry.indexBuffer, geometry.vertexCount, geometry.indexCount).
+- **Riesgo:** Satin Geometry expone `vertexCount`/`indexCount` como computed properties y `vertexBuffers` como diccionario `[VertexBufferIndex: MTLBuffer]`, no como `vertexBuffer` singular. Las asignaciones directas usadas en `buildObject` y `refreshNonPBRObjectGeometry` dependen de que el build de CI las acepte (pasan actualmente). Si en runtime estas asignaciones no tienen efecto, los objetos non-PBR esculpidos no se refrescarán visualmente.
+- **Mitigación:** Si se detecta que la geometría non-PBR no se actualiza en runtime, implementar el fallback: flag `needsNonPBRRebuild` que dispare `rebuildSceneFrom()` UNA sola vez al terminar el stroke (cuando `modifiedModelIndices` queda vacío tras haber tenido modificaciones non-PBR), no por frame.
+- **Impacto en tests:** El contador `rebuildCount` (usado por RendererRegressionTests) solo se incrementa si se activa el fallback. El path normal (in-place) no lo incrementa, preservando la garantía del test.
+
+### R1 — modelNameToObject → modelIdToObject
+- **Fix:** Migrado diccionario de clave `model.name` a `model.id.uuidString`. Model ya tiene `let id: UUID`. Elimina colisiones si dos modelos comparten nombre. Verificado: 0 referencias a `modelNameToObject` en el código.
 
 ## BLOQUEOS
 - Sin Mac → no compilar localmente
@@ -73,6 +84,7 @@ ios-app/AppForgeStudio/
 - Satin repo archivado (ultimo tag 13.0.0, Abril 2025)
 
 ## HISTORIAL
+- 2026-06-10 — F2 wave: R1 (modelIdToObject), R2 (non-PBR sculpt refresh + riesgo documentado)
 - 2026-05-26 04:30 UTC — Fix de 7 bugs de compilacion + assets + CI + tests + Satin 13.0.0
 - 2026-05-25 23:30 UTC — Limpieza masiva: .git anidado eliminado, 100+ archivos huerfanos borrados, estructura Sources/ unificada
 - 2026-05-12 — CSG real implementado (BSP tree en Shape.swift)

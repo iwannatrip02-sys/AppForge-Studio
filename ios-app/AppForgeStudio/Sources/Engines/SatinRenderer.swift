@@ -82,6 +82,12 @@ class SatinRenderer: NSObject, ObservableObject {
     var onTransformsApplied: (([String: simd_float4x4]) -> Void)?
     var sculptEngine: SculptEngine?
 
+    /// World-space position for the brush cursor indicator (set from MetalView touch handlers).
+    /// nil = cursor hidden.
+    var brushCursorPosition: SIMD3<Float>? = nil
+    /// Radius of the brush cursor indicator in world units.
+    var brushCursorRadius: Float = 0.05
+
     func setSculptEngine(_ engine: SculptEngine) {
         self.sculptEngine = engine
     }
@@ -89,7 +95,7 @@ class SatinRenderer: NSObject, ObservableObject {
     private(set) var rebuildCount: Int = 0
     private var lastFrameTime: CFTimeInterval = 0
     private var sceneObjectCount: Int = 0
-    private var modelNameToObject: [String: Object] = [:]
+    private var modelIdToObject: [String: Object] = [:]
 
     func updateAnimation() {
         let now = CACurrentMediaTime()
@@ -127,8 +133,8 @@ class SatinRenderer: NSObject, ObservableObject {
         var anyApplied = false
         for i in 0..<scene3D.models.count {
             let model = scene3D.models[i]
-            let key = model.name
-            let transform = transforms[key] ?? transforms[model.id.uuidString]
+            let idKey = model.id.uuidString
+            let transform = transforms[model.name] ?? transforms[idKey]
             guard let transform = transform else { continue }
             anyApplied = true
 
@@ -150,14 +156,14 @@ class SatinRenderer: NSObject, ObservableObject {
             scene3D.models[i].scale = scale
 
             // Update Satin Object in-place (basic pipeline)
-            if let object = modelNameToObject[key] {
+            if let object = modelIdToObject[idKey] {
                 object.position = translation
                 object.rotation = rotation
                 object.scale = scale
             }
 
             // Update PBRRenderable model in-place (PBR pipeline)
-            if let pbrIndex = pbrRenderables.firstIndex(where: { $0.model.name == key || $0.model.id == model.id }) {
+            if let pbrIndex = pbrRenderables.firstIndex(where: { $0.model.id == model.id }) {
                 pbrRenderables[pbrIndex].model.position = translation
                 pbrRenderables[pbrIndex].model.rotation = rotation
                 pbrRenderables[pbrIndex].model.scale = scale
@@ -181,6 +187,8 @@ class SatinRenderer: NSObject, ObservableObject {
     weak var mtkView: MTKView?
 
     private var pbrRenderables: [PBRRenderable] = []
+    private var cursorObject: Object?
+    private var cursorSetupDone = false
 
     var irradianceMap: MTLTexture?
     var prefilterMap: MTLTexture?
@@ -219,6 +227,46 @@ class SatinRenderer: NSObject, ObservableObject {
         depthDescriptor.isDepthWriteEnabled = true
         depthState = device.makeDepthStencilState(descriptor: depthDescriptor)
         animationEngine?.onFrameTick = { [weak self] in self?.mtkView?.setNeedsDisplay() }
+        setupCursorObject()
+    }
+
+    /// Creates a small wireframe sphere Object used as the brush cursor indicator (lazy, called once).
+    private func setupCursorObject() {
+        guard !cursorSetupDone else { return }
+        cursorSetupDone = true
+
+        // Build a low-poly icosahedron-like sphere for the cursor
+        let t: Float = (1.0 + sqrt(5.0)) / 2.0
+        let rawVerts: [SIMD3<Float>] = [
+            SIMD3<Float>(-1,  t,  0), SIMD3<Float>( 1,  t,  0), SIMD3<Float>(-1, -t,  0), SIMD3<Float>( 1, -t,  0),
+            SIMD3<Float>( 0, -1,  t), SIMD3<Float>( 0,  1,  t), SIMD3<Float>( 0, -1, -t), SIMD3<Float>( 0,  1, -t),
+            SIMD3<Float>( t,  0, -1), SIMD3<Float>( t,  0,  1), SIMD3<Float>(-t,  0, -1), SIMD3<Float>(-t,  0,  1),
+        ]
+        var verts: [Float] = []
+        for v in rawVerts {
+            let n = simd_normalize(v)
+            let s: Float = 0.04 // small radius
+            verts.append(contentsOf: [n.x * s, n.y * s, n.z * s, 0,  // position + w
+                                       n.x, n.y, n.z,              // normal
+                                       0.0, 0.0])                   // uv
+        }
+        let indices: [UInt32] = [
+            0,11,5, 0,5,1, 0,1,7, 0,7,10, 0,10,11,
+            1,5,9, 5,11,4, 11,10,2, 10,7,6, 7,1,8,
+            3,9,4, 3,4,2, 3,2,6, 3,6,8, 3,8,9,
+            4,9,5, 2,4,11, 6,2,10, 8,6,7, 9,8,1,
+        ]
+        let data = GeometryData(vertices: verts, normals: [], uvs: [], indices: indices)
+        let geometry = Geometry(data: data)
+        geometry.vertexBuffer = device.makeBuffer(bytes: verts, length: verts.count * MemoryLayout<Float>.stride, options: .storageModeShared)
+        geometry.indexBuffer = device.makeBuffer(bytes: indices, length: indices.count * MemoryLayout<UInt32>.stride, options: .storageModeShared)
+        geometry.vertexCount = rawVerts.count
+        geometry.indexCount = indices.count
+        let mat = BasicMaterial(color: SIMD4<Float>(0.2, 0.6, 1.0, 0.8))
+        let obj = Object(geometry: geometry, material: mat)
+        obj.visible = false
+        cursorObject = obj
+        scene?.add(obj)
     }
 
     private func setupBasicPipeline(library: MTLLibrary) {
@@ -566,10 +614,11 @@ class SatinRenderer: NSObject, ObservableObject {
 
     private func rebuildSceneFrom(_ scene3D: Scene3D) {
         rebuildCount += 1
+        let savedCursor = cursorObject
         scene = Object()
         sceneObjectCount = scene3D.models.count
         pbrRenderables.removeAll()
-        modelNameToObject.removeAll()
+        modelIdToObject.removeAll()
 
         for model in scene3D.models {
             if model.usesPBR {
@@ -612,8 +661,13 @@ class SatinRenderer: NSObject, ObservableObject {
             } else {
                 let object = buildObject(from: model)
                 scene.add(object)
-                modelNameToObject[model.name] = object
+                modelIdToObject[model.id.uuidString] = object
             }
+        }
+        // Re-add cursor object if it exists (scene was replaced)
+        if let co = savedCursor {
+            cursorObject = co
+            scene.add(co)
         }
     }
 
@@ -702,6 +756,33 @@ class SatinRenderer: NSObject, ObservableObject {
         return object
     }
 
+    /// Rebuilds a non-PBR Satin Object's geometry buffers in-place from the model's current meshes.
+    /// Used by the sculpt path to update non-PBR models without a full scene rebuild.
+    /// Risk: Satin Geometry properties (vertexBuffer, indexBuffer, vertexCount, indexCount)
+    /// may be computed/private in some Satin versions. The CI build passes with the same
+    /// property-assignment pattern used by buildObject(). If this path fails at runtime,
+    /// the safe fallback is a single rebuildSceneFrom() at stroke end (see BRAIN.md Risks).
+    private func refreshNonPBRObjectGeometry(for model: Model) {
+        guard let object = modelIdToObject[model.id.uuidString] else { return }
+        let (vb, ib, ic) = createBuffersFromMeshes(model.meshes)
+        guard let vBuf = vb, let iBuf = ib, ic > 0 else { return }
+
+        // Rebuild interleaved vertex data to compute vertexCount
+        var totalFloats = 0
+        for mesh in model.meshes {
+            totalFloats += mesh.vertices.count * 9
+        }
+        let vertexCount = totalFloats > 0 ? totalFloats / 9 : 0
+        guard vertexCount > 0 else { return }
+
+        // Update the existing Satin Object's geometry in-place
+        // (same property-assignment pattern as buildObject)
+        object.geometry.vertexBuffer = vBuf
+        object.geometry.indexBuffer = iBuf
+        object.geometry.vertexCount = vertexCount
+        object.geometry.indexCount = ic
+    }
+
     func update() {
         updateAnimation()
     }
@@ -762,13 +843,30 @@ class SatinRenderer: NSObject, ObservableObject {
                 for i in modifiedModelIndices where scene.models[i].usesPBR {
                     let (vb, ib, ic) = createBuffersFromMeshes(scene.models[i].meshes)
                     guard let vBuf = vb, let iBuf = ib, ic > 0 else { continue }
-                    if let pbrIndex = pbrRenderables.firstIndex(where: { $0.model.name == scene.models[i].name || $0.model.id == scene.models[i].id }) {
+                    if let pbrIndex = pbrRenderables.firstIndex(where: { $0.model.id == scene.models[i].id }) {
                         pbrRenderables[pbrIndex].vertexBuffer = vBuf
                         pbrRenderables[pbrIndex].indexBuffer = iBuf
                         pbrRenderables[pbrIndex].indexCount = ic
                     }
                 }
+                // Non-PBR models: rebuild Satin Object geometry in-place
+                for i in modifiedModelIndices where !scene.models[i].usesPBR {
+                    refreshNonPBRObjectGeometry(for: scene.models[i])
+                }
             }
+        }
+
+        // ---- Brush cursor state ----
+        if let cursorPos = brushCursorPosition {
+            setupCursorObject()
+            if let co = cursorObject {
+                co.visible = true
+                co.position = cursorPos
+                let r = brushCursorRadius
+                co.scale = SIMD3<Float>(r / 0.04, r / 0.04, r / 0.04)  // normalize to base radius
+            }
+        } else {
+            cursorObject?.visible = false
         }
 
         guard let drawable = view.currentDrawable,
