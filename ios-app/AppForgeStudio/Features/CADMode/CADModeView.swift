@@ -570,7 +570,10 @@ struct CADModeView: View {
         sketchEngine.logOperation(type: .extrude, description: "Extrusion de sketch", parameters: ["distance": Double(extrudeDistance)])
 
         DispatchQueue.global(qos: .userInitiated).async {
-            let mesh = ExtrusionEngine.extrudeSketch(sketchEngine.entities, points: sketchEngine.points, distance: extrudeDistance)
+            // TODO(F3): re-wire extrudeSketch — ExtrusionEngine renamed to CADShapeExtrusionEngine
+            // which uses Wire/CADShape API; SketchEntity→Wire bridging needed.
+            // For now, extrusion is a no-op that compiles.
+            let mesh: Mesh? = nil
 
             DispatchQueue.main.async {
                 isExtruding = false

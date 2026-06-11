@@ -14,9 +14,9 @@ final class LoftEngine {
 }
 
 @MainActor
-final class ShellEngine {
+final class OCCTShellEngine {
     private let engine = OCCTEngine.shared
-    
+
     func shell(_ shape: CADShape, thickness: Double, quality: MeshQuality = .medium) -> Mesh {
         let result = engine.shell(shape, thickness: thickness)
         return result?.appforgeMesh(quality: quality) ?? shape.appforgeMesh(quality: quality)
@@ -24,9 +24,9 @@ final class ShellEngine {
 }
 
 @MainActor
-final class SweepEngine {
+final class OCCTSweepEngine {
     private let engine = OCCTEngine.shared
-    
+
     func sweep(profile: Wire, along path: Wire, quality: MeshQuality = .medium) -> Mesh {
         let result = engine.sweep(profile: profile, along: path)
         return result?.appforgeMesh(quality: quality) ?? Mesh(vertices: [], indices: [])

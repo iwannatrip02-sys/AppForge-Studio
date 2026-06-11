@@ -23,9 +23,10 @@ enum ActiveMode: String, CaseIterable {
     case paint = "Pintar"
     case hybrid = "Hybrid"
     case render = "Render"
+    case animation = "Animation"
 }
 
-class ToolViewModel: ObservableObject {
+class WorkspaceToolViewModel: ObservableObject {
     @Published var activeMode: ActiveMode = .hybrid
     @Published var activeTool: ActiveTool = .select
     @Published var brushSize: Float = 0.05
@@ -52,6 +53,8 @@ class ToolViewModel: ObservableObject {
         case .hybrid:
             return ActiveTool.allCases
         case .render:
+            return [.select, .move, .rotate]
+        case .animation:
             return [.select, .move, .rotate]
         }
     }
@@ -83,6 +86,33 @@ class ToolViewModel: ObservableObject {
             brushOpacity = 0.3
         default:
             resetBrushDefaults()
+        }
+    }
+
+    // MARK: - ToolbarView support (added for compilation)
+
+    @Published var hasSelection: Bool = false
+    @Published var brushPresets: [[String: Any]] = [
+        ["name": "fine"],
+        ["name": "medium"],
+        ["name": "coarse"],
+        ["name": "airbrush"]
+    ]
+
+    var onResetCamera: (() -> Void)?
+    var onDeleteSelected: (() -> Void)?
+
+    func resetCamera() {
+        onResetCamera?()
+    }
+
+    func deleteSelected() {
+        onDeleteSelected?()
+    }
+
+    func selectPreset(_ dict: [String: Any]) {
+        if let name = dict["name"] as? String {
+            setBrushFromPreset(name)
         }
     }
 }

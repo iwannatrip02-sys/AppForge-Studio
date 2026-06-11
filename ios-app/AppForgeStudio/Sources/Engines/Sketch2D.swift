@@ -2,7 +2,7 @@ import Foundation
 import simd
 
 // MARK: - 2D Geometry Entities
-enum SketchEntity {
+enum Sketch2DEntity {
     case point(SIMD2<Float>)
     case line(SIMD2<Float>, SIMD2<Float>)
     case arc(center: SIMD2<Float>, radius: Float, startAngle: Float, endAngle: Float)
@@ -33,32 +33,32 @@ enum SketchEntity {
 }
 
 // MARK: - Constraints
-enum ConstraintType {
-    case distance(SketchEntity, SketchEntity, Float)        // distance between two entities
-    case angle(SketchEntity, SketchEntity, Float)           // angle between two lines
-    case coincident(SketchEntity, SketchEntity)             // points coincide
-    case concentric(SketchEntity, SketchEntity)             // share center
-    case parallel(SketchEntity, SketchEntity)               // lines are parallel
-    case perpendicular(SketchEntity, SketchEntity)          // lines are perpendicular
-    case horizontal(SketchEntity)                          // line is horizontal
-    case vertical(SketchEntity)                            // line is vertical
-    case fixed(SketchEntity)                                // lock position
+enum SketchConstraintType {
+    case distance(Sketch2DEntity, Sketch2DEntity, Float)        // distance between two entities
+    case angle(Sketch2DEntity, Sketch2DEntity, Float)           // angle between two lines
+    case coincident(Sketch2DEntity, Sketch2DEntity)             // points coincide
+    case concentric(Sketch2DEntity, Sketch2DEntity)             // share center
+    case parallel(Sketch2DEntity, Sketch2DEntity)               // lines are parallel
+    case perpendicular(Sketch2DEntity, Sketch2DEntity)          // lines are perpendicular
+    case horizontal(Sketch2DEntity)                          // line is horizontal
+    case vertical(Sketch2DEntity)                            // line is vertical
+    case fixed(Sketch2DEntity)                                // lock position
 }
 
 struct Constraint {
-    let type: ConstraintType
+    let type: SketchConstraintType
     let priority: Int = 1
     var isSatisfied: Bool = false
 }
 
 // MARK: - Sketch
 class Sketch2D {
-    var entities: [SketchEntity] = []
+    var entities: [Sketch2DEntity] = []
     var constraints: [Constraint] = []
     
-    func addEntity(_ entity: SketchEntity) { entities.append(entity) }
+    func addEntity(_ entity: Sketch2DEntity) { entities.append(entity) }
     
-    func addConstraint(_ type: ConstraintType) {
+    func addConstraint(_ type: SketchConstraintType) {
         constraints.append(Constraint(type: type))
     }
     
@@ -72,7 +72,7 @@ class Sketch2D {
         return residual
     }
     
-    private func constraintError(_ type: ConstraintType, index: Int) -> Float {
+    private func constraintError(_ type: SketchConstraintType, index: Int) -> Float {
         switch type {
         case .distance(let e1, let e2, let target):
             let p1 = centerOf(e1)
@@ -105,7 +105,7 @@ class Sketch2D {
         }
     }
     
-    private func centerOf(_ entity: SketchEntity) -> SIMD2<Float> {
+    private func centerOf(_ entity: Sketch2DEntity) -> SIMD2<Float> {
         switch entity {
         case .point(let p): return p
         case .line(let a, let b): return (a + b) * 0.5
@@ -114,7 +114,7 @@ class Sketch2D {
         }
     }
     
-    private func directionOf(_ entity: SketchEntity) -> SIMD2<Float> {
+    private func directionOf(_ entity: Sketch2DEntity) -> SIMD2<Float> {
         switch entity {
         case .line(let a, let b):
             let d = b - a

@@ -18,20 +18,17 @@ class ToolViewModel: ObservableObject {
     @Published var csgShapeBIndex: Int? = nil
     @Published var csgActiveOperation: CADTool? = nil
     
-    let extrusion = ExtrusionEngine()
     let bevel = BevelEngine()
     let boolean = BooleanEngine()
     let loopCut = LoopCutEngine()
-    let measure = MeasureEngine()
-    let brushEngine = BrushEngine()
     let occt = OCCTEngine.shared
+    // TODO(F3): ExtrusionEngine→CADShapeExtrusionEngine, MeasureEngine→CADShapeMeasureEngine pending migration
     
     func executeTool(mesh: inout Mesh) {
         switch selectedTool {
         case .extrude:
-            let faceIndices = stride(from: 0, to: min(mesh.indices.count, 9), by: 3).map { mesh.indices[$0] }
-            guard !faceIndices.isEmpty else { return }
-            mesh = extrusion.extrude(mesh: &mesh, faceIndices: faceIndices, direction: SIMD3<Float>(0, 0, 1), distance: 0.1)
+            // TODO(F3): re-wire ExtrusionEngine → CADShapeExtrusionEngine
+            break
         case .loopCut:
             if mesh.indices.count >= 6 {
                 let i0 = Int(mesh.indices[0]), i1 = Int(mesh.indices[1])
@@ -84,11 +81,8 @@ class ToolViewModel: ObservableObject {
                     SIMD3<Float>(Float(box.min.x), Float(box.min.y), Float(box.min.z)),
                     SIMD3<Float>(Float(box.max.x), Float(box.max.y), Float(box.max.z))
                 ))
-            } else {
-                measurementArea = measure.measureArea(mesh: mesh)
-                measurementVolume = measure.measureVolume(mesh: mesh)
-                measurementDistance = measure.measureDistance(p1: .zero, p2: SIMD3<Float>(1, 0, 0))
             }
+            // TODO(F3): MeasureEngine fallback removed — CADShapeMeasureEngine uses CADShape API
         case .select, .move, .rotate, .scale:
             break
         case .line, .circle, .rectangle, .arc, .dimension, .constraint:

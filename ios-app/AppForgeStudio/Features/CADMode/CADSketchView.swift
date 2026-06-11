@@ -123,7 +123,7 @@ struct CADSketchView: View {
                 )
             } else {
                 ZStack {
-                    GridView2(gridSize: sketchEngine.gridSize, canvasSize: geo.size)
+                    SketchGridView(gridSize: sketchEngine.gridSize, canvasSize: geo.size)
                     ForEach(sketchEngine.entities, id: \.id) { entity in
                         EntityView2(entity: entity, points: sketchEngine.points)
                     }
@@ -205,7 +205,7 @@ struct CADSketchView: View {
     }
 }
 
-struct GridView2: View {
+struct SketchGridView: View {
     let gridSize: Float
     let canvasSize: CGSize
     @EnvironmentObject var themeManager: ThemeManager

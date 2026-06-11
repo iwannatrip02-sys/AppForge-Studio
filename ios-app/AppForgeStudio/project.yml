@@ -34,6 +34,7 @@ targets:
     sources:
       - path: Core/UI
       - path: Core/Managers
+      - path: Core/Services/ExportService
       - path: Features/CADMode
       - path: Features/SculptMode
       - path: Features/PaintMode

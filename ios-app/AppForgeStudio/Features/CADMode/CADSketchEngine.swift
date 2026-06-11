@@ -41,7 +41,7 @@ enum SketchEntity {
     }
 }
 
-enum SketchTool: String, CaseIterable { case select = "Seleccionar"; case point = "Punto"; case line = "Linea"; case circle = "Circulo"; case rectangle = "Rectangulo"; case arc = "Arco" }
+enum SketchEngineTool: String, CaseIterable { case select = "Seleccionar"; case point = "Punto"; case line = "Linea"; case circle = "Circulo"; case rectangle = "Rectangulo"; case arc = "Arco" }
 
 class CADSketchEngine: ObservableObject {
     @Published var constraintManager = GeometryConstraintManager()
@@ -200,17 +200,9 @@ class CADSketchEngine: ObservableObject {
     }
 
     func extrudeSketch(distance: Float) -> Mesh {
-        let engine = ExtrusionEngine()
-        var mesh = Mesh()
-        let sketchPoints = collectSketchPoints()
-        guard sketchPoints.count >= 3 else { return mesh }
-        let faceIndices = Array(0..<UInt32(sketchPoints.count))
-        let direction = SIMD3<Float>(0, 0, 1)
-        var tempMesh = Mesh(vertices: sketchPoints.map { p in
-            Vertex(position: SIMD3<Float>(p.position.x, p.position.y, 0), normal: SIMD3<Float>(0, 0, 1), uv: SIMD2<Float>(0, 0))
-        }, indices: faceIndices)
-        mesh = engine.extrude(mesh: &tempMesh, faceIndices: faceIndices, direction: direction, distance: distance)
-        return mesh
+        // TODO(F3): re-wire ExtrusionEngine → CADShapeExtrusionEngine (API changed to Wire/CADShape)
+        // Original ExtrusionEngine.extrude(mesh:faceIndices:direction:distance:) no longer exists.
+        return Mesh()
     }
 
     private func collectSketchPoints() -> [SketchPoint] {
