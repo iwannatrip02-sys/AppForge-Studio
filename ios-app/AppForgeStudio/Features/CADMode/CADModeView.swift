@@ -163,7 +163,7 @@ struct CADModeView: View {
                     Text(tab.rawValue)
                         .font(.system(size: 10))
                         .padding(.horizontal, 12).padding(.vertical, 4)
-                        .background(selectedTab == tab ? Color.blue : theme.surfaceSecondary)
+                        .background(selectedTab == tab ? theme.accent : theme.surfaceSecondary)
                         .foregroundColor(theme.textPrimary)
                 }
             }
@@ -190,7 +190,7 @@ struct CADModeView: View {
                 ForEach(canvasVM.scene.cadHistory.getAllOperations(), id: \.id) { node in
                     HStack {
                         Circle()
-                            .fill(node.id == canvasVM.scene.cadHistory.current.id ? Color.blue : Color.gray)
+                            .fill(node.id == canvasVM.scene.cadHistory.current.id ? theme.accent : theme.textSecondary)
                             .frame(width: 6, height: 6)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(node.operation)
@@ -264,8 +264,8 @@ struct CADModeView: View {
                                     .font(.system(size: 9))
                             }
                             .padding(.horizontal, 5).padding(.vertical, 3)
-                            .background(Color.green.opacity(0.3))
-                            .foregroundColor(theme.textPrimary).cornerRadius(5)
+                            .background(theme.surfaceSecondary)
+                            .foregroundColor(theme.textPrimary).cornerRadius(theme.cornerRadiusSmall)
                         }
                         .accessibilityLabel("Agregar \(prim.label)")
                         .dynamicTypeSize(...DynamicTypeSize.xLarge)
@@ -302,8 +302,8 @@ struct CADModeView: View {
             Text(tool.rawValue)
                 .font(.system(size: 9))
                 .padding(.horizontal, 5).padding(.vertical, 3)
-                .background(selectedTool == tool ? Color.blue : theme.surfaceSecondary)
-                .foregroundColor(theme.textPrimary).cornerRadius(5)
+                .background(selectedTool == tool ? theme.accent : theme.surfaceSecondary)
+                .foregroundColor(theme.textPrimary).cornerRadius(theme.cornerRadiusSmall)
         }
         .accessibilityLabel("Herramienta \(tool.rawValue)")
         .dynamicTypeSize(...DynamicTypeSize.xLarge)
@@ -344,7 +344,7 @@ struct CADModeView: View {
                     }
                 }
                 .padding(.horizontal, 10).padding(.vertical, 3)
-                .background(Color.blue.opacity(0.15))
+                .background(theme.surfaceSecondary)
             case .fillet:
                 HStack {
                     Text("Radio:").font(.caption).foregroundColor(theme.textPrimary)
@@ -359,7 +359,7 @@ struct CADModeView: View {
                         .controlSize(.small)
                 }
                 .padding(.horizontal, 10).padding(.vertical, 3)
-                .background(Color.blue.opacity(0.15))
+                .background(theme.surfaceSecondary)
             case .chamfer:
                 HStack {
                     Text("Radio:").font(.caption).foregroundColor(theme.textPrimary)
@@ -374,7 +374,7 @@ struct CADModeView: View {
                         .controlSize(.small)
                 }
                 .padding(.horizontal, 10).padding(.vertical, 3)
-                .background(Color.orange.opacity(0.15))
+                .background(theme.surfaceSecondary)
             case .shell:
                 HStack {
                     Text("Grosor:").font(.caption).foregroundColor(theme.textPrimary)
@@ -389,7 +389,7 @@ struct CADModeView: View {
                         .controlSize(.small)
                 }
                 .padding(.horizontal, 10).padding(.vertical, 3)
-                .background(Color.green.opacity(0.15))
+                .background(theme.surfaceSecondary)
             case .loft:
                 HStack {
                     Text("Loft entre 2 perfiles (copia desplazada en Z)")
@@ -401,7 +401,7 @@ struct CADModeView: View {
                         .controlSize(.small)
                 }
                 .padding(.horizontal, 10).padding(.vertical, 3)
-                .background(Color.purple.opacity(0.15))
+                .background(theme.surfaceSecondary)
             case .sweep:
                 HStack {
                     Text("Altura:").font(.caption).foregroundColor(theme.textPrimary)
@@ -416,13 +416,13 @@ struct CADModeView: View {
                         .controlSize(.small)
                 }
                 .padding(.horizontal, 10).padding(.vertical, 3)
-                .background(Color.yellow.opacity(0.12))
+                .background(theme.surfaceSecondary)
             case .booleanUnion, .booleanSubtract, .booleanIntersect:
                 csgParameterBar
             case .measure:
                 MeasureTool(toolVM: toolVM, canvasVM: canvasVM)
                     .padding(.horizontal, 10).padding(.vertical, 3)
-                    .background(Color.mint.opacity(0.12))
+                    .background(theme.surfaceSecondary)
             default:
                 EmptyView()
             }
@@ -437,7 +437,7 @@ struct CADModeView: View {
                 animationVM.selectedClipName = clip.name
             }) {
                 Image(systemName: "play.rectangle")
-                    .foregroundColor(canvasVM.scene.models.isEmpty ? theme.textSecondary : .blue)
+                    .foregroundColor(canvasVM.scene.models.isEmpty ? theme.textSecondary : theme.accent)
             }
             .disabled(canvasVM.scene.models.isEmpty)
             Text(animationVM.isPlaying ? "Playing" : "Anim").font(.system(size: 9))
@@ -481,14 +481,14 @@ struct CADModeView: View {
             Button(action: { showCADTimeline = true }) {
                 Image(systemName: "timeline.selection")
                     .font(.system(size: 11))
-                    .foregroundColor(.blue)
+                    .foregroundColor(theme.accent)
             }
             .help("Timeline CAD")
 
             Button(action: { exportToSTEP() }) {
                 Image(systemName: "square.and.arrow.up")
                     .font(.system(size: 11))
-                    .foregroundColor(.blue)
+                    .foregroundColor(theme.accent)
             }
             .disabled(canvasVM.scene.models.isEmpty)
         }.padding(.horizontal, 6).padding(.vertical, 2)
@@ -500,7 +500,7 @@ struct CADModeView: View {
             Button(action: { showSnapOverlay.toggle() }) {
                 Image(systemName: showSnapOverlay ? "scope" : "dot.scope")
                     .font(.system(size: 11))
-                    .foregroundColor(showSnapOverlay ? .blue : theme.textSecondary)
+                    .foregroundColor(showSnapOverlay ? theme.accent : theme.textSecondary)
             }
             .help("Toggle snap guides")
             Spacer()
@@ -809,14 +809,7 @@ struct CADModeView: View {
             default: return "CSG"
             }
         }()
-        let bgColor: Color = {
-            switch selectedTool {
-            case .booleanUnion: return Color.cyan.opacity(0.12)
-            case .booleanSubtract: return Color.orange.opacity(0.12)
-            case .booleanIntersect: return Color.purple.opacity(0.12)
-            default: return Color.cyan.opacity(0.12)
-            }
-        }()
+        let bgColor: Color = theme.surfaceSecondary
 
         VStack(spacing: 2) {
             HStack {
@@ -825,7 +818,7 @@ struct CADModeView: View {
                 Spacer()
                 Text(csgStatusMessage)
                     .font(.caption2)
-                    .foregroundColor(bothSelected ? .green : .yellow)
+                    .foregroundColor(bothSelected ? theme.success : theme.warning)
             }
             HStack {
                 Text("A:").font(.caption2).foregroundColor(theme.textSecondary)

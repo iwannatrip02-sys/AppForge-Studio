@@ -18,7 +18,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Select Xcode (Swift 6.1+ required)
         run: |
@@ -129,9 +129,51 @@ jobs:
           echo "=== Tests exit code: $? ==="
           tail -50 test.log
 
+      - name: Archive and Package Unsigned IPA (device)
+        if: success()
+        continue-on-error: true
+        working-directory: ios-app/AppForgeStudio
+        run: |
+          echo "=== Archiving for device (unsigned) ==="
+          xcodebuild archive \
+            -project AppForgeStudio.xcodeproj \
+            -scheme AppForgeStudio \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -configuration Debug \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            -archivePath AppForgeStudio.xcarchive \
+            2>&1 | tee archive.log
+          echo "=== Archive exit code: $? ==="
+          tail -30 archive.log
+          echo "=== Packaging unsigned IPA ==="
+          mkdir -p Payload
+          APP_PATH=$(find AppForgeStudio.xcarchive/Products/Applications -name "*.app" -type d 2>/dev/null | head -1)
+          if [ -d "$APP_PATH" ]; then
+            cp -R "$APP_PATH" Payload/
+            zip -r AppForgeStudio-unsigned.ipa Payload/
+            ls -lh AppForgeStudio-unsigned.ipa
+            echo "=== IPA packaging complete ==="
+          else
+            echo "=== ERROR: .app not found in xcarchive. Available paths: ==="
+            find AppForgeStudio.xcarchive -maxdepth 4 -type d 2>/dev/null || true
+            echo "=== Skipping IPA packaging ==="
+          fi
+
+      - name: Upload Unsigned IPA
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: AppForgeStudio-unsigned-ipa
+          path: ios-app/AppForgeStudio/AppForgeStudio-unsigned.ipa
+          retention-days: 14
+
       - name: Upload build and test logs (always)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: build-log-${{ github.run_id }}
           path: |

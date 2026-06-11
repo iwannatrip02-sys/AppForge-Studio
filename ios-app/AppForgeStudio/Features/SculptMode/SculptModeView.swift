@@ -29,14 +29,14 @@ struct SculptModeView: View {
                     ForEach(BrushOption.allCases, id: \.self) { b in
                         Button(action: { selectedBrush = b }) {
                             VStack(spacing: 2) {
-                                Circle().fill(selectedBrush == b ? Color.blue : themeManager.currentTheme.textSecondary).frame(width: 6, height: 6)
+                                Circle().fill(selectedBrush == b ? themeManager.currentTheme.accent : themeManager.currentTheme.textSecondary).frame(width: 6, height: 6)
                                 Text(b.rawValue).font(.system(size: 8))
                             }.padding(.horizontal, 6).padding(.vertical, 4)
-                                .background(selectedBrush == b ? Color.blue.opacity(0.2) : Color.clear).cornerRadius(8)
+                                .background(selectedBrush == b ? themeManager.currentTheme.accent.opacity(0.15) : Color.clear).cornerRadius(themeManager.currentTheme.cornerRadiusSmall)
                         }
                     }
                 }.padding(.horizontal, 8)
-            }.padding(.vertical, 4).background(themeManager.isDarkMode ? Color.black.opacity(0.5) : themeManager.currentTheme.surface)
+            }.padding(.vertical, 4).background(themeManager.currentTheme.surface)
 
             ContentView(canvasVM: canvasVM, renderer: renderer, brushEngine: toolVM.brushEngine, isPaintMode: toolVM.isPaintMode)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -84,13 +84,13 @@ struct SculptModeView: View {
                             canvasVM.currentMesh = subdivisionVM.subdivide(mesh, levels: Int(subdivisionLevels))
                         }
                         .font(.caption).padding(.horizontal, 6).padding(.vertical, 4)
-                        .background(Color.blue).foregroundColor(themeManager.currentTheme.textPrimary).cornerRadius(6)
+                        .background(themeManager.currentTheme.accent).foregroundColor(themeManager.currentTheme.textPrimary).cornerRadius(themeManager.currentTheme.cornerRadiusSmall)
                     }
                 }
                 Slider(value: $toolVM.radius, in: 0.01...0.5).frame(width: 120)
                 Text(String(format: "%.2f", toolVM.radius)).font(.caption).foregroundColor(themeManager.currentTheme.textPrimary).frame(width: 40)
                 Toggle("Simetria", isOn: $toolVM.symmetryEnabled).toggleStyle(.switch).font(.caption2)
-            }.padding(.horizontal).padding(.vertical, 4).background(themeManager.isDarkMode ? Color.black.opacity(0.6) : themeManager.currentTheme.surface)
+            }.padding(.horizontal).padding(.vertical, 4).background(themeManager.currentTheme.surface)
         }
     }
 }

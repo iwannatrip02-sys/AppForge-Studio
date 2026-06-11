@@ -43,40 +43,12 @@ struct CircularProgressView: View {
         ZStack {
             Circle().stroke(theme.surfaceSecondary, lineWidth: 6)
             Circle().trim(from: 0, to: min(progress, 1.0))
-                .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                .stroke(theme.accent, style: StrokeStyle(lineWidth: 6, lineCap: .round))
                 .rotationEffect(.degrees(-90))
                 .animation(.spring(response: 1, dampingFraction: 0.75), value: progress)
             Text(String(format: "%d%%", Int(progress * 100)))
                 .font(.caption.bold()).foregroundColor(theme.textPrimary)
         }.frame(width: 60, height: 60)
-    }
-}
-
-// MARK: - Confetti View (success animation)
-
-struct ConfettiView: View {
-    @State private var particles: [(offset: CGSize, opacity: Double, color: Color)] = []
-    var body: some View {
-        GeometryReader { geometry in
-            ForEach(0..<particles.count, id: \.self) { i in
-                Circle().fill(particles[i].color).frame(width: 8, height: 8)
-                    .offset(particles[i].offset).opacity(particles[i].opacity)
-            }
-        }.onAppear {
-            let colors: [Color] = [.accentColor, .green, .blue, .orange, .pink, .purple]
-            var temp: [(CGSize, Double, Color)] = []
-            for _ in 0..<30 {
-                let x = CGFloat.random(in: -150...150)
-                let y = CGFloat.random(in: -200...50)
-                let op = Double.random(in: 0.6...1.0)
-                let col = colors.randomElement() ?? .accentColor
-                temp.append((CGSize(width: x, height: y), op, col))
-            }
-            particles = temp
-            withAnimation(.easeOut(duration: 2.0)) {
-                particles = particles.map { (CGSize(width: $0.offset.width * 1.5, height: $0.offset.height + 100), 0, $0.color) }
-            }
-        }
     }
 }
 
@@ -150,8 +122,8 @@ struct ExportView: View {
                 successOverlay
             }
         }
-        .animation(.easeInOut(duration: 0.3), value: exportSuccess)
-        .animation(.easeInOut(duration: 0.3), value: isExporting)
+        .animation(AppTheme.animSmooth, value:exportSuccess)
+        .animation(AppTheme.animSmooth, value:isExporting)
         .fileExporter(
             isPresented: $showFileExporter,
             document: ExportFileDocument(url: exportVM.exportedFileURL),
@@ -193,7 +165,7 @@ struct ExportView: View {
     private var headerSection: some View {
         VStack(spacing: 8) {
             Image(systemName: "square.and.arrow.up.fill")
-                .font(.system(size: 48)).foregroundColor(.accentColor)
+                .font(.system(size: 48)).foregroundColor(theme.accent)
                 .rotationEffect(.degrees(rotationAngle))
                 .onTapGesture {
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.5)) { rotationAngle += 360 }
@@ -210,8 +182,8 @@ struct ExportView: View {
         VStack(spacing: 8) {
             if let model = exportVM.selectedModel {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 12).fill(theme.surfaceSecondary).frame(height: 180)
-                    Image(systemName: "cube.transparent").font(.system(size: 64)).foregroundColor(.accentColor.opacity(0.3))
+                    RoundedRectangle(cornerRadius: theme.cornerRadiusLarge).fill(theme.surfaceSecondary).frame(height: 180)
+                    Image(systemName: "cube.transparent").font(.system(size: 64)).foregroundColor(theme.accent.opacity(0.3))
                     VStack(alignment: .leading, spacing: 2) {
                         Text(model.name).font(.subheadline.bold()).foregroundColor(theme.textPrimary)
                         let triCount = model.meshes.reduce(0) { $0 + $1.indices.count / 3 }
@@ -219,10 +191,10 @@ struct ExportView: View {
                         let vertCount = model.meshes.reduce(0) { $0 + $1.vertices.count }
                         Text("\(vertCount) vértices").font(.caption2).foregroundColor(theme.textSecondary)
                     }
-                    .padding(8).background(theme.surface).cornerRadius(8)
+                    .padding(8).background(theme.surface).cornerRadius(theme.cornerRadiusSmall)
                 }
             } else {
-                RoundedRectangle(cornerRadius: 12).fill(theme.surfaceSecondary).frame(height: 180)
+                RoundedRectangle(cornerRadius: theme.cornerRadiusLarge).fill(theme.surfaceSecondary).frame(height: 180)
                     .overlay(
                         VStack(spacing: 8) {
                             Image(systemName: "cube.transparent").font(.system(size: 40)).foregroundColor(theme.textSecondary.opacity(0.3))
@@ -242,7 +214,7 @@ struct ExportView: View {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
                 ForEach(ExportViewModel.ExportFormat.allCases) { fmt in
                     Button(action: {
-                        withAnimation(.easeInOut(duration: 0.2)) {
+                        withAnimation(AppTheme.animSnappy) {
                             selectedFormat = fmt
                             exportVM.selectedFormat = fmt
                         }
@@ -258,9 +230,9 @@ struct ExportView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
-                        .background(selectedFormat == fmt ? Color.accentColor : theme.surfaceSecondary)
+                        .background(selectedFormat == fmt ? theme.accent : theme.surfaceSecondary)
                         .foregroundColor(selectedFormat == fmt ? .white : theme.textPrimary)
-                        .cornerRadius(10)
+                        .cornerRadius(theme.cornerRadiusSmall)
                     }
                 }
             }
@@ -276,7 +248,7 @@ struct ExportView: View {
             HStack(spacing: 8) {
                 ForEach(ExportQuality.allCases) { quality in
                     Button(action: {
-                        withAnimation(.easeInOut(duration: 0.2)) {
+                        withAnimation(AppTheme.animSnappy) {
                             selectedQuality = quality
                         }
                     }) {
@@ -288,12 +260,12 @@ struct ExportView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
-                        .background(selectedQuality == quality ? Color.accentColor.opacity(0.3) : theme.surfaceSecondary)
-                        .foregroundColor(selectedQuality == quality ? .accentColor : theme.textPrimary)
-                        .cornerRadius(8)
+                        .background(selectedQuality == quality ? theme.accent.opacity(0.3) : theme.surfaceSecondary)
+                        .foregroundColor(selectedQuality == quality ? theme.accent : theme.textPrimary)
+                        .cornerRadius(theme.cornerRadiusSmall)
                         .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(selectedQuality == quality ? Color.accentColor : Color.clear, lineWidth: 1.5)
+                            RoundedRectangle(cornerRadius: theme.cornerRadiusSmall)
+                                .stroke(selectedQuality == quality ? theme.accent : Color.clear, lineWidth: 1.5)
                         )
                     }
                 }
@@ -308,7 +280,7 @@ struct ExportView: View {
             Text("Nombre del archivo").font(.caption).foregroundColor(theme.textSecondary).padding(.leading, 4)
             TextField("modelo", text: $exportFileName)
                 .textFieldStyle(.plain).font(.body).foregroundColor(theme.textPrimary)
-                .padding(12).background(theme.surfaceSecondary).cornerRadius(10)
+                .padding(12).background(theme.surfaceSecondary).cornerRadius(theme.cornerRadiusSmall)
                 .overlay(
                     HStack {
                         Spacer()
@@ -327,10 +299,10 @@ struct ExportView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.orange)
+                    .foregroundColor(theme.warning)
                 Text("Advertencias de validación")
                     .font(.caption.bold())
-                    .foregroundColor(.orange)
+                    .foregroundColor(theme.warning)
                 Spacer()
                 Button("Descartar") {
                     withAnimation { showValidationWarning = false }
@@ -343,8 +315,8 @@ struct ExportView: View {
                 .lineLimit(6)
         }
         .padding(12)
-        .background(Color.orange.opacity(0.1))
-        .cornerRadius(10)
+        .background(theme.warning.opacity(0.1))
+        .cornerRadius(theme.cornerRadiusSmall)
         .padding(.horizontal)
     }
 
@@ -391,8 +363,8 @@ struct ExportView: View {
             }
             .foregroundColor(.white)
             .frame(maxWidth: .infinity).padding(.vertical, 14)
-            .background((isExporting || exportVM.isExporting) ? Color.accentColor.opacity(0.6) : Color.accentColor)
-            .cornerRadius(12)
+            .background((isExporting || exportVM.isExporting) ? theme.accent.opacity(0.6) : theme.accent)
+            .cornerRadius(theme.cornerRadiusMedium)
         }
         .padding(.horizontal)
         .disabled(isExporting || exportVM.isExporting || exportVM.selectedModel == nil)
@@ -413,7 +385,7 @@ struct ExportView: View {
             Label("Ver en AR", systemImage: "arkit")
                 .font(.headline).foregroundColor(.white)
                 .frame(maxWidth: .infinity).padding(.vertical, 14)
-                .background(Color.green).cornerRadius(12)
+                .background(theme.success).cornerRadius(theme.cornerRadiusMedium)
         }.padding(.horizontal)
     }
 
@@ -428,7 +400,7 @@ struct ExportView: View {
                     Label("Compartir archivo", systemImage: "square.and.arrow.up")
                         .font(.headline).foregroundColor(.white)
                         .frame(maxWidth: .infinity).padding(.vertical, 14)
-                        .background(Color.blue).cornerRadius(12)
+                        .background(theme.accent).cornerRadius(theme.cornerRadiusMedium)
                 }
                 .padding(.horizontal)
 
@@ -437,7 +409,7 @@ struct ExportView: View {
                     Label("Guardar en Archivos", systemImage: "folder")
                         .font(.subheadline).foregroundColor(theme.textPrimary)
                         .frame(maxWidth: .infinity).padding(.vertical, 10)
-                        .background(theme.surfaceSecondary).cornerRadius(10)
+                        .background(theme.surfaceSecondary).cornerRadius(theme.cornerRadiusSmall)
                 }
                 .padding(.horizontal)
             } else {
@@ -445,7 +417,7 @@ struct ExportView: View {
                     Label("Compartir / Guardar", systemImage: "square.and.arrow.up")
                         .font(.headline).foregroundColor(.white)
                         .frame(maxWidth: .infinity).padding(.vertical, 14)
-                        .background(Color.blue).cornerRadius(12)
+                        .background(theme.accent).cornerRadius(theme.cornerRadiusMedium)
                 }
                 .padding(.horizontal)
             }
@@ -457,24 +429,23 @@ struct ExportView: View {
     private var successOverlay: some View {
         ZStack {
             theme.surface.edgesIgnoringSafeArea(.all).transition(.opacity)
-            ConfettiView().transition(.opacity)
             VStack(spacing: 16) {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 64)).foregroundColor(.green)
+                    .font(.system(size: 64)).foregroundColor(theme.success)
                     .scaleEffect(exportSuccess ? 1 : 0)
-                    .animation(.spring(response: 0.4, dampingFraction: 0.5), value: exportSuccess)
+                    .animation(AppTheme.animSnappy, value: exportSuccess)
                 Text("Exportación exitosa").font(.title2.bold()).foregroundColor(theme.textPrimary)
                 Text("\(exportFileName).\(selectedFormat.fileExtension)")
                     .font(.caption).foregroundColor(theme.textSecondary)
                 Button("Cerrar") {
-                    withAnimation(.easeOut(duration: 0.3)) {
+                    withAnimation(AppTheme.animSmooth) {
                         exportSuccess = false
                         exportVM.reset()
                     }
                 }
-                .font(.headline).foregroundColor(.accentColor)
+                .font(.headline).foregroundColor(theme.accent)
                 .padding(.horizontal, 32).padding(.vertical, 12)
-                .background(Color.accentColor.opacity(0.2)).cornerRadius(10)
+                .background(theme.accent.opacity(0.2)).cornerRadius(theme.cornerRadiusSmall)
             }.transition(.scale.combined(with: .opacity))
         }
     }
