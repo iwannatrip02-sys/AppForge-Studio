@@ -62,24 +62,27 @@ jobs:
       - name: Resolve SPM dependencies (OCCTSwift + Satin)
         working-directory: ios-app/AppForgeStudio
         run: |
-          if [ -f "*.xcodeproj/project.pbxproj" ]; then
-            xcodebuild -resolvePackageDependencies -project AppForgeStudio.xcodeproj -scheme AppForgeStudio -destination 'generic/platform=iOS'
-          else
-            swift package resolve
-          fi
+          xcodebuild -resolvePackageDependencies \
+            -project AppForgeStudio.xcodeproj \
+            -scheme AppForgeStudio \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath DerivedData
 
       - name: Patch SatinCore C++ narrowing errors (Triangulator.mm)
+        working-directory: ios-app/AppForgeStudio
         run: |
-          TRIANGULATOR=$(find /Users/runner/Library/Developer/Xcode/DerivedData -name Triangulator.mm -path "*/Satin/*" 2>/dev/null | head -1)
-          if [ -f "$TRIANGULATOR" ]; then
-            echo "Found: $TRIANGULATOR"
-            sed -i '' 's/\.i0 = v1->index, \.i1 = v2->index, \.i2 = v3->index/.i0 = static_cast<uint32_t>(v1->index), .i1 = static_cast<uint32_t>(v2->index), .i2 = static_cast<uint32_t>(v3->index)/g' "$TRIANGULATOR"
-            sed -i '' 's/\.i0 = v1->index/.i0 = static_cast<uint32_t>(v1->index)/g' "$TRIANGULATOR"
-            sed -i '' 's/\.index = index/.index = static_cast<int>(index)/g' "$TRIANGULATOR"
-            echo "Patched successfully"
-          else
-            echo "Triangulator.mm not found, continuing..."
+          TRIANGULATOR=$(find DerivedData/SourcePackages/checkouts -name Triangulator.mm -path "*/Satin/*" 2>/dev/null | head -1)
+          if [ ! -f "$TRIANGULATOR" ]; then
+            echo "FATAL: Triangulator.mm not found after resolve — patch cannot apply"
+            exit 1
           fi
+          echo "Found: $TRIANGULATOR"
+          sed -i '' 's/\.i0 = v1->index, \.i1 = v2->index, \.i2 = v3->index/.i0 = static_cast<uint32_t>(v1->index), .i1 = static_cast<uint32_t>(v2->index), .i2 = static_cast<uint32_t>(v3->index)/g' "$TRIANGULATOR"
+          sed -i '' 's/\.i0 = v1->index/.i0 = static_cast<uint32_t>(v1->index)/g' "$TRIANGULATOR"
+          sed -i '' 's/\.index = index/.index = static_cast<int>(index)/g' "$TRIANGULATOR"
+          PATCHED=$(grep -c "static_cast<uint32_t>" "$TRIANGULATOR" || true)
+          echo "static_cast occurrences after patch: $PATCHED"
+          if [ "$PATCHED" -eq 0 ]; then echo "FATAL: patch did not apply"; exit 1; fi
 
       - name: Install iOS Simulator runtime
         run: |
@@ -94,6 +97,7 @@ jobs:
         working-directory: ios-app/AppForgeStudio
         run: |
           echo "=== Starting build ==="
+          set -o pipefail
           if [ -d "AppForgeStudio.xcodeproj" ]; then
             xcodebuild build \
               -project AppForgeStudio.xcodeproj \
@@ -101,12 +105,11 @@ jobs:
               -sdk iphonesimulator \
               -destination 'generic/platform=iOS Simulator' \
               -configuration Debug \
+              -derivedDataPath DerivedData \
               CODE_SIGN_IDENTITY="" \
               CODE_SIGNING_REQUIRED=NO \
               CODE_SIGNING_ALLOWED=NO \
               2>&1 | tee build.log
-            echo "=== Build exit code: $? ==="
-            tail -50 build.log
           else
             echo "No xcodeproj found"
             exit 1
@@ -116,32 +119,24 @@ jobs:
         working-directory: ios-app/AppForgeStudio
         run: |
           echo "=== Starting tests ==="
+          set -o pipefail
           xcodebuild test \
             -project AppForgeStudio.xcodeproj \
             -scheme AppForgeStudio \
             -sdk iphonesimulator \
             -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M4)' \
             -configuration Debug \
+            -derivedDataPath DerivedData \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee test.log
-          echo "=== Tests exit code: $? ==="
-          tail -50 test.log
 
       - name: Archive and Package Unsigned IPA (device)
         if: success()
         continue-on-error: true
         working-directory: ios-app/AppForgeStudio
         run: |
-          echo "=== Re-applying SatinCore narrowing patch (SPM may have refreshed checkouts) ==="
-          for TRIANGULATOR in $(find /Users/runner/Library/Developer/Xcode/DerivedData -name Triangulator.mm -path "*/Satin/*" 2>/dev/null); do
-            echo "Patching: $TRIANGULATOR"
-            sed -i '' 's/\.i0 = v1->index, \.i1 = v2->index, \.i2 = v3->index/.i0 = static_cast<uint32_t>(v1->index), .i1 = static_cast<uint32_t>(v2->index), .i2 = static_cast<uint32_t>(v3->index)/g' "$TRIANGULATOR"
-            sed -i '' 's/\.i0 = v1->index/.i0 = static_cast<uint32_t>(v1->index)/g' "$TRIANGULATOR"
-            sed -i '' 's/\.index = index/.index = static_cast<int>(index)/g' "$TRIANGULATOR"
-            grep -c "static_cast<uint32_t>" "$TRIANGULATOR" || echo "WARNING: patch produced no static_cast"
-          done
           echo "=== Archiving for device (unsigned) ==="
           set -o pipefail
           xcodebuild archive \
@@ -150,14 +145,12 @@ jobs:
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -configuration Debug \
+            -derivedDataPath DerivedData \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             -archivePath AppForgeStudio.xcarchive \
             2>&1 | tee archive.log
-          ARCHIVE_EXIT=$?
-          echo "=== Archive exit code: $ARCHIVE_EXIT ==="
-          tail -30 archive.log
           echo "=== Packaging unsigned IPA ==="
           mkdir -p Payload
           APP_PATH=$(find AppForgeStudio.xcarchive/Products/Applications -name "*.app" -type d 2>/dev/null | head -1)
