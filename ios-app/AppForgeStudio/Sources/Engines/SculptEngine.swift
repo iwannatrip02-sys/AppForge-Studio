@@ -91,7 +91,7 @@ class SculptEngine {
         case .crease:
             vertex.position += vertex.normal * influence * 1.5
         case .grab:
-            let displacement = point.position - vertex.position
+            let displacement = simd_length(point.dragDelta) > 0.001 ? point.dragDelta : (point.position - vertex.position)
             vertex.position += displacement * influence * 0.3
         case .flatten:
             vertex.position -= vertex.normal * influence * 0.5

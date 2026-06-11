@@ -12,6 +12,7 @@ private struct FrameUniforms {
     var viewMatrix: simd_float4x4
     var projectionMatrix: simd_float4x4
     var cameraPosition: SIMD4<Float>
+    var normalMatrix: simd_float3x3
 }
 
 private struct BasicUniforms {
@@ -22,6 +23,7 @@ private struct BasicUniforms {
     var lightDirection: SIMD3<Float>
     var lightColor: SIMD3<Float>
     var lightIntensity: Float
+    var normalMatrix: simd_float3x3
 }
 
 struct GPUPBRMaterial {
@@ -29,6 +31,7 @@ struct GPUPBRMaterial {
     var metallic: Float
     var roughness: Float
     var ao: Float
+    var _padEmissionAlign: Float = 0
     var emissionR: Float; var emissionG: Float; var emissionB: Float; var _pad2: Float = 0
     var emissionIntensity: Float
 }
@@ -82,8 +85,11 @@ class SatinRenderer: NSObject, ObservableObject {
     func setSculptEngine(_ engine: SculptEngine) {
         self.sculptEngine = engine
     }
+    /// Number of times rebuildSceneFrom() has been called. Testability hook (F0 regression test).
+    private(set) var rebuildCount: Int = 0
     private var lastFrameTime: CFTimeInterval = 0
     private var sceneObjectCount: Int = 0
+    private var modelNameToObject: [String: Object] = [:]
 
     func updateAnimation() {
         let now = CACurrentMediaTime()
@@ -121,7 +127,8 @@ class SatinRenderer: NSObject, ObservableObject {
         var anyApplied = false
         for i in 0..<scene3D.models.count {
             let model = scene3D.models[i]
-            let transform = transforms[model.name] ?? transforms[model.id.uuidString]
+            let key = model.name
+            let transform = transforms[key] ?? transforms[model.id.uuidString]
             guard let transform = transform else { continue }
             anyApplied = true
 
@@ -137,14 +144,29 @@ class SatinRenderer: NSObject, ObservableObject {
             let scaleZ = simd_length(SIMD3<Float>(transform.columns.2.x, transform.columns.2.y, transform.columns.2.z))
             let scale = SIMD3<Float>(scaleX, scaleY, scaleZ)
 
+            // Update Scene3D model
             scene3D.models[i].position = translation
             scene3D.models[i].rotation = rotation
             scene3D.models[i].scale = scale
+
+            // Update Satin Object in-place (basic pipeline)
+            if let object = modelNameToObject[key] {
+                object.position = translation
+                object.rotation = rotation
+                object.scale = scale
+            }
+
+            // Update PBRRenderable model in-place (PBR pipeline)
+            if let pbrIndex = pbrRenderables.firstIndex(where: { $0.model.name == key || $0.model.id == model.id }) {
+                pbrRenderables[pbrIndex].model.position = translation
+                pbrRenderables[pbrIndex].model.rotation = rotation
+                pbrRenderables[pbrIndex].model.scale = scale
+            }
         }
 
         if anyApplied {
             self.scene3D = scene3D
-            rebuildSceneFrom(scene3D)
+            // Transforms updated in-place — no rebuild needed
         }
     }
 
@@ -543,9 +565,11 @@ class SatinRenderer: NSObject, ObservableObject {
     }
 
     private func rebuildSceneFrom(_ scene3D: Scene3D) {
+        rebuildCount += 1
         scene = Object()
         sceneObjectCount = scene3D.models.count
         pbrRenderables.removeAll()
+        modelNameToObject.removeAll()
 
         for model in scene3D.models {
             if model.usesPBR {
@@ -588,6 +612,7 @@ class SatinRenderer: NSObject, ObservableObject {
             } else {
                 let object = buildObject(from: model)
                 scene.add(object)
+                modelNameToObject[model.name] = object
             }
         }
     }
@@ -723,17 +748,26 @@ class SatinRenderer: NSObject, ObservableObject {
 
     func render(in view: MTKView) {
         if let se = sculptEngine, var scene = self.scene3D {
-            var modified = false
+            var modifiedModelIndices = Set<Int>()
             for i in 0..<scene.models.count {
                 for j in 0..<scene.models[i].meshes.count {
                     if se.applySculpt(to: &scene.models[i].meshes[j]) {
-                        modified = true
+                        modifiedModelIndices.insert(i)
                     }
                 }
             }
-            if modified {
+            if !modifiedModelIndices.isEmpty {
                 self.scene3D = scene
-                rebuildSceneFrom(scene)
+                // Update GPU buffers in-place for modified PBR models (no full scene rebuild)
+                for i in modifiedModelIndices where scene.models[i].usesPBR {
+                    let (vb, ib, ic) = createBuffersFromMeshes(scene.models[i].meshes)
+                    guard let vBuf = vb, let iBuf = ib, ic > 0 else { continue }
+                    if let pbrIndex = pbrRenderables.firstIndex(where: { $0.model.name == scene.models[i].name || $0.model.id == scene.models[i].id }) {
+                        pbrRenderables[pbrIndex].vertexBuffer = vBuf
+                        pbrRenderables[pbrIndex].indexBuffer = iBuf
+                        pbrRenderables[pbrIndex].indexCount = ic
+                    }
+                }
             }
         }
 
@@ -755,7 +789,8 @@ class SatinRenderer: NSObject, ObservableObject {
                 ambientColor: SIMD3<Float>(0.18, 0.18, 0.18),
                 lightDirection: scene3D?.lighting.directionalLight.direction ?? simd_normalize(SIMD3<Float>(0.0, -1.0, -1.0)),
                 lightColor: scene3D?.lighting.directionalLight.color ?? SIMD3<Float>(1.0, 1.0, 1.0),
-                lightIntensity: scene3D?.lighting.directionalLight.intensity ?? 0.8
+                lightIntensity: scene3D?.lighting.directionalLight.intensity ?? 0.8,
+                normalMatrix: matrix_identity_float3x3
             )
 
             encoder.setVertexBytes(&basicUniforms, length: MemoryLayout<BasicUniforms>.stride, index: 1)
@@ -805,11 +840,18 @@ class SatinRenderer: NSObject, ObservableObject {
 
             for pbrObj in pbrRenderables {
                 let modelMatrix = pbrObj.model.transform
+                let model3x3 = simd_float3x3(
+                    SIMD3<Float>(modelMatrix.columns.0.x, modelMatrix.columns.0.y, modelMatrix.columns.0.z),
+                    SIMD3<Float>(modelMatrix.columns.1.x, modelMatrix.columns.1.y, modelMatrix.columns.1.z),
+                    SIMD3<Float>(modelMatrix.columns.2.x, modelMatrix.columns.2.y, modelMatrix.columns.2.z)
+                )
+                let normalMatrix = model3x3.inverse.transpose
                 var frameUniforms = FrameUniforms(
                     modelMatrix: modelMatrix,
                     viewMatrix: viewMatrix,
                     projectionMatrix: projectionMatrix,
-                    cameraPosition: cameraPos4
+                    cameraPosition: cameraPos4,
+                    normalMatrix: normalMatrix
                 )
                 var materialUniforms = pbrObj.pbrMaterial
 
