@@ -18,7 +18,7 @@ class Model: ObservableObject {
     @Published var cadHistoryID: UUID?
     @Published var originOp: String?
     @Published var usesPBR: Bool = false
-    @Published var pbrMaterial: PBRMaterial = .default
+    @Published var pbrMaterial: PBRMaterial = PBRMaterial()
 
     @Published var position: SIMD3<Float>
     @Published var rotation: simd_quatf

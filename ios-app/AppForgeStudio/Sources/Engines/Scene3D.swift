@@ -115,15 +115,9 @@ struct Scene3D {
         }
     }
 
-    mutating func resolveSceneConstraints(method: SolveMethod = .gaussSeidel) {
+    mutating func resolveSceneConstraints() {
         configurePositionProvider()
-        var positions = constraintManager.collectPositions()
-        guard !positions.isEmpty else { return }
-        constraintManager.isSolving = true
-        let metrics = constraintManager.solve(positions: &positions, method: method)
-        constraintManager.lastMetrics = metrics
-        constraintManager.isSolving = false
-        applyPositions(positions)
+        constraintManager.resolveConstraints()
     }
 
     private mutating func applyPositions(_ positions: [UUID: SIMD3<Float>]) {

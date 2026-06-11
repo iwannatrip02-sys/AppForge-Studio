@@ -1,5 +1,6 @@
 import Foundation
 import simd
+import OSLog
 
 /// Bridges between CAD (OCCT B-rep) and Sculpt (mesh deformation) workflows.
 /// This is the AppForge differentiator: select a CAD face → sculpt it → re-integrate.

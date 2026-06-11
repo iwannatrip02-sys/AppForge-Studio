@@ -5,13 +5,13 @@ import simd
 import OSLog
 
 private let logger = Logger(subsystem: "com.appforgestudio", category: "SatinMesh")
-class SatinMesh: Object {
+class SatinMesh: Mesh {
     var vertexBuffer: MTLBuffer?
     var indexBuffer: MTLBuffer?
     var vertexCount: Int = 0
     var indexCount: Int = 0
     var meshColor: simd_float4 = simd_float4(0.5, 0.5, 0.5, 1.0)
-    
+
     init(device: MTLDevice, vertices: [Float] = [], indices: [UInt16] = [], color: simd_float4 = simd_float4(0.5, 0.5, 0.5, 1.0)) {
         let geometry = Geometry()
         let vertexData = !vertices.isEmpty ? vertices : [0,0,0, 0,0,1, 1,0,0, 1,0,1]
@@ -35,7 +35,11 @@ class SatinMesh: Object {
             }
         }
     }
-    
+
+    required init(from decoder: Decoder) throws {
+        try super.init(from: decoder)
+    }
+
     func updateColor(_ color: simd_float4) {
         meshColor = color
         material?.set("ModelColor", color)

@@ -891,7 +891,7 @@ struct PencilForceOverlay: UIViewRepresentable {
     }
 }
 
-fileprivate class PencilForceView: UIView {
+class PencilForceView: UIView {
     var onPencilForce: ((CGFloat, CGPoint) -> Void)?
     private let feedbackGen = UIImpactFeedbackGenerator(style: .light)
 

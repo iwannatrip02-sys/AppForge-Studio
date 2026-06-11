@@ -1,11 +1,11 @@
-import Foundation
+﻿import Foundation
 import simd
 import Metal
 import OSLog
 
 private let logger = Logger(subsystem: "com.appforgestudio", category: "VoxelRemesh")
 
-/// Voxel-based uniform remeshing — Nomad Sculpt's "Dynamesh" equivalent.
+/// Voxel-based uniform remeshing â€” Nomad Sculpt's "Dynamesh" equivalent.
 /// Converts any mesh to a clean, uniform-resolution triangle mesh using SDF marching cubes.
 @MainActor
 final class VoxelRemeshEngine {
@@ -25,7 +25,7 @@ final class VoxelRemeshEngine {
     /// Returns a clean, manifold mesh ready for sculpting.
     func remesh(_ mesh: Mesh) -> Mesh {
         guard let device = device else {
-            logger.warning("[VoxelRemesh] No Metal device — returning original mesh")
+            logger.warning("[VoxelRemesh] No Metal device â€” returning original mesh")
             return mesh
         }
         
@@ -52,7 +52,7 @@ final class VoxelRemeshEngine {
             result = simplifyMesh(result, targetCount: targetTriangles)
         }
         
-        logger.info("[VoxelRemesh] \(mesh.vertices.count) → \(result.vertices.count) vertices (\(result.indices.count/3) triangles)")
+        logger.info("[VoxelRemesh] \(mesh.vertices.count) â†’ \(result.vertices.count) vertices (\(result.indices.count/3) triangles)")
         return result
     }
     
@@ -294,7 +294,7 @@ private let MC_EDGE_TABLE: [[Int8]] = [
     [10,3,11,10,1,3,9,5,4,-1], [4,9,5,0,8,1,8,10,1,8,11,10,-1], [5,4,0,5,0,11,5,11,10,11,0,3,-1], [5,4,8,5,8,10,10,8,11,-1],
     [9,7,8,5,7,9,-1], [9,3,0,9,5,3,5,7,3,-1], [0,7,8,0,1,7,1,5,7,-1], [1,5,3,3,5,7,-1],
     [9,7,8,9,5,7,10,1,2,-1], [10,1,2,9,5,0,5,3,0,5,7,3,-1], [8,0,2,8,2,5,8,5,7,10,2,5,-1], [2,10,5,2,5,3,3,5,7,-1],
-    [7,11,2,7,8,11,5,9,4,-1], [9,5,4,0,11,2,0,8,11,0,2,?,-1], [2,3,11,0,1,8,1,7,8,1,5,7,-1], [11,2,1,11,1,7,7,1,5,-1],
+    [7,11,2,7,8,11,5,9,4,-1], [9,5,4,0,11,2,0,8,11,0,2,3,-1], [2,3,11,0,1,8,1,7,8,1,5,7,-1], [11,2,1,11,1,7,7,1,5,-1],
     [9,5,8,8,5,7,10,1,3,10,3,11,-1], [5,7,0,5,0,9,7,11,0,1,0,10,11,10,0,-1], [11,10,0,11,0,3,10,5,0,8,0,7,5,7,0,-1], [11,10,5,7,11,5,-1],
     [10,6,5,-1], [0,8,3,5,10,6,-1], [9,0,1,5,10,6,-1], [1,8,3,1,9,8,5,10,6,-1],
     [1,6,5,2,6,1,-1], [1,6,5,1,2,6,3,0,8,-1], [9,6,5,9,0,6,0,2,6,-1], [5,9,8,5,8,2,5,2,6,3,2,8,-1],

@@ -1,4 +1,4 @@
-import Foundation
+﻿import Foundation
 import simd
 import QuartzCore
 import Combine
@@ -528,6 +528,7 @@ class AnimationEngine: ObservableObject {
         let t = p.easingEnum.apply(rawT)
         return simd_mix(p.scaleValue, n.scaleValue, t)
     }
+}
 
 // MARK: - simd_float4x4 Extensions
 private extension simd_float4x4 {
@@ -544,5 +545,4 @@ private extension simd_float4x4 {
         m.columns.2.z = v.z
         return m
     }
-}
 }
