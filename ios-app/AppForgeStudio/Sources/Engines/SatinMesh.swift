@@ -5,7 +5,7 @@ import simd
 import OSLog
 
 private let logger = Logger(subsystem: "com.appforgestudio", category: "SatinMesh")
-class SatinMesh: Mesh {
+class SatinMesh: Satin.Mesh {
     var vertexBuffer: MTLBuffer?
     var indexBuffer: MTLBuffer?
     var vertexCount: Int = 0
