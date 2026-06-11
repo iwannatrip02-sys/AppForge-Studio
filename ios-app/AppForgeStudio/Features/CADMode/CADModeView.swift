@@ -54,6 +54,12 @@ struct CADModeView: View {
         [.line, .circle, .rectangle, .arc, .dimension, .constraint]
     }
 
+    private var primitiveTools: [(label: String, icon: String)] {
+        [("Box", "cube"), ("Sphere", "globe"), ("Cylinder", "cylinder"), ("Cone", "cone"), ("Torus", "torus")]
+    }
+
+    @State private var primitiveSize: Float = 1.0
+
     var body: some View {
         VStack(spacing: 0) {
             if isSketchTool {
@@ -243,6 +249,34 @@ struct CADModeView: View {
                     ForEach(cadTools, id: \.self) { tool in
                         toolButton(tool)
                     }
+                    theme.border.frame(width: 1, height: 20).padding(.horizontal, 4)
+                    // --- Primitive creation buttons (F3.T2) ---
+                    ForEach(primitiveTools.indices, id: \.self) { idx in
+                        let prim = primitiveTools[idx]
+                        Button(action: {
+                            HapticService.shared.light()
+                            performAddPrimitive(prim.label)
+                        }) {
+                            HStack(spacing: 2) {
+                                Image(systemName: prim.icon)
+                                    .font(.system(size: 8))
+                                Text(prim.label)
+                                    .font(.system(size: 9))
+                            }
+                            .padding(.horizontal, 5).padding(.vertical, 3)
+                            .background(Color.green.opacity(0.3))
+                            .foregroundColor(theme.textPrimary).cornerRadius(5)
+                        }
+                        .accessibilityLabel("Agregar \(prim.label)")
+                        .dynamicTypeSize(...DynamicTypeSize.xLarge)
+                    }
+                    // --- Size slider for primitives ---
+                    Slider(value: $primitiveSize, in: 0.2...3.0)
+                        .frame(width: 80)
+                    Text(String(format: "%.1f", primitiveSize))
+                        .font(.system(size: 8))
+                        .foregroundColor(theme.textSecondary)
+                        .frame(width: 22)
                     theme.border.frame(width: 1, height: 20).padding(.horizontal, 4)
                     ForEach(sketchTools, id: \.self) { tool in
                         toolButton(tool)
@@ -622,6 +656,60 @@ struct CADModeView: View {
         let modelIDs = canvasVM.scene.models.map { $0.id }
         assemblyEngine.createAssembly(name: "Group_\(UUID().uuidString.prefix(8))", modelIDs: modelIDs)
         sketchEngine.logOperation(type: .booleanUnion, description: "Assembly agrupado (\(modelIDs.count) modelos)")
+    }
+
+    // MARK: - Primitive Creation (F3.T2)
+
+    private func performAddPrimitive(_ type: String) {
+        let size = Double(primitiveSize)
+        let occt = OCCTEngine.shared
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            let shape: OCCTSwift.Shape?
+            let opDescription: String
+
+            switch type {
+            case "Box":
+                shape = occt.box(width: size, height: size, depth: size)
+                opDescription = "Box \(String(format: "%.1f", size))mm"
+            case "Sphere":
+                shape = occt.sphere(radius: size * 0.5)
+                opDescription = "Sphere r=\(String(format: "%.1f", size * 0.5))mm"
+            case "Cylinder":
+                shape = occt.cylinder(radius: size * 0.5, height: size)
+                opDescription = "Cylinder r=\(String(format: "%.1f", size * 0.5)) h=\(String(format: "%.1f", size))mm"
+            case "Cone":
+                shape = occt.cone(bottomRadius: size * 0.5, topRadius: 0, height: size)
+                opDescription = "Cone r=\(String(format: "%.1f", size * 0.5)) h=\(String(format: "%.1f", size))mm"
+            case "Torus":
+                shape = occt.torus(majorRadius: size * 0.5, minorRadius: size * 0.15)
+                opDescription = "Torus R=\(String(format: "%.1f", size * 0.5)) r=\(String(format: "%.1f", size * 0.15))mm"
+            default:
+                return
+            }
+
+            guard let validShape = shape,
+                  let mesh = OCCTBridge.toMesh(validShape, quality: .medium) else {
+                DispatchQueue.main.async {
+                    self.csgStatusMessage = "Failed to create \(type)"
+                }
+                return
+            }
+
+            let name = "\(type)_\(UUID().uuidString.prefix(8))"
+            let model = Model(name: name, meshes: [mesh])
+
+            DispatchQueue.main.async {
+                self.canvasVM.scene.addModel(model)
+                self.canvasVM.scene.cadHistory.pushOperation(
+                    CADOperation(type: .createShape, description: opDescription,
+                                 parameters: ["size": Double(self.primitiveSize)])
+                )
+                self.canvasVM.objectWillChange.send()
+                self.sketchEngine.logOperation(type: .createShape, description: opDescription)
+            }
+        }
     }
 
     private func startCSGOperation(_ tool: CADTool) {

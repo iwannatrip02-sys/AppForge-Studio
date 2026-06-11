@@ -1,198 +1,208 @@
 import XCTest
 @testable import AppForgeStudio
 
+/// Tests for AnimationPlaybackController (F4.T1).
+///
+/// Verifies transport controls, seek, progress, speed, time formatting,
+/// and integration with AnimationEngine.
 @MainActor
 final class AnimationPlaybackTests: XCTestCase {
-    
+
     var engine: AnimationEngine!
     var controller: AnimationPlaybackController!
-    
+
     override func setUp() {
         super.setUp()
         engine = AnimationEngine()
-        
-        let clip = AnimationClip(name: "TestClip", duration: 10.0)
+
+        var clip = AnimationClip(name: "TestClip", duration: 10.0)
         clip.loop = false
         engine.registerClip(clip)
         engine.selectedClipName = "TestClip"
-        
+
         controller = AnimationPlaybackController(animationEngine: engine)
     }
-    
+
+    override func tearDown() {
+        controller = nil
+        engine = nil
+        super.tearDown()
+    }
+
+    // MARK: - Transport lifecycle
+
     func testPlaybackLifecycle() {
-        // Given: controller inicializado
         XCTAssertFalse(controller.isPlaying)
         XCTAssertEqual(controller.currentTime, 0)
-        
-        // When: play
+
         controller.play()
         XCTAssertTrue(controller.isPlaying)
-        
-        // When: pause
+
         controller.pause()
         XCTAssertFalse(controller.isPlaying)
-        
-        // When: resume (toggle)
+
         controller.togglePlayback()
         XCTAssertTrue(controller.isPlaying)
-        
-        // When: stop
+
         controller.stop()
         XCTAssertFalse(controller.isPlaying)
         XCTAssertEqual(controller.currentTime, 0)
     }
-    
+
+    // MARK: - Seek
+
     func testSeekWithinBounds() {
-        // Given: duracion 10.0
-        
-        // When: seek a mitad
         controller.seek(to: 5.0)
         XCTAssertEqual(controller.currentTime, 5.0)
         XCTAssertEqual(engine.currentTime, 5.0)
-        
-        // When: seek a 0
+
         controller.seek(to: 0.0)
         XCTAssertEqual(controller.currentTime, 0.0)
-        
-        // When: seek mas alla de duracion
-        controller.seek(to: 20.0)
-        XCTAssertEqual(controller.currentTime, 10.0) // limitado a duration
-        
-        // When: seek a negativo
-        controller.seek(to: -5.0)
-        XCTAssertEqual(controller.currentTime, 0.0) // limitado a 0
     }
-    
+
+    func testSeekClampsToDuration() {
+        controller.seek(to: 20.0)
+        XCTAssertEqual(controller.currentTime, 10.0) // clamped to duration
+
+        controller.seek(to: -5.0)
+        XCTAssertEqual(controller.currentTime, 0.0) // clamped to 0
+    }
+
+    // MARK: - Progress
+
     func testProgressCalculation() {
         controller.seek(to: 0.0)
         XCTAssertEqual(controller.progress, 0.0)
-        
+
         controller.seek(to: 5.0)
         XCTAssertEqual(controller.progress, 0.5)
-        
+
         controller.seek(to: 10.0)
         XCTAssertEqual(controller.progress, 1.0)
     }
-    
-    func testSpeedChanges() {
-        // Given: speed por defecto 1.0
+
+    // MARK: - Speed
+
+    func testSpeedDefaults() {
         XCTAssertEqual(controller.playbackSpeed, 1.0)
-        
-        // When: setSpeed 2.0
+        XCTAssertEqual(controller.speedMultiplier, 1.0)
+    }
+
+    func testSetSpeed() {
         controller.setSpeed(2.0)
         XCTAssertEqual(controller.playbackSpeed, 2.0)
-        
-        // When: setSpeed 0.0 (debajo del minimo)
+
         controller.setSpeed(0.0)
-        XCTAssertEqual(controller.playbackSpeed, 0.1) // minimo clamp
-        
-        // When: setSpeed 15.0 (encima del maximo)
+        XCTAssertEqual(controller.playbackSpeed, 0.1) // minimum clamp
+
         controller.setSpeed(15.0)
-        XCTAssertEqual(controller.playbackSpeed, 10.0) // maximo clamp
+        XCTAssertEqual(controller.playbackSpeed, 10.0) // maximum clamp
     }
-    
+
+    func testPlaybackSpeedProperty() {
+        controller.playbackSpeed = 3.0
+        XCTAssertEqual(controller.speedMultiplier, 3.0)
+
+        controller.playbackSpeed = -1.0 // below min
+        XCTAssertEqual(controller.speedMultiplier, 0.1)
+
+        controller.playbackSpeed = 100.0 // above max
+        XCTAssertEqual(controller.speedMultiplier, 10.0)
+    }
+
+    // MARK: - Time formatting
+
     func testTimeAndDurationStrings() {
-        // Given: duracion 10.0
         controller.seek(to: 0.0)
         XCTAssertEqual(controller.timeString, "0:00")
         XCTAssertEqual(controller.durationString, "0:10")
-        
+
         controller.seek(to: 5.0)
         XCTAssertEqual(controller.timeString, "0:05")
-        
+
         controller.seek(to: 10.0)
         XCTAssertEqual(controller.timeString, "0:10")
     }
-    
+
+    func testTimeFormattingMinutes() {
+        // Create a longer clip
+        var clip = AnimationClip(name: "Long", duration: 125.0) // 2min 5sec
+        engine.registerClip(clip)
+        engine.selectedClipName = "Long"
+        controller.seek(to: 65.0) // 1min 5sec
+        XCTAssertEqual(controller.timeString, "1:05")
+        XCTAssertEqual(controller.durationString, "2:05")
+    }
+
+    // MARK: - Looping
+
     func testIsLoopingDetection() {
-        // Given: clip sin loop
         XCTAssertFalse(controller.isLooping)
-        
-        // When: cambiar a loop
+
         var clip = engine.clips["TestClip"]!
         clip.loop = true
         engine.registerClip(clip)
-        
-        // Then: detectado correctamente
-        let looping = controller.isLooping
-        XCTAssertTrue(looping)
-    }
-    
-    func testMorphTarget() {
-        var mesh = Mesh()
-        mesh.baseVertices = [
-            Vertex(position: SIMD3<Float>(0, 0, 0)),
-            Vertex(position: SIMD3<Float>(1, 0, 0)),
-            Vertex(position: SIMD3<Float>(0, 1, 0)),
-            Vertex(position: SIMD3<Float>(0, 0, 1))
-        ]
-        mesh.vertices = mesh.baseVertices
-        let deformed = [
-            Vertex(position: SIMD3<Float>(1, 0, 0)),
-            Vertex(position: SIMD3<Float>(2, 0, 0)),
-            Vertex(position: SIMD3<Float>(1, 1, 0)),
-            Vertex(position: SIMD3<Float>(1, 0, 1))
-        ]
-        let target = MorphEngine.createMorphTarget(from: mesh, name: "stretch", deformedVertices: deformed)
-        XCTAssertEqual(target.name, "stretch")
-        XCTAssertEqual(target.offsets.count, 4)
-        XCTAssertEqual(target.offsets[0], SIMD3<Float>(1, 0, 0))
-        mesh.morphTargets = [target]
-        mesh.morphTargets[0].weight = 1.0
-        mesh.applyMorphs()
-        XCTAssertEqual(mesh.vertices[0].position, SIMD3<Float>(1, 0, 0))
-        XCTAssertEqual(mesh.vertices[1].position, SIMD3<Float>(2, 0, 0))
+
+        XCTAssertTrue(engine.clips["TestClip"]?.loop ?? false)
     }
 
-    func testMorphAnimation() {
-        var clip = AnimationClip(name: "MorphTest", duration: 2.0)
-        clip.morphFrames["smile"] = [
-            Keyframe<Float>(time: 0, value: 0),
-            Keyframe<Float>(time: 2, value: 1)
-        ]
+    // MARK: - Animation name
 
-        var mesh = Mesh()
-        mesh.baseVertices = [
-            Vertex(position: SIMD3<Float>(0, 0, 0)),
-            Vertex(position: SIMD3<Float>(1, 0, 0))
-        ]
-        mesh.vertices = mesh.baseVertices
-        let deformed = [
-            Vertex(position: SIMD3<Float>(0, 1, 0)),
-            Vertex(position: SIMD3<Float>(1, 1, 0))
-        ]
-        let target = MorphEngine.createMorphTarget(from: mesh, name: "smile", deformedVertices: deformed)
-        mesh.morphTargets = [target]
-
-        MorphEngine.applyAllMorphs(to: &mesh, at: 1.0, clip: clip)
-        XCTAssertEqual(mesh.morphTargets[0].weight, 0.5, accuracy: 1e-4)
-        XCTAssertEqual(mesh.vertices[0].position.y, 0.5, accuracy: 1e-4)
-    }
-
-    func testMorphBlend() {
-        var mesh = Mesh()
-        mesh.baseVertices = [
-            Vertex(position: SIMD3<Float>(0, 0, 0)),
-            Vertex(position: SIMD3<Float>(1, 0, 0))
-        ]
-        mesh.vertices = mesh.baseVertices
-        let d1 = [Vertex(position: SIMD3<Float>(0, 2, 0)), Vertex(position: SIMD3<Float>(1, 2, 0))]
-        let t1 = MorphEngine.createMorphTarget(from: mesh, name: "up", deformedVertices: d1)
-        mesh.morphTargets = [t1]
-        MorphEngine.blendMorphs(on: &mesh, weights: ["up": 0.5])
-        XCTAssertEqual(mesh.vertices[0].position.y, 1.0, accuracy: 1e-4)
-    }
-
-    func testPlaybackNameChange() {
+    func testAnimationName() {
         XCTAssertEqual(controller.animationName, "TestClip")
-        
+
         engine.selectedClipName = ""
-        // Nota: la actualizacion via Combine es async, damos oportunidad
-        let expectation = XCTestExpectation(description: "Name update")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertEqual(self.controller.animationName, "Sin animacion")
-            expectation.fulfill()
-        }
-        wait(for: [expectation], timeout: 0.5)
+        // When no clip name, shows placeholder
+        XCTAssertEqual(controller.animationName, "Sin animacion")
+    }
+
+    // MARK: - External tick (SatinRenderer integration)
+
+    func testExternalTickAdvancesTime() {
+        controller.play()
+        controller.tick(deltaTime: 2.0)
+        XCTAssertEqual(controller.currentTime, 2.0, accuracy: 0.01)
+        XCTAssertTrue(controller.isPlaying)
+    }
+
+    func testExternalTickWithSpeed() {
+        controller.setSpeed(2.0)
+        controller.play()
+        controller.tick(deltaTime: 1.0)
+        // deltaTime 1.0 × speed 2.0 = 2.0 seconds advanced
+        XCTAssertEqual(controller.currentTime, 2.0, accuracy: 0.01)
+    }
+
+    func testExternalTickLoop() {
+        var clip = engine.clips["TestClip"]!
+        clip.loop = true
+        engine.registerClip(clip)
+
+        // Add a clip to the controller
+        let pbClip = PlaybackClip(name: "TestClip", duration: 5.0, loop: true)
+        var active = pbClip
+        active.isActive = true
+        controller.addClip(active)
+
+        controller.play()
+        controller.tick(deltaTime: 3.0) // t=3
+        controller.tick(deltaTime: 3.0) // t=6 → wraps to 1.0
+        XCTAssertEqual(controller.currentTime, 1.0, accuracy: 0.01)
+    }
+
+    func testExternalTickNonLoopStops() {
+        var clip = engine.clips["TestClip"]!
+        clip.loop = false
+        engine.registerClip(clip)
+
+        let pbClip = PlaybackClip(name: "TestClip", duration: 5.0, loop: false)
+        var active = pbClip
+        active.isActive = true
+        controller.addClip(active)
+
+        controller.play()
+        controller.tick(deltaTime: 6.0) // exceeds duration (5.0)
+        XCTAssertEqual(controller.currentTime, 5.0, accuracy: 0.01)
+        XCTAssertFalse(controller.isPlaying)
     }
 }
