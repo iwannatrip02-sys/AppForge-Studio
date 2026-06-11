@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import simd
 
+@MainActor
 class ToolViewModel: ObservableObject {
     @Published var selectedTool: CADTool = .select
     @Published var gridSnapEnabled: Bool = false
