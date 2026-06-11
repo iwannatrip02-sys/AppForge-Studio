@@ -253,7 +253,7 @@ float2 direction_to_uv(float3 dir) {
 }
 
 kernel void equirect_to_cubemap(
-    texture2d<float, access::read> equirect [[texture(0)]],
+    texture2d<float, access::sample> equirect [[texture(0)]],
     texturecube<float, access::write> cubemap [[texture(1)]],
     uint3 tid [[thread_position_in_grid]]
 ) {
@@ -267,7 +267,7 @@ kernel void equirect_to_cubemap(
 }
 
 kernel void irradiance_convolution(
-    texturecube<float, access::read> envMap [[texture(0)]],
+    texturecube<float, access::sample> envMap [[texture(0)]],
     texturecube<float, access::write> irradiance [[texture(1)]],
     uint3 tid [[thread_position_in_grid]]
 ) {
@@ -332,7 +332,7 @@ float3 importance_sample_ggx(float2 xi, float3 N, float roughness) {
 }
 
 kernel void prefilter_convolution(
-    texturecube<float, access::read> envMap [[texture(0)]],
+    texturecube<float, access::sample> envMap [[texture(0)]],
     texturecube<float, access::write> prefilter [[texture(1)]],
     constant float& roughness [[buffer(0)]],
     uint3 tid [[thread_position_in_grid]]
