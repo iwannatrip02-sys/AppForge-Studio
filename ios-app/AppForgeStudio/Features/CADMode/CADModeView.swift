@@ -597,6 +597,7 @@ struct CADModeView: View {
         HapticService.shared.selection()
     }
 
+    @MainActor
     private func performBooleanUnion() {
         guard canvasVM.scene.models.count >= 2 else { return }
         let meshA = canvasVM.scene.models[0].meshes.first ?? Mesh()
@@ -605,17 +606,15 @@ struct CADModeView: View {
 
         sketchEngine.logOperation(type: .booleanUnion, description: "Union de 2 modelos")
 
-        DispatchQueue.global(qos: .userInitiated).async {
-            let engine = BooleanEngine()
-            let result = engine.booleanUnion(a: meshA, b: meshB)
-            DispatchQueue.main.async {
-                let model = Model(name: "Union_\(UUID().uuidString.prefix(8))", meshes: [result])
-                canvasVM.scene.addModel(model)
-                canvasVM.objectWillChange.send()
-            }
-        }
+        let engine = BooleanEngine()
+        let result = engine.booleanUnion(a: meshA, b: meshB)
+        let model = Model(name: "Union_\(UUID().uuidString.prefix(8))")
+        model.meshes = [result]
+        canvasVM.scene.addModel(model)
+        canvasVM.objectWillChange.send()
     }
 
+    @MainActor
     private func performBooleanSubtract() {
         guard canvasVM.scene.models.count >= 2 else { return }
         let meshA = canvasVM.scene.models[0].meshes.first ?? Mesh()
@@ -624,17 +623,15 @@ struct CADModeView: View {
 
         sketchEngine.logOperation(type: .booleanSubtract, description: "Diferencia de 2 modelos")
 
-        DispatchQueue.global(qos: .userInitiated).async {
-            let engine = BooleanEngine()
-            let result = engine.booleanDifference(a: meshA, b: meshB)
-            DispatchQueue.main.async {
-                let model = Model(name: "Subtract_\(UUID().uuidString.prefix(8))", meshes: [result])
-                canvasVM.scene.addModel(model)
-                canvasVM.objectWillChange.send()
-            }
-        }
+        let engine = BooleanEngine()
+        let result = engine.booleanDifference(a: meshA, b: meshB)
+        let model = Model(name: "Subtract_\(UUID().uuidString.prefix(8))")
+        model.meshes = [result]
+        canvasVM.scene.addModel(model)
+        canvasVM.objectWillChange.send()
     }
 
+    @MainActor
     private func performBooleanIntersect() {
         guard canvasVM.scene.models.count >= 2 else { return }
         let meshA = canvasVM.scene.models[0].meshes.first ?? Mesh()
@@ -643,15 +640,12 @@ struct CADModeView: View {
 
         sketchEngine.logOperation(type: .booleanIntersect, description: "Interseccion de 2 modelos")
 
-        DispatchQueue.global(qos: .userInitiated).async {
-            let engine = BooleanEngine()
-            let result = engine.booleanIntersection(a: meshA, b: meshB)
-            DispatchQueue.main.async {
-                let model = Model(name: "Intersect_\(UUID().uuidString.prefix(8))", meshes: [result])
-                canvasVM.scene.addModel(model)
-                canvasVM.objectWillChange.send()
-            }
-        }
+        let engine = BooleanEngine()
+        let result = engine.booleanIntersection(a: meshA, b: meshB)
+        let model = Model(name: "Intersect_\(UUID().uuidString.prefix(8))")
+        model.meshes = [result]
+        canvasVM.scene.addModel(model)
+        canvasVM.objectWillChange.send()
     }
 
     private func performGroupAssembly() {
@@ -749,6 +743,7 @@ struct CADModeView: View {
         }
     }
 
+    @MainActor
     private func performCSGWithSelectedShapes() {
         guard let idxA = toolVM.csgShapeAIndex,
               let idxB = toolVM.csgShapeBIndex,
@@ -762,29 +757,25 @@ struct CADModeView: View {
         csgStatusMessage = "Applying..."
         let operation = selectedTool
 
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
-            let engine = BooleanEngine()
-            let result: Mesh
-            switch operation {
-            case .booleanUnion:
-                result = engine.booleanUnion(a: meshA, b: meshB)
-            case .booleanSubtract:
-                result = engine.booleanDifference(a: meshA, b: meshB)
-            case .booleanIntersect:
-                result = engine.booleanIntersection(a: meshA, b: meshB)
-            default:
-                return
-            }
-            DispatchQueue.main.async {
-                let name = "\(operation.rawValue)_\(UUID().uuidString.prefix(8))"
-                let model = Model(name: name, meshes: [result])
-                self.canvasVM.scene.addModel(model)
-                self.canvasVM.objectWillChange.send()
-                self.sketchEngine.logOperation(type: .booleanUnion, description: "CSG \(operation.rawValue) de 2 modelos")
-                self.resetCSGSelection()
-            }
+        let engine = BooleanEngine()
+        let result: Mesh
+        switch operation {
+        case .booleanUnion:
+            result = engine.booleanUnion(a: meshA, b: meshB)
+        case .booleanSubtract:
+            result = engine.booleanDifference(a: meshA, b: meshB)
+        case .booleanIntersect:
+            result = engine.booleanIntersection(a: meshA, b: meshB)
+        default:
+            return
         }
+        let name = "\(operation.rawValue)_\(UUID().uuidString.prefix(8))"
+        let model = Model(name: name)
+        model.meshes = [result]
+        canvasVM.scene.addModel(model)
+        canvasVM.objectWillChange.send()
+        sketchEngine.logOperation(type: .booleanUnion, description: "CSG \(operation.rawValue) de 2 modelos")
+        resetCSGSelection()
     }
 
     @ViewBuilder
@@ -932,6 +923,7 @@ class PencilForceView: UIView {
 
 // MARK: - CAD Tool Execution
 
+@MainActor
 private func executeCADTool(_ tool: CADTool, canvasVM: CanvasViewModel, toolVM: ToolViewModel) {
     guard let firstMesh = canvasVM.scene.models.first?.meshes.first else { return }
     var mutableMesh = firstMesh
@@ -960,21 +952,9 @@ private func executeCADTool(_ tool: CADTool, canvasVM: CanvasViewModel, toolVM: 
         _ = engine.computeShell(faceIndex: 0, thickness: toolVM.shellThickness, mesh: &mutableMesh)
 
     case .loft:
-        let engine = LoftEngine()
-        let profile1 = mutableMesh.vertices
-        let profile2 = profile1.map { v in
-            Vertex(position: v.position + SIMD3<Float>(0, 0, 0.3),
-                   normal: v.normal, uv: v.uv)
-        }
-        let profile3 = profile1.map { v in
-            Vertex(position: v.position + SIMD3<Float>(0.15, 0, 0.4),
-                   normal: v.normal, uv: v.uv)
-        }
-        let loftedMesh = engine.computeLoft(curves: [profile1, profile2, profile3], segments: 8)
-        if !loftedMesh.vertices.isEmpty {
-            let model = Model(name: "Loft_\(UUID().uuidString.prefix(8))", meshes: [loftedMesh])
-            canvasVM.scene.addModel(model)
-        }
+        // TODO(F3): LoftEngine.loft(profiles:solid:quality:) expects [Wire], not [Vertex].
+        // Vertex→Wire bridging not yet implemented. No-op until F3.
+        logger.warning("TODO(F3): Loft operation skipped — Wire bridging needed")
 
     case .sweep:
         let engine = SweepEngine()
@@ -987,7 +967,8 @@ private func executeCADTool(_ tool: CADTool, canvasVM: CanvasViewModel, toolVM: 
         ]
         let sweptMesh = engine.computeSweep(profile: profile, path: path, segments: 12)
         if !sweptMesh.vertices.isEmpty {
-            let model = Model(name: "Sweep_\(UUID().uuidString.prefix(8))", meshes: [sweptMesh])
+            let model = Model(name: "Sweep_\(UUID().uuidString.prefix(8))")
+            model.meshes = [sweptMesh]
             canvasVM.scene.addModel(model)
         }
 

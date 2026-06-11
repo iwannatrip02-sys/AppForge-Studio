@@ -138,7 +138,7 @@ struct CADSketchView: View {
 
                             switch selectedTool {
                             case .line:
-                                if case .line(let last)? = sketchEngine.entities.compactMap({
+                                if let last = sketchEngine.entities.compactMap({
                                     if case .line(let l) = $0 { return l }
                                     return nil
                                 }).last {
@@ -237,7 +237,7 @@ struct EntityView2: View {
             switch entity {
             case .point(let p):
                 let cp = sc(p.position)
-                ctx.fill(Path(ellipseIn: CGRect(x: cp.x-3, y: cp.y-3, w: 6, h: 6)), with: .color(themeManager.currentTheme.textPrimary))
+                ctx.fill(Path(ellipseIn: CGRect(x: cp.x-3, y: cp.y-3, width: 6, height: 6)), with: .color(themeManager.currentTheme.textPrimary))
             case .line(let l):
                 if let s = points.first(where: { $0.id == l.start }), let e = points.first(where: { $0.id == l.end }) {
                     var p = Path(); p.move(to: sc(s.position)); p.addLine(to: sc(e.position))
@@ -246,11 +246,11 @@ struct EntityView2: View {
             case .circle(let c):
                 if let cp = points.first(where: { $0.id == c.center }) {
                     let cpt = sc(cp.position); let r = CGFloat(c.radius * 200)
-                    ctx.stroke(Path(ellipseIn: CGRect(x: cpt.x-r, y: cpt.y-r, w: r*2, h: r*2)), with: .color(.cyan), lineWidth: 1.5)
+                    ctx.stroke(Path(ellipseIn: CGRect(x: cpt.x-r, y: cpt.y-r, width: r*2, height: r*2)), with: .color(.cyan), lineWidth: 1.5)
                 }
             case .rectangle(let r):
                 if let op = points.first(where: { $0.id == r.origin }) {
-                    let opt = sc(op.position); let sz = CGSize(w: CGFloat(r.size.x*200), h: CGFloat(r.size.y*200))
+                    let opt = sc(op.position); let sz = CGSize(width: CGFloat(r.size.x*200), height: CGFloat(r.size.y*200))
                     ctx.stroke(Path(CGRect(origin: opt, size: sz)), with: .color(.cyan), lineWidth: 1.5)
                 }
             case .arc(let a):
