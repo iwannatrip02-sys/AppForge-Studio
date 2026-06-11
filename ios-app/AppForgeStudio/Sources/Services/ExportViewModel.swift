@@ -11,6 +11,7 @@ class ExportViewModel: ObservableObject {
         case stl = "STL"
         case step = "STEP"
         case usdz = "USDZ"
+        case gltf = "GLTF"
         case fbx = "FBX"
         var id: String { rawValue }
         var fileExtension: String {
@@ -19,6 +20,7 @@ class ExportViewModel: ObservableObject {
             case .stl: return "stl"
             case .step: return "step"
             case .usdz: return "usdz"
+            case .gltf: return "gltf"
             case .fbx: return "fbx"
             }
         }
@@ -28,6 +30,7 @@ class ExportViewModel: ObservableObject {
             case .stl: return "Estereolitografia"
             case .step: return "STEP CAD"
             case .usdz: return "Universal Scene Description"
+            case .gltf: return "GL Transmission Format"
             case .fbx: return "Autodesk FBX"
             }
         }
@@ -37,6 +40,7 @@ class ExportViewModel: ObservableObject {
             case .obj: return "doc.text.fill"
             case .step: return "gearshape.fill"
             case .usdz: return "arkit"
+            case .gltf: return "circle.hexagongrid"
             case .fbx: return "square.3.layers.3d"
             }
         }
@@ -46,6 +50,7 @@ class ExportViewModel: ObservableObject {
             case .stl: return UTType(filenameExtension: "stl") ?? .data
             case .step: return UTType(filenameExtension: "step") ?? .data
             case .usdz: return UTType(filenameExtension: "usdz") ?? .data
+            case .gltf: return UTType(filenameExtension: "gltf") ?? .data
             case .fbx: return UTType(filenameExtension: "fbx") ?? .data
             }
         }
@@ -89,6 +94,7 @@ class ExportViewModel: ObservableObject {
         case .stl: mappedFormat = .stl
         case .step: mappedFormat = .step
         case .usdz: mappedFormat = .usdz
+        case .gltf: mappedFormat = .gltf
         case .fbx: mappedFormat = .fbx
         }
 

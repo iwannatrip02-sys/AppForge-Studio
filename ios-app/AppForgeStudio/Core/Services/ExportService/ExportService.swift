@@ -29,6 +29,80 @@ enum ExportError: Error, LocalizedError {
     }
 }
 
+// MARK: - Mesh Validation (watertight/manifold pre-export check)
+
+/// Individual validation issue found during mesh inspection.
+enum MeshValidationIssue: LocalizedError, CustomStringConvertible {
+    case orphanFace(faceIndex: Int, vertexIndex: UInt32, vertexCount: Int)
+    case nonManifoldEdge(v0: UInt32, v1: UInt32, faceCount: Int)
+    case nanPosition(vertexIndex: Int)
+    case nanNormal(vertexIndex: Int)
+    case degenerateFace(faceIndex: Int, area: Float)
+    case zeroAreaFace(faceIndex: Int)
+    case zeroLengthEdge(v0: UInt32, v1: UInt32)
+
+    var description: String {
+        switch self {
+        case .orphanFace(let fi, let vi, let vc):
+            return "Cara \(fi): índice \(vi) fuera de rango (máx \(vc - 1))"
+        case .nonManifoldEdge(let v0, let v1, let fc):
+            return "Arista (\(v0),\(v1)) compartida por \(fc) caras (non-manifold)"
+        case .nanPosition(let vi):
+            return "Vértice \(vi): posición contiene NaN"
+        case .nanNormal(let vi):
+            return "Vértice \(vi): normal contiene NaN"
+        case .degenerateFace(let fi, let area):
+            return "Cara \(fi): área degenerada (\(String(format: "%.8f", area)))"
+        case .zeroAreaFace(let fi):
+            return "Cara \(fi): área cero (vértices colineales o duplicados)"
+        case .zeroLengthEdge(let v0, let v1):
+            return "Arista (\(v0),\(v1)): longitud cero (vértices coincidentes)"
+        }
+    }
+
+    var errorDescription: String? { description }
+
+    var severity: ValidationSeverity {
+        switch self {
+        case .orphanFace, .nonManifoldEdge: return .error
+        case .nanPosition, .nanNormal: return .error
+        case .degenerateFace, .zeroAreaFace, .zeroLengthEdge: return .warning
+        }
+    }
+}
+
+enum ValidationSeverity: String {
+    case error = "Error"
+    case warning = "Advertencia"
+}
+
+/// Result of pre-export mesh validation.
+struct MeshValidationReport: CustomStringConvertible {
+    let issues: [MeshValidationIssue]
+    let meshName: String
+
+    var errorCount: Int { issues.filter { $0.severity == .error }.count }
+    var warningCount: Int { issues.filter { $0.severity == .warning }.count }
+    var isWatertight: Bool { errorCount == 0 && !issues.contains(where: { if case .nonManifoldEdge = $0 { return true }; return false }) }
+    var isManifold: Bool { !issues.contains(where: { if case .nonManifoldEdge = $0 { return true }; return false }) }
+    var hasNaN: Bool { issues.contains(where: { if case .nanPosition = $0 { return true }; if case .nanNormal = $0 { return true }; return false }) }
+    var isValid: Bool { errorCount == 0 }
+
+    var description: String {
+        var lines: [String] = ["Validación de malla '\(meshName)':"]
+        if issues.isEmpty {
+            lines.append("  ✓ Sin problemas detectados")
+        } else {
+            for issue in issues {
+                lines.append("  [\(issue.severity.rawValue)] \(issue.description)")
+            }
+        }
+        lines.append("  Resumen: \(errorCount) errores, \(warningCount) advertencias")
+        lines.append("  Watertight: \(isWatertight ? "Sí" : "No"), Manifold: \(isManifold ? "Sí" : "No"), NaN: \(hasNaN ? "Sí" : "No")")
+        return lines.joined(separator: "\n")
+    }
+}
+
 class ExportService {
     private let device: MTLDevice
     private let logger = Logger(subsystem: "com.appforgestudio", category: "ExportService")
@@ -41,10 +115,129 @@ class ExportService {
         self.csgEngine = csgEngine
     }
 
-    func export(model: Model, format: ExportFormat, to url: URL) -> Result<Void, ExportError> {
+    // MARK: - Pre-export mesh validation
+
+    /// Validates a mesh for watertightness, manifold edges, NaN values, and degenerate faces.
+    /// Reports all issues found; call before export to warn the user.
+    static func validateMeshForExport(_ mesh: Mesh, name: String = "mesh") -> MeshValidationReport {
+        var issues: [MeshValidationIssue] = []
+
+        let vertexCount = mesh.vertices.count
+        let indexCount = mesh.indices.count
+
+        // Check 1: empty mesh
+        guard vertexCount > 0 else {
+            issues.append(.orphanFace(faceIndex: -1, vertexIndex: 0, vertexCount: 0))
+            return MeshValidationReport(issues: issues, meshName: name)
+        }
+        guard indexCount > 0 else {
+            return MeshValidationReport(issues: issues, meshName: name)
+        }
+
+        // Check 2: orphan faces — indices referencing non-existent vertices
+        for (fi, vi) in mesh.indices.enumerated() {
+            if Int(vi) >= vertexCount {
+                issues.append(.orphanFace(faceIndex: fi / 3, vertexIndex: vi, vertexCount: vertexCount))
+            }
+        }
+
+        // Check 3: NaN positions and normals
+        for (vi, vertex) in mesh.vertices.enumerated() {
+            let p = vertex.position
+            if p.x.isNaN || p.y.isNaN || p.z.isNaN || !p.x.isFinite || !p.y.isFinite || !p.z.isFinite {
+                issues.append(.nanPosition(vertexIndex: vi))
+            }
+            let n = vertex.normal
+            if n.x.isNaN || n.y.isNaN || n.z.isNaN || !n.x.isFinite || !n.y.isFinite || !n.z.isFinite {
+                issues.append(.nanNormal(vertexIndex: vi))
+            }
+        }
+
+        // Check 4: non-manifold edges — edges shared by >2 faces
+        var edgeFaceCount: [UInt64: Int] = [:]
+        for fi in stride(from: 0, to: indexCount - 2, by: 3) {
+            let a = mesh.indices[fi]
+            let b = mesh.indices[fi + 1]
+            let c = mesh.indices[fi + 2]
+
+            // Check for degenerate/zero-area faces
+            if a == b || b == c || a == c {
+                issues.append(.degenerateFace(faceIndex: fi / 3, area: 0))
+                continue
+            }
+
+            let pa = mesh.vertices[Int(a)].position
+            let pb = mesh.vertices[Int(b)].position
+            let pc = mesh.vertices[Int(c)].position
+            let area = simd_length(simd_cross(pb - pa, pc - pa)) * 0.5
+            if area < 1e-10 {
+                issues.append(.zeroAreaFace(faceIndex: fi / 3))
+            }
+            if area.isNaN || area.isInfinite {
+                issues.append(.degenerateFace(faceIndex: fi / 3, area: area))
+            }
+
+            // Count edge usage
+            let edges = [(a, b), (b, c), (c, a)]
+            for (v0, v1) in edges {
+                let minV = min(v0, v1)
+                let maxV = max(v0, v1)
+                // Check zero-length edge
+                if minV == maxV {
+                    issues.append(.zeroLengthEdge(v0: v0, v1: v1))
+                }
+                let key = (UInt64(minV) << 32) | UInt64(maxV)
+                edgeFaceCount[key, default: 0] += 1
+            }
+        }
+
+        // Report non-manifold edges
+        for (key, count) in edgeFaceCount {
+            if count > 2 {
+                let v0 = UInt32(key >> 32)
+                let v1 = UInt32(key & 0xFFFFFFFF)
+                issues.append(.nonManifoldEdge(v0: v0, v1: v1, faceCount: count))
+            }
+        }
+
+        // Deduplicate issues
+        var seen: Set<String> = []
+        issues = issues.filter { seen.insert($0.description).inserted }
+
+        return MeshValidationReport(issues: issues, meshName: name)
+    }
+
+    /// Validates all meshes in a model and returns a combined report.
+    static func validateModelForExport(_ model: Model) -> MeshValidationReport {
+        var allIssues: [MeshValidationIssue] = []
+        for (i, mesh) in model.meshes.enumerated() {
+            let report = validateMeshForExport(mesh, name: "\(model.name).mesh[\(i)]")
+            allIssues.append(contentsOf: report.issues)
+        }
+        return MeshValidationReport(issues: allIssues, meshName: model.name)
+    }
+
+    /// Validates and returns a user-facing summary. Use before export to warn.
+    func validateAndReport(model: Model) -> String {
+        let report = Self.validateModelForExport(model)
+        logger.info("\(report.description)")
+        return report.description
+    }
+
+    func export(model: Model, format: ExportFormat, to url: URL, skipValidation: Bool = false) -> Result<Void, ExportError> {
         guard !model.meshes.isEmpty, model.meshes.contains(where: { !$0.vertices.isEmpty }) else {
             return .failure(.invalidModel("El modelo no tiene vertices para exportar"))
         }
+
+        // Pre-export validation (watertight/manifold/NaN check)
+        if !skipValidation {
+            let report = Self.validateModelForExport(model)
+            logger.info("\(report.description)")
+            if !report.isValid {
+                logger.warning("Export proceeding with \(report.errorCount) validation errors — output may be invalid")
+            }
+        }
+
         do {
             switch format {
             case .usdz:
@@ -136,42 +329,109 @@ class ExportService {
         guard !model.meshes.isEmpty else {
             throw ExportError.invalidModel("No valid meshes found for GLTF export")
         }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = .prettyPrinted
-        var verticesList: [[String: Any]] = []
-        var indicesList: [UInt32] = []
+
+        // Collect vertices and indices across all meshes
+        var allPositions: [Float] = []
+        var allNormals: [Float] = []
+        var allTexCoords: [Float] = []
+        var allIndices: [UInt32] = []
         var vertexOffset: UInt32 = 0
+        var minPos = SIMD3<Float>(Float.greatestFiniteMagnitude, Float.greatestFiniteMagnitude, Float.greatestFiniteMagnitude)
+        var maxPos = SIMD3<Float>(-Float.greatestFiniteMagnitude, -Float.greatestFiniteMagnitude, -Float.greatestFiniteMagnitude)
+
         for mesh in model.meshes {
             for v in mesh.vertices {
-                verticesList.append(["pos": [v.position.x, v.position.y, v.position.z], "nml": [v.normal.x, v.normal.y, v.normal.z], "uv": [v.uv.x, v.uv.y]])
+                let p = v.position
+                allPositions.append(contentsOf: [p.x, p.y, p.z])
+                allNormals.append(contentsOf: [v.normal.x, v.normal.y, v.normal.z])
+                allTexCoords.append(contentsOf: [v.uv.x, v.uv.y])
+                minPos = SIMD3(min(minPos.x, p.x), min(minPos.y, p.y), min(minPos.z, p.z))
+                maxPos = SIMD3(max(maxPos.x, p.x), max(maxPos.y, p.y), max(maxPos.z, p.z))
             }
-            for i in mesh.indices { indicesList.append(i + vertexOffset) }
+            for i in mesh.indices { allIndices.append(i + vertexOffset) }
             vertexOffset += UInt32(mesh.vertices.count)
         }
+
+        let vertexCount = allPositions.count / 3
+        let indexCount = allIndices.count
+
+        // Build binary buffer: positions (12B ea) + normals (12B ea) + texcoords (8B ea) + indices (4B ea)
+        let posByteLen = vertexCount * 12
+        let nmlByteLen = vertexCount * 12
+        let uvByteLen  = vertexCount * 8
+        let idxByteLen = indexCount * 4
+        let totalBinLen = posByteLen + nmlByteLen + uvByteLen + idxByteLen
+
+        var binData = Data(capacity: totalBinLen)
+        // Write positions (tightly packed float3, 12 bytes each)
+        for i in 0..<vertexCount {
+            let off = i * 3
+            binData.append(contentsOf: withUnsafeBytes(of: allPositions[off]) { Data($0) })
+            binData.append(contentsOf: withUnsafeBytes(of: allPositions[off + 1]) { Data($0) })
+            binData.append(contentsOf: withUnsafeBytes(of: allPositions[off + 2]) { Data($0) })
+        }
+        // Write normals
+        for i in 0..<vertexCount {
+            let off = i * 3
+            binData.append(contentsOf: withUnsafeBytes(of: allNormals[off]) { Data($0) })
+            binData.append(contentsOf: withUnsafeBytes(of: allNormals[off + 1]) { Data($0) })
+            binData.append(contentsOf: withUnsafeBytes(of: allNormals[off + 2]) { Data($0) })
+        }
+        // Write texcoords
+        for i in 0..<vertexCount {
+            let off = i * 2
+            binData.append(contentsOf: withUnsafeBytes(of: allTexCoords[off]) { Data($0) })
+            binData.append(contentsOf: withUnsafeBytes(of: allTexCoords[off + 1]) { Data($0) })
+        }
+        // Write indices (UInt32 little-endian)
+        for idx in allIndices {
+            var le = idx.littleEndian
+            binData.append(contentsOf: withUnsafeBytes(of: &le) { Data($0) })
+        }
+
+        // Verify binary buffer size
+        guard binData.count == totalBinLen else {
+            throw ExportError.writeFailed("GLTF binary buffer size mismatch: expected \(totalBinLen), got \(binData.count)")
+        }
+
+        // Write .bin file alongside .gltf
+        let binURL = url.deletingPathExtension().appendingPathExtension("bin")
+        try binData.write(to: binURL, options: .atomic)
+
         let gltf: [String: Any] = [
             "asset": ["version": "2.0", "generator": "AppForgeStudio"],
             "scene": 0,
             "scenes": [["nodes": [0]]],
             "nodes": [["mesh": 0, "name": model.name]],
-            "meshes": [["primitives": [["attributes": ["POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2], "indices": 3]]]],
+            "meshes": [[
+                "primitives": [[
+                    "attributes": ["POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2],
+                    "indices": 3,
+                    "mode": 4  // TRIANGLES
+                ]]
+            ]],
             "accessors": [
-                ["bufferView": 0, "componentType": 5126, "count": verticesList.count, "type": "VEC3", "max": [Float.greatestFiniteMagnitude], "min": [-Float.greatestFiniteMagnitude]],
-                ["bufferView": 1, "componentType": 5126, "count": verticesList.count, "type": "VEC3"],
-                ["bufferView": 2, "componentType": 5126, "count": verticesList.count, "type": "VEC2"],
-                ["bufferView": 3, "componentType": 5125, "count": indicesList.count, "type": "SCALAR"]
+                ["bufferView": 0, "componentType": 5126, "count": vertexCount, "type": "VEC3",
+                 "min": [minPos.x, minPos.y, minPos.z], "max": [maxPos.x, maxPos.y, maxPos.z]],
+                ["bufferView": 1, "componentType": 5126, "count": vertexCount, "type": "VEC3"],
+                ["bufferView": 2, "componentType": 5126, "count": vertexCount, "type": "VEC2"],
+                ["bufferView": 3, "componentType": 5125, "count": indexCount, "type": "SCALAR"]
             ],
             "bufferViews": [
-                ["buffer": 0, "byteOffset": 0, "byteLength": verticesList.count * 12, "target": 34962],
-                ["buffer": 0, "byteOffset": verticesList.count * 12, "byteLength": verticesList.count * 12, "target": 34962],
-                ["buffer": 0, "byteOffset": verticesList.count * 24, "byteLength": verticesList.count * 8, "target": 34962],
-                ["buffer": 0, "byteOffset": verticesList.count * 32, "byteLength": indicesList.count * 4, "target": 34963]
+                ["buffer": 0, "byteOffset": 0, "byteLength": posByteLen, "target": 34962],
+                ["buffer": 0, "byteOffset": posByteLen, "byteLength": nmlByteLen, "target": 34962],
+                ["buffer": 0, "byteOffset": posByteLen + nmlByteLen, "byteLength": uvByteLen, "target": 34962],
+                ["buffer": 0, "byteOffset": posByteLen + nmlByteLen + uvByteLen, "byteLength": idxByteLen, "target": 34963]
             ],
-            "buffers": [["byteLength": verticesList.count * 32 + indicesList.count * 4, "uri": url.lastPathComponent.replacingOccurrences(of: ".gltf", with: ".bin")]]
+            "buffers": [["byteLength": totalBinLen, "uri": binURL.lastPathComponent]]
         ]
-        guard let data = try? JSONSerialization.data(withJSONObject: gltf, options: .prettyPrinted) else {
-            throw ExportError.writeFailed("GLTF serialization failed")
+
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: gltf, options: .prettyPrinted) else {
+            throw ExportError.writeFailed("GLTF JSON serialization failed")
         }
-        try data.write(to: url)
+        try jsonData.write(to: url, options: .atomic)
+
+        logger.info("GLTF exported: \(url.path) + \(binURL.path) (\(totalBinLen) bytes binary)")
     }
 
     private func exportOBJ(model: Model, to url: URL) throws {

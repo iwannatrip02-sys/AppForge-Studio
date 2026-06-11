@@ -2,6 +2,24 @@ import Foundation
 import simd
 import Combine
 
+/// Hybrid layer type — determines which editing mode (CAD, Sculpt, Paint)
+/// this layer belongs to. Hybrid mode uses this to filter editable layers.
+enum HybridLayerType: String, Codable, CaseIterable, Sendable {
+    case cad = "CAD"
+    case sculpt = "Sculpt"
+    case paint = "Paint"
+
+    var icon: String {
+        switch self {
+        case .cad: return "gearshape"
+        case .sculpt: return "hand.draw"
+        case .paint: return "paintpalette"
+        }
+    }
+
+    var displayName: String { rawValue }
+}
+
 /// Non-destructive modeling layer — every CAD operation or sculpt stroke
 /// is a LayerOperation that can be reordered, toggled, or deleted.
 /// This beats both Shapr3D (history without layers) and Nomad (layers without params).
@@ -12,15 +30,17 @@ struct ModelLayer: Identifiable, Codable {
     var isLocked: Bool = false
     var opacity: Float = 1.0
     var blendMode: LayerBlendMode = .normal
+    var layerType: HybridLayerType = .cad
     var operations: [LayerOperation] = []
-    
+
     // Cached mesh result for this layer's accumulated operations
     var cachedMesh: Mesh?
     var isDirty: Bool = true  // needs re-evaluation
-    
-    init(name: String) {
+
+    init(name: String, layerType: HybridLayerType = .cad) {
         self.id = UUID()
         self.name = name
+        self.layerType = layerType
     }
 }
 
@@ -80,9 +100,24 @@ final class LayerManager: ObservableObject {
     
     // MARK: - Layer CRUD
     
-    func addLayer(name: String) {
-        layers.append(ModelLayer(name: name))
+    func addLayer(name: String, layerType: HybridLayerType = .cad) {
+        layers.append(ModelLayer(name: name, layerType: layerType))
         if activeLayerId == nil { activeLayerId = layers.last?.id }
+    }
+
+    /// Returns only layers of the given type, preserving stack order.
+    func layers(ofType type: HybridLayerType) -> [ModelLayer] {
+        layers.filter { $0.layerType == type }
+    }
+
+    /// Returns the active layer if it matches the given type, else the topmost visible layer of that type.
+    func activeLayer(for type: HybridLayerType) -> ModelLayer? {
+        if let activeId = activeLayerId,
+           let active = layers.first(where: { $0.id == activeId }),
+           active.layerType == type {
+            return active
+        }
+        return layers.last(where: { $0.layerType == type && $0.isVisible })
     }
     
     func removeLayer(_ layer: ModelLayer) {
