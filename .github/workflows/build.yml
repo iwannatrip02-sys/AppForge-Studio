@@ -68,21 +68,10 @@ jobs:
             -destination 'generic/platform=iOS' \
             -derivedDataPath DerivedData
 
-      - name: Patch SatinCore C++ narrowing errors (Triangulator.mm)
-        working-directory: ios-app/AppForgeStudio
-        run: |
-          TRIANGULATOR=$(find DerivedData/SourcePackages/checkouts -name Triangulator.mm -path "*/Satin/*" 2>/dev/null | head -1)
-          if [ ! -f "$TRIANGULATOR" ]; then
-            echo "FATAL: Triangulator.mm not found after resolve — patch cannot apply"
-            exit 1
-          fi
-          echo "Found: $TRIANGULATOR"
-          sed -i '' 's/\.i0 = v1->index, \.i1 = v2->index, \.i2 = v3->index/.i0 = static_cast<uint32_t>(v1->index), .i1 = static_cast<uint32_t>(v2->index), .i2 = static_cast<uint32_t>(v3->index)/g' "$TRIANGULATOR"
-          sed -i '' 's/\.i0 = v1->index/.i0 = static_cast<uint32_t>(v1->index)/g' "$TRIANGULATOR"
-          sed -i '' 's/\.index = index/.index = static_cast<int>(index)/g' "$TRIANGULATOR"
-          PATCHED=$(grep -c "static_cast<uint32_t>" "$TRIANGULATOR" || true)
-          echo "static_cast occurrences after patch: $PATCHED"
-          if [ "$PATCHED" -eq 0 ]; then echo "FATAL: patch did not apply"; exit 1; fi
+      # SatinCore .mm files (Triangulator, Generators, ...) violate -Wc++11-narrowing
+      # across many call sites; per-file sed patching does not scale. The narrowing
+      # warning-as-error is suppressed globally via OTHER_CPLUSPLUSFLAGS on each
+      # xcodebuild invocation below instead.
 
       - name: Install iOS Simulator runtime
         run: |
@@ -109,6 +98,7 @@ jobs:
               CODE_SIGN_IDENTITY="" \
               CODE_SIGNING_REQUIRED=NO \
               CODE_SIGNING_ALLOWED=NO \
+              OTHER_CPLUSPLUSFLAGS='$(inherited) -Wno-c++11-narrowing' \
               2>&1 | tee build.log
           else
             echo "No xcodeproj found"
@@ -130,6 +120,7 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
+            OTHER_CPLUSPLUSFLAGS='$(inherited) -Wno-c++11-narrowing' \
             2>&1 | tee test.log
 
       - name: Archive and Package Unsigned IPA (device)
@@ -149,6 +140,7 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
+            OTHER_CPLUSPLUSFLAGS='$(inherited) -Wno-c++11-narrowing' \
             -archivePath AppForgeStudio.xcarchive \
             2>&1 | tee archive.log
           echo "=== Packaging unsigned IPA ==="
