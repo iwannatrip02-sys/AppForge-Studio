@@ -17,8 +17,9 @@ final class SceneManager: ObservableObject {
     
     // MARK: - Layer Management
     
-    func addLayer(name: String = "Layer \(layers.count + 1)") -> SceneLayer {
-        let layer = SceneLayer(name: name)
+    func addLayer(name: String? = nil) -> SceneLayer {
+        let layerName = name ?? "Layer \(layers.count + 1)"
+        let layer = SceneLayer(name: layerName)
         layers.append(layer)
         if activeLayerId == nil {
             activeLayerId = layer.id

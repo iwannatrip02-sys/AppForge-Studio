@@ -1,12 +1,12 @@
 import Foundation
 import simd
-// OCCT reemplazado por Shape.swift nativo
+import OCCTSwift
 
 // BooleanEngine que usa OCCTEngine.shared para operaciones CSG reales
 class BooleanEngine {
     
     // MARK: - Mesh a Shape usando triangulacion OCCT BRepBuilderAPI_MakePolygon
-    private func meshToShape(_ mesh: Mesh) -> Shape? {
+    private func meshToShape(_ mesh: Mesh) -> OCCTSwift.Shape? {
         guard mesh.vertices.count >= 3, mesh.indices.count >= 3 else { return nil }
         
         // Construir Shape desde triangulos reales de la malla
@@ -29,17 +29,17 @@ class BooleanEngine {
             
             if triangles.count == 1 {
                 let (p0, p1, p2) = triangles[0]
-                return try Shape.face(p0: p0, p1: p1, p2: p2)
+                return try OCCTSwift.Shape.face(p0: p0, p1: p1, p2: p2)
             } else {
-                var faces: [Shape] = []
+                var faces: [OCCTSwift.Shape] = []
                 for (p0, p1, p2) in triangles {
-                    if let face = try? Shape.face(p0: p0, p1: p1, p2: p2) {
+                    if let face = try? OCCTSwift.Shape.face(p0: p0, p1: p1, p2: p2) {
                         faces.append(face)
                     }
                 }
                 guard !faces.isEmpty else { return nil }
-                let shell = Shape.shell(faces: faces)
-                return Shape.solid(shell: shell)
+                let shell = OCCTSwift.Shape.shell(faces: faces)
+                return OCCTSwift.Shape.solid(shell: shell)
             }
         } catch {
             var minBounds = SIMD3<Float>(Float.greatestFiniteMagnitude, Float.greatestFiniteMagnitude, Float.greatestFiniteMagnitude)
@@ -51,13 +51,13 @@ class BooleanEngine {
             let size = maxBounds - minBounds
             let center = (minBounds + maxBounds) * 0.5
             let engine = OCCTEngine.shared
-            let box = engine.createBox(width: Double(size.x), height: Double(size.y), depth: Double(size.z))
+            let box = engine.box(width: Double(size.x), height: Double(size.y), depth: Double(size.z))
             return box
         }
     }
     
     // MARK: - Shape a Mesh (extraer triangulos de un Shape)
-    private func shapeToMesh(_ shape: Shape) -> Mesh {
+    private func shapeToMesh(_ shape: OCCTSwift.Shape) -> Mesh {
         do {
             let triangles = try shape.triangulate()
             let vertices = triangles.vertices.map { tv in
@@ -75,8 +75,8 @@ class BooleanEngine {
     
     func booleanUnion(a: Mesh, b: Mesh) -> Mesh {
         let engine = OCCTEngine.shared
-        if let shapeA = meshToShape(a), let shapeB = meshToShape(b) {
-            let result = engine.union(shapeA, shapeB)
+        if let shapeA = meshToShape(a), let shapeB = meshToShape(b),
+           let result = engine.union(shapeA, shapeB) {
             return shapeToMesh(result)
         }
         // Fallback: concatenar vertices
@@ -92,8 +92,8 @@ class BooleanEngine {
     
     func booleanDifference(a: Mesh, b: Mesh) -> Mesh {
         let engine = OCCTEngine.shared
-        if let shapeA = meshToShape(a), let shapeB = meshToShape(b) {
-            let result = engine.subtract(shapeA, shapeB)
+        if let shapeA = meshToShape(a), let shapeB = meshToShape(b),
+           let result = engine.subtract(shapeA, shapeB) {
             return shapeToMesh(result)
         }
         return a
@@ -101,8 +101,8 @@ class BooleanEngine {
     
     func booleanIntersection(a: Mesh, b: Mesh) -> Mesh {
         let engine = OCCTEngine.shared
-        if let shapeA = meshToShape(a), let shapeB = meshToShape(b) {
-            let result = engine.intersect(shapeA, shapeB)
+        if let shapeA = meshToShape(a), let shapeB = meshToShape(b),
+           let result = engine.intersect(shapeA, shapeB) {
             return shapeToMesh(result)
         }
         return Mesh()

@@ -86,7 +86,7 @@ struct CADTimelineView: View {
 }
 
 struct CADNodeRow: View {
-    @ObservedObject var node: CADNode
+    let node: CADNode
     @ObservedObject var historyTree: CADHistoryTree
     let depth: Int
     @EnvironmentObject var themeManager: ThemeManager

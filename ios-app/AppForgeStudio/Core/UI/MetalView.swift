@@ -253,7 +253,8 @@ struct MetalView: UIViewRepresentable {
                 isExtruding = false
             default: break
             }
-        
+        }
+
         @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
             let location = gesture.location(in: gesture.view)
             guard let view = gesture.view as? MTKView else { return }

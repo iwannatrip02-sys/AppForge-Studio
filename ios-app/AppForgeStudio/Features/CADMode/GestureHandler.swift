@@ -71,16 +71,6 @@ class GestureHandlerView: UIView {
         return true
     }
     
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        isMultipleTouchEnabled = true
-    }
-    
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        isMultipleTouchEnabled = true
-    }
-
     private var panGesture: UIPanGestureRecognizer!
     private var pinchGesture: UIPinchGestureRecognizer!
     private var tapGesture: UITapGestureRecognizer!
@@ -96,12 +86,14 @@ class GestureHandlerView: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        isMultipleTouchEnabled = true
         setupGestures()
         feedbackGen.prepare()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
+        isMultipleTouchEnabled = true
         setupGestures()
         feedbackGen.prepare()
     }

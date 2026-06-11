@@ -6,7 +6,7 @@ import Satin
 struct AppForgeStudioApp: App {
     @StateObject private var appState = AppState()
     @State private var showOnboarding = !UserDefaults.standard.bool(forKey: "onboardingComplete")
-    var body: some Scene {
+    var body: some SwiftUI.Scene {
         WindowGroup {
             if showOnboarding {
                 OnboardingFlow(showOnboarding: $showOnboarding)

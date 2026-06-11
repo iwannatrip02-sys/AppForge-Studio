@@ -470,7 +470,7 @@ struct HybridModeView: View {
 
     // MARK: - Helpers
 
-    private func appMode(for layerType: HybridLayerType) -> CanvasViewModel.AppMode {
+    private func appMode(for layerType: HybridLayerType) -> AppMode {
         switch layerType {
         case .cad: return .cad
         case .sculpt: return .sculpt

@@ -16,8 +16,6 @@ class AppState: ObservableObject {
     func toggleDarkMode() {
         isDarkMode.toggle()
     }
-    @Published var isLoading = true
-
     let themeManager: ThemeManager
     let canvasVM: CanvasViewModel
     let toolVM: ToolViewModel
@@ -25,7 +23,7 @@ class AppState: ObservableObject {
     let modelLoader: ModelLoadService
     let exportVM: ExportViewModel
     lazy var animationVM: AnimationEngine = {
-        AnimationEngine(appState: self)
+        AnimationEngine()
     }()
     let subdivisionVM: SubdivisionEngine
     lazy var materialEditorVM: MaterialEditorViewModel = {

@@ -5,7 +5,7 @@ private let logger = Logger(subsystem: "com.appforgestudio", category: "Preferen
 struct PreferencesView: View {
     @AppStorage("renderQuality") private var renderQuality: RenderQuality = .high
     @AppStorage("showGrid") private var showGrid = true
-    @AppStorage("gridSize") private var gridSize: Float = 1.0
+    @AppStorage("gridSize") private var gridSize: Double = 1.0
     @AppStorage("autoSave") private var autoSave = true
     @AppStorage("autoSaveInterval") private var autoSaveInterval: Double = 300
     @AppStorage("defaultExportFormat") private var defaultExportFormat: PreferencesExportFormat = .stl

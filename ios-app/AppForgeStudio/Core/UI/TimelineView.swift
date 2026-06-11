@@ -9,7 +9,7 @@ struct TimelineView: View {
 
     private var theme: AppTheme { themeManager.currentTheme }
     @State private var showAddKeyframe = false
-    @State private var draggedKeyframe: KeyframeEntry? = nil
+    @State private var draggedKeyframe: AnimationEngine.KeyframeEntry? = nil
     @State private var dragOffset: CGFloat = 0
     
     var body: some View {
@@ -105,7 +105,7 @@ struct TimelineView: View {
         }
     }
     
-    private func keyframeRow(kf: KeyframeEntry, duration: Float) -> some View {
+    private func keyframeRow(kf: AnimationEngine.KeyframeEntry, duration: Float) -> some View {
         let pos = duration > 0 ? CGFloat(kf.time / duration) : 0
         let color: Color = {
             switch kf.type {

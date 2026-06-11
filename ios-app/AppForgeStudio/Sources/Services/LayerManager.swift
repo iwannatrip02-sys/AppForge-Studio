@@ -23,7 +23,7 @@ enum HybridLayerType: String, Codable, CaseIterable, Sendable {
 /// Non-destructive modeling layer — every CAD operation or sculpt stroke
 /// is a LayerOperation that can be reordered, toggled, or deleted.
 /// This beats both Shapr3D (history without layers) and Nomad (layers without params).
-struct ModelLayer: Identifiable, Codable {
+struct ModelLayer: Identifiable {
     let id: UUID
     var name: String
     var isVisible: Bool = true
