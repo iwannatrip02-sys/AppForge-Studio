@@ -24,13 +24,14 @@ struct Uniforms {
     float3 lightDirection;
     float3 lightColor;
     float lightIntensity;
+    float3x3 normalMatrix;
 };
 
 vertex VertexOut vertex_main(VertexIn in [[stage_in]], constant Uniforms &uniforms [[buffer(1)]]) {
     VertexOut out;
     float4 worldPos = uniforms.modelMatrix * float4(in.position.xyz, 1.0);
     out.position = uniforms.projectionMatrix * uniforms.viewMatrix * worldPos;
-    out.worldNormal = normalize(transpose(inverse(float3x3(uniforms.modelMatrix))) * in.normal);
+    out.worldNormal = normalize(uniforms.normalMatrix * in.normal);
     out.uv = in.uv;
     out.color = in.color;
     out.worldPosition = worldPos.xyz;

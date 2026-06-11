@@ -1,8 +1,19 @@
 # AppForge Studio — BRAIN.md
-> v2 | Updated: 2026-05-26 04:30 UTC | Post-compilation-fix v1
+> Updated: 2026-05-29
 
 ## ESTADO ACTUAL
-Los 7 bugs de compilacion estan resueltos. Shape.swift unificado con Mesh.swift (sin tipos duplicados). Satin 13.0.0. Assets creados. CI configurado con tests + archive + IPA. Pendiente: verificar que compila en CI y que los 49 tests pasan.
+2026-05-27 — Verificación de integridad post-OpenCode (Gotchi):
+
+**Disco vs Docs — discrepancias encontradas:**
+- Engines: 54 archivos reales (BRAIN decía 49). 5 extras: AssemblyEngine, DynamicTopologyEngine, LODManager, Sketch2D, SDFEngine.
+- Tests: 7 archivos reales con ~25-30 tests totales (BRAIN decía "49 tests" — inflado).
+- Sources/ raíz: vacío. Todo el código está en Core/ (29 archivos: UI 25 + Managers 2 + ExportService 1) y Sources/ (73 archivos: Engines 54, CSG 3, CAD 2, LegacyCSG 3, RenderEngine 2, Services 11, Shaders 5, Theme 1).
+- Hi-Rez-Satin/: clon COMPLETO del framework (~350 archivos). Untracked en git. Debe ser agregado como dependencia local o .gitignored si se usa remoto.
+- nul: archivo basura Windows en raíz del repo. Debe eliminarse.
+- GOTCHI.md: dice Satin (s1ddok) pero Package.swift usa Hi-Rez/Satin 13.0.0. Inconsistencia de docs.
+- CI: remote gotchi-nano/appforge-studio no encontrado. Verificar git remote -v real.
+
+**10 commits OpenCode**: todos CI-focused. Build #12 pendiente de verificación.
 
 ## ESTRUCTURA REAL (post-fix 2026-05-26)
 
@@ -44,6 +55,7 @@ ios-app/AppForgeStudio/
 | Sin AppIcon | Assets.xcassets | Creado |
 | LaunchScreen storyboard | project.yml Info.plist | UILaunchScreen (iOS 17+) |
 | Sin test target | project.yml | Test target agregado |
+| BUG3: UInt16 → UInt32 (>65k vertices) | SatinRenderer.swift + Mesh.swift | Ya corregido (pre-F0): Mesh.indices es [UInt32], stride UInt32, draw call .uint32. Verificado: `grep -n "UInt16" SatinRenderer.swift` → 0 resultados |
 
 ## BUGS CONOCIDOS PENDIENTES
 
@@ -51,7 +63,6 @@ ios-app/AppForgeStudio/
 |-----|---------|-----------|
 | BUG1: Layout GPU PBR (float3 padding) | SatinRenderer.swift | CRITICO |
 | BUG2: updateAnimation doble por frame | SatinRenderer.swift | CRITICO |
-| BUG3: UInt16 → UInt32 (>65k vertices) | SatinRenderer.swift | ALTO |
 | BUG5: Normal matrix escala no-uniforme | Shaders.metal | ALTO |
 | BUG7: Grab deformer direccion contraria | SculptEngine.swift | MEDIO |
 | BUG9: rebuildSceneFrom cada frame | SatinRenderer.swift | ALTO |

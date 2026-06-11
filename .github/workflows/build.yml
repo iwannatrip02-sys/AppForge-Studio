@@ -112,10 +112,28 @@ jobs:
             exit 1
           fi
 
-      - name: Upload build log (always)
+      - name: Run Tests (iOS Simulator)
+        working-directory: ios-app/AppForgeStudio
+        run: |
+          echo "=== Starting tests ==="
+          xcodebuild test \
+            -project AppForgeStudio.xcodeproj \
+            -scheme AppForgeStudio \
+            -sdk iphonesimulator \
+            -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M4)' \
+            -configuration Debug \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee test.log
+          echo "=== Tests exit code: $? ==="
+          tail -50 test.log
+
+      - name: Upload build and test logs (always)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-log-${{ github.run_id }}
           path: |
             ios-app/AppForgeStudio/build.log
+            ios-app/AppForgeStudio/test.log

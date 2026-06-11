@@ -20,6 +20,7 @@ struct FrameUniforms {
     float4x4 viewMatrix;
     float4x4 projectionMatrix;
     float4 cameraPosition;
+    float3x3 normalMatrix;
 };
 
 struct PBRMaterialUniforms {
@@ -178,12 +179,12 @@ vertex VertexOut ibl_vertex_main(
     VertexOut out;
     float4 worldPos = uniforms.modelMatrix * float4(in.position.xyz, 1.0);
     out.position = uniforms.projectionMatrix * uniforms.viewMatrix * worldPos;
-    out.worldNormal = normalize(transpose(inverse(float3x3(uniforms.modelMatrix))) * in.normal);
+    out.worldNormal = normalize(uniforms.normalMatrix * in.normal);
     out.uv = in.uv;
     out.worldPosition = worldPos.xyz;
 
     float3 up = abs(in.normal.y) < 0.999 ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0);
-    out.tangent = normalize(transpose(inverse(float3x3(uniforms.modelMatrix))) * normalize(cross(up, in.normal)));
+    out.tangent = normalize(uniforms.normalMatrix * normalize(cross(up, in.normal)));
 
     return out;
 }
