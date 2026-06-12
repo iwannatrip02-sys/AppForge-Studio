@@ -105,6 +105,8 @@ class SatinRenderer: NSObject, ObservableObject {
     var brushCursorPosition: SIMD3<Float>? = nil
     /// Radius of the brush cursor indicator in world units.
     var brushCursorRadius: Float = 0.05
+    /// Viewport aspect ratio, updated by MTKViewDelegate on size changes.
+    var aspectRatio: Float = 1.0
 
     func setSculptEngine(_ engine: SculptEngine) {
         self.sculptEngine = engine
@@ -305,7 +307,7 @@ class SatinRenderer: NSObject, ObservableObject {
         // Evidence: vendor/Satin/Sources/Satin/Materials/BasicColorMaterial.swift:22 — BasicColorMaterial(color:blending:)
         let mat = BasicColorMaterial(color: SIMD4<Float>(0.2, 0.6, 1.0, 0.8))
         // Evidence: vendor/Satin/Sources/Satin/Core/Mesh.swift:152 — Mesh(geometry:material:) on Mesh, not Object
-        let obj = Mesh(geometry: geometry, material: mat)
+        let obj = Satin.Mesh(geometry: geometry, material: mat)
         obj.visible = false
         cursorObject = obj
         scene?.add(obj)
@@ -467,20 +469,21 @@ class SatinRenderer: NSObject, ObservableObject {
 
     private func setupComputePipelines() {
         guard let library = device.makeDefaultLibrary() else { return }
-        let computeNames = [
-            ("equirect_to_cubemap", &equirectToCubemapPS),
-            ("irradiance_convolution", &irradianceConvolutionPS),
-            ("prefilter_convolution", &prefilterConvolutionPS),
-            ("brdf_lut", &brdfLUTPS)
-        ]
-        for (name, statePtr) in computeNames {
-            if let fn = library.makeFunction(name: name) {
-                do {
-                    statePtr.pointee = try device.makeComputePipelineState(function: fn)
-                } catch {
-                    logger.info("Failed to create compute pipeline \(name): \(error)")
-                }
-            }
+        if let fn = library.makeFunction(name: "equirect_to_cubemap") {
+            do { equirectToCubemapPS = try device.makeComputePipelineState(function: fn) }
+            catch { logger.info("Failed to create compute pipeline equirect_to_cubemap: \(error)") }
+        }
+        if let fn = library.makeFunction(name: "irradiance_convolution") {
+            do { irradianceConvolutionPS = try device.makeComputePipelineState(function: fn) }
+            catch { logger.info("Failed to create compute pipeline irradiance_convolution: \(error)") }
+        }
+        if let fn = library.makeFunction(name: "prefilter_convolution") {
+            do { prefilterConvolutionPS = try device.makeComputePipelineState(function: fn) }
+            catch { logger.info("Failed to create compute pipeline prefilter_convolution: \(error)") }
+        }
+        if let fn = library.makeFunction(name: "brdf_lut") {
+            do { brdfLUTPS = try device.makeComputePipelineState(function: fn) }
+            catch { logger.info("Failed to create compute pipeline brdf_lut: \(error)") }
         }
     }
 
@@ -686,7 +689,7 @@ class SatinRenderer: NSObject, ObservableObject {
                     albedoR: model.pbrMaterial.albedo.x,
                     albedoG: model.pbrMaterial.albedo.y,
                     albedoB: model.pbrMaterial.albedo.z,
-                    metallic: model.pbrMaterial.metallic,
+                    metallic: model.pbrMaterial.metalness,
                     roughness: model.pbrMaterial.roughness,
                     ao: model.pbrMaterial.ao,
                     emissionR: model.pbrMaterial.emission.x,
@@ -703,14 +706,14 @@ class SatinRenderer: NSObject, ObservableObject {
                 ))
             } else {
                 let object = buildObject(from: model)
-                scene.add(object)
+                scene?.add(object)
                 modelIdToObject[model.id.uuidString] = object
             }
         }
         // Re-add cursor object if it exists (scene was replaced)
         if let co = savedCursor {
             cursorObject = co
-            scene.add(co)
+            scene?.add(co)
         }
     }
 
@@ -771,10 +774,10 @@ class SatinRenderer: NSObject, ObservableObject {
         guard let vb = device.makeBuffer(bytes: vertices, length: vertices.count * MemoryLayout<Float>.stride, options: .storageModeShared),
               let ib = device.makeBuffer(bytes: indices, length: indices.count * MemoryLayout<UInt32>.stride, options: .storageModeShared) else {
             // Fallback: return empty Mesh (shouldn't happen on real devices)
-            return Mesh(geometry: Geometry(), material: BasicColorMaterial())
+            return Satin.Mesh(geometry: Geometry(), material: BasicColorMaterial(color: SIMD4<Float>(1, 0, 1, 1)))
         }
 
-        let materialColor = model.usesPBR ? model.pbrMaterial.colorPreview : model.color
+        let materialColor = model.usesPBR ? SIMD4<Float>(model.pbrMaterial.albedo.x, model.pbrMaterial.albedo.y, model.pbrMaterial.albedo.z, 1.0) : model.color
         let modelMatrix = model.transform
         basicRenderables.append(BasicRenderable(
             vertexBuffer: vb,
@@ -791,7 +794,7 @@ class SatinRenderer: NSObject, ObservableObject {
         // Evidence: vendor/Satin/Sources/Satin/Core/Mesh.swift:152 — Mesh(geometry:material:) on Mesh
         let geometry = buildSatinGeometry(vertices: vertices, indices: indices)
         let material = BasicColorMaterial(color: materialColor)
-        let mesh = Mesh(geometry: geometry, material: material)
+        let mesh = Satin.Mesh(geometry: geometry, material: material)
         mesh.position = model.position
         return mesh
     }
@@ -826,7 +829,7 @@ class SatinRenderer: NSObject, ObservableObject {
     /// we rebuild via addAttribute/setElements (same pattern as buildSatinGeometry) and
     /// update the BasicRenderable entry for direct Metal rendering.
     private func refreshNonPBRObjectGeometry(for model: Model) {
-        guard let mesh = modelIdToObject[model.id.uuidString] as? Mesh else { return }
+        guard let mesh = modelIdToObject[model.id.uuidString] as? Satin.Mesh else { return }
 
         // Rebuild interleaved vertex data from meshes
         var vertices: [Float] = []

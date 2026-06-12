@@ -204,7 +204,7 @@ class MaterialManager: ObservableObject {
            let decoded = try? JSONDecoder().decode([PBRMaterial].self, from: data) {
             materials = decoded
         } else {
-            materials = MaterialPresets.all
+            materials = PBRMaterialPresets.all
         }
         selectedMaterialID = materials.first?.id
     }
@@ -216,7 +216,7 @@ class MaterialManager: ObservableObject {
     }
     
     func addMaterial(name: String = "Nuevo Material", from source: PBRMaterial? = nil) {
-        let base = source ?? MaterialPresets.plastic
+        let base = source ?? PBRMaterialPresets.plastic
         let material = PBRMaterial(name: name, albedo: base.albedo, roughness: base.roughness,
                                     metalness: base.metalness, ao: base.ao, normalScale: base.normalScale,
                                     emission: base.emission, emissionIntensity: base.emissionIntensity,

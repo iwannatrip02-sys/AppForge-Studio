@@ -40,7 +40,8 @@ class SculptEngine {
             let symPoint = SculptPoint(
                 position: mirrored(point.position),
                 normal: mirrored(point.normal),
-                pressure: point.pressure
+                pressure: point.pressure,
+                dragDelta: .zero
             )
             for i in 0..<vertices.count {
                 applyDeformer(at: symPoint, to: &vertices[i], adjacency: nil)
@@ -64,7 +65,8 @@ class SculptEngine {
                 let symPoint = SculptPoint(
                     position: mirrored(stroke.position),
                     normal: mirrored(stroke.normal),
-                    pressure: stroke.pressure
+                    pressure: stroke.pressure,
+                    dragDelta: .zero
                 )
                 for i in 0..<mesh.vertices.count {
                     applyDeformer(at: symPoint, to: &mesh.vertices[i], adjacency: neighborPositions[i])

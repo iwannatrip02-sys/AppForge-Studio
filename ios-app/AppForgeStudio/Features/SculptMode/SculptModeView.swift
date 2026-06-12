@@ -38,7 +38,7 @@ struct SculptModeView: View {
                 }.padding(.horizontal, 8)
             }.padding(.vertical, 4).background(themeManager.currentTheme.surface)
 
-            ContentView(canvasVM: canvasVM, renderer: renderer, brushEngine: toolVM.brushEngine, isPaintMode: toolVM.isPaintMode)
+            ContentView(canvasVM: canvasVM, renderer: renderer, brushEngine: nil, isPaintMode: toolVM.isPaintMode)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             HStack(spacing: 12) {

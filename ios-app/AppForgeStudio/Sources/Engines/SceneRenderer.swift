@@ -95,10 +95,14 @@ class SceneRenderer {
             guard let vertexBuffer = model.vertexBuffer,
                   let indexBuffer = model.indexBuffer else { continue }
             
+            let camera = scene.camera
+            let viewMatrix = lookAt(eye: camera.position, target: camera.target, up: camera.up)
+            let aspect: Float = 1.0
+            let projectionMatrix = perspective_fov(fov: camera.fov * .pi / 180, aspect: aspect, near: camera.nearPlane, far: camera.farPlane)
             var uniforms = SceneUniforms(
                 modelMatrix: model.transform,
-                viewMatrix: scene.camera.viewMatrix,
-                projectionMatrix: scene.camera.projectionMatrix,
+                viewMatrix: viewMatrix,
+                projectionMatrix: projectionMatrix,
                 ambientColor: ambientColor,
                 lightDirection: lightDirection,
                 lightColor: lightColor,

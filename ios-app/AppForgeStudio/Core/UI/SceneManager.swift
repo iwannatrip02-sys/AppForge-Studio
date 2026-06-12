@@ -44,8 +44,8 @@ final class SceneManager: ObservableObject {
         logger.debug("Toggled visibility for layer \(id.uuidString), now visible: \(layers[index].isVisible)")
     }
     
-    func visibleMeshes() -> [Model] {
-        return layers
+    func visibleMeshes() -> [ModelWrapper] {
+        return self.layers
             .filter { $0.isVisible }
             .flatMap { $0.meshes }
     }

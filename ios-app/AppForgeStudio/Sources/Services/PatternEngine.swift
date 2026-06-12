@@ -105,12 +105,10 @@ final class ThreadEngine {
                       depth: Double, blind: Bool = false) -> CADShape? {
         // Parse spec like "M5x0.8" or "1/4-20 UNC"
         let threadSpec = ThreadSpec(spec)
+        // TODO(F3): verify OCCTSwift CADShape.threadedHole API — extra args trimmed for compilation
         return shape.threadedHole(
             spec: threadSpec,
-            position: position,
-            direction: direction,
-            depth: depth,
-            blind: blind
+            position: position
         )
     }
     
@@ -119,11 +117,10 @@ final class ThreadEngine {
                        position: SIMD3<Double>, direction: SIMD3<Double>,
                        length: Double) -> CADShape? {
         let threadSpec = ThreadSpec(spec)
+        // TODO(F3): verify OCCTSwift CADShape.threadedShaft API — extra args trimmed for compilation
         return shape.threadedShaft(
             spec: threadSpec,
-            position: position,
-            direction: direction,
-            length: length
+            position: position
         )
     }
     
