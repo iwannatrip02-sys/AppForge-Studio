@@ -71,6 +71,24 @@ private struct PBRRenderable {
     var model: Model
 }
 
+/// Non-PBR (basic pipeline) renderable — vertex/index buffers + model matrix for direct Metal drawing.
+/// Replaces the non-existent `scene.draw(encoder:)` API in Satin 13.
+private struct BasicRenderable {
+    var vertexBuffer: MTLBuffer
+    var indexBuffer: MTLBuffer
+    var indexCount: Int
+    var modelMatrix: simd_float4x4
+    var color: SIMD4<Float>
+    var modelId: String  // for lookup during sculpt refresh & transform updates
+}
+
+/// @MainActor: AnimationEngine is @MainActor (ios-app/AppForgeStudio/Sources/Engines/AnimationEngine.swift:184).
+/// SatinRenderer accesses engine.isPlaying (:114), engine.evaluateAnimation (:116),
+/// engine.currentTransforms (:124), engine.onFrameTick (:229) from updateAnimation() and setup().
+/// MTKView calls draw(in:) on the main thread; AppState (creator) is already @MainActor.
+/// Whole-class annotation is the cleanest fix — avoids per-method annotations and
+/// MainActor.assumeIsolated noise.
+@MainActor
 class SatinRenderer: NSObject, ObservableObject {
     let device: MTLDevice
     var scene: Object? = nil
@@ -156,10 +174,15 @@ class SatinRenderer: NSObject, ObservableObject {
             scene3D.models[i].scale = scale
 
             // Update Satin Object in-place (basic pipeline)
+            // Evidence: vendor/Satin/Sources/Satin/Core/Object.swift:84 — orientation: simd_quatf (NOT rotation)
             if let object = modelIdToObject[idKey] {
                 object.position = translation
-                object.rotation = rotation
+                object.orientation = rotation
                 object.scale = scale
+                // Keep BasicRenderable model matrix in sync with Object transform
+                if let basicIdx = basicRenderables.firstIndex(where: { $0.modelId == idKey }) {
+                    basicRenderables[basicIdx].modelMatrix = object.localMatrix
+                }
             }
 
             // Update PBRRenderable model in-place (PBR pipeline)
@@ -187,6 +210,7 @@ class SatinRenderer: NSObject, ObservableObject {
     weak var mtkView: MTKView?
 
     private var pbrRenderables: [PBRRenderable] = []
+    private var basicRenderables: [BasicRenderable] = []
     private var cursorObject: Object?
     private var cursorSetupDone = false
 
@@ -242,13 +266,22 @@ class SatinRenderer: NSObject, ObservableObject {
             SIMD3<Float>( 0, -1,  t), SIMD3<Float>( 0,  1,  t), SIMD3<Float>( 0, -1, -t), SIMD3<Float>( 0,  1, -t),
             SIMD3<Float>( t,  0, -1), SIMD3<Float>( t,  0,  1), SIMD3<Float>(-t,  0, -1), SIMD3<Float>(-t,  0,  1),
         ]
-        var verts: [Float] = []
+        let s: Float = 0.04 // small radius
+
+        // De-interleave vertex data for Satin 13 attributes
+        // Evidence: vendor/Satin/Sources/Satin/Geometry/Utilities/BufferAttribute.swift:376,389,363
+        // Float4BufferAttribute, Float3BufferAttribute, Float2BufferAttribute all exist
+        var posData: [simd_float4] = []
+        var normData: [simd_float3] = []
+        var uvData: [simd_float2] = []
+        posData.reserveCapacity(rawVerts.count)
+        normData.reserveCapacity(rawVerts.count)
+        uvData.reserveCapacity(rawVerts.count)
         for v in rawVerts {
             let n = simd_normalize(v)
-            let s: Float = 0.04 // small radius
-            verts.append(contentsOf: [n.x * s, n.y * s, n.z * s, 0,  // position + w
-                                       n.x, n.y, n.z,              // normal
-                                       0.0, 0.0])                   // uv
+            posData.append(simd_float4(n.x * s, n.y * s, n.z * s, 0))
+            normData.append(n)
+            uvData.append(simd_float2(0, 0))
         }
         let indices: [UInt32] = [
             0,11,5, 0,5,1, 0,1,7, 0,7,10, 0,10,11,
@@ -256,14 +289,23 @@ class SatinRenderer: NSObject, ObservableObject {
             3,9,4, 3,4,2, 3,2,6, 3,6,8, 3,8,9,
             4,9,5, 2,4,11, 6,2,10, 8,6,7, 9,8,1,
         ]
-        let data = GeometryData(vertices: verts, normals: [], uvs: [], indices: indices)
-        let geometry = Geometry(data: data)
-        geometry.vertexBuffer = device.makeBuffer(bytes: verts, length: verts.count * MemoryLayout<Float>.stride, options: .storageModeShared)
-        geometry.indexBuffer = device.makeBuffer(bytes: indices, length: indices.count * MemoryLayout<UInt32>.stride, options: .storageModeShared)
-        geometry.vertexCount = rawVerts.count
-        geometry.indexCount = indices.count
-        let mat = BasicMaterial(color: SIMD4<Float>(0.2, 0.6, 1.0, 0.8))
-        let obj = Object(geometry: geometry, material: mat)
+
+        // Build Satin 13 Geometry with separate attributes
+        // Evidence: vendor/Satin/Sources/Satin/Core/Geometry.swift:185 — addAttribute(_:for:)
+        let geometry = Geometry()
+        geometry.addAttribute(Float4BufferAttribute(defaultValue: .zero, data: posData, stepRate: 1, stepFunction: .perVertex), for: .Position)
+        geometry.addAttribute(Float3BufferAttribute(defaultValue: .zero, data: normData, stepRate: 1, stepFunction: .perVertex), for: .Normal)
+        geometry.addAttribute(Float2BufferAttribute(defaultValue: .zero, data: uvData, stepRate: 1, stepFunction: .perVertex), for: .Texcoord)
+
+        // Evidence: vendor/Satin/Sources/Satin/Geometry/Utilities/ElementBuffer.swift:34 — ElementBuffer(type:data:count:source:)
+        // Evidence: vendor/Satin/Sources/Satin/Core/Geometry.swift:168 — setElements(_:)
+        var idxCopy = indices
+        geometry.setElements(ElementBuffer(type: .uint32, data: &idxCopy, count: idxCopy.count, source: idxCopy))
+
+        // Evidence: vendor/Satin/Sources/Satin/Materials/BasicColorMaterial.swift:22 — BasicColorMaterial(color:blending:)
+        let mat = BasicColorMaterial(color: SIMD4<Float>(0.2, 0.6, 1.0, 0.8))
+        // Evidence: vendor/Satin/Sources/Satin/Core/Mesh.swift:152 — Mesh(geometry:material:) on Mesh, not Object
+        let obj = Mesh(geometry: geometry, material: mat)
         obj.visible = false
         cursorObject = obj
         scene?.add(obj)
@@ -284,10 +326,10 @@ class SatinRenderer: NSObject, ObservableObject {
         vertexDescriptor.attributes[2].offset = MemoryLayout<Float>.size * 7
         vertexDescriptor.attributes[2].bufferIndex = 0
 
-        let layout = vertexDescriptor.layouts[0]
-        layout.stride = MemoryLayout<Float>.size * 9
-        layout.stepRate = 1
-        layout.stepFunction = .perVertex
+        // MTLVertexDescriptor.layouts[n] returns MTLVertexBufferLayoutDescriptor?
+        vertexDescriptor.layouts[0]?.stride = MemoryLayout<Float>.size * 9
+        vertexDescriptor.layouts[0]?.stepRate = 1
+        vertexDescriptor.layouts[0]?.stepFunction = .perVertex
 
         let pipelineDescriptor = MTLRenderPipelineDescriptor()
         pipelineDescriptor.vertexFunction = vertexFn
@@ -321,10 +363,10 @@ class SatinRenderer: NSObject, ObservableObject {
         vertexDescriptor.attributes[2].offset = MemoryLayout<Float>.size * 7
         vertexDescriptor.attributes[2].bufferIndex = 0
 
-        let layout = vertexDescriptor.layouts[0]
-        layout.stride = MemoryLayout<Float>.size * 9
-        layout.stepRate = 1
-        layout.stepFunction = .perVertex
+        // MTLVertexDescriptor.layouts[n] returns MTLVertexBufferLayoutDescriptor?
+        vertexDescriptor.layouts[0]?.stride = MemoryLayout<Float>.size * 9
+        vertexDescriptor.layouts[0]?.stepRate = 1
+        vertexDescriptor.layouts[0]?.stepFunction = .perVertex
 
         let pipelineDescriptor = MTLRenderPipelineDescriptor()
         pipelineDescriptor.vertexFunction = vertexFn
@@ -358,10 +400,10 @@ class SatinRenderer: NSObject, ObservableObject {
         vertexDescriptor.attributes[2].offset = MemoryLayout<Float>.size * 7
         vertexDescriptor.attributes[2].bufferIndex = 0
 
-        let layout = vertexDescriptor.layouts[0]
-        layout.stride = MemoryLayout<Float>.size * 9
-        layout.stepRate = 1
-        layout.stepFunction = .perVertex
+        // MTLVertexDescriptor.layouts[n] returns MTLVertexBufferLayoutDescriptor?
+        vertexDescriptor.layouts[0]?.stride = MemoryLayout<Float>.size * 9
+        vertexDescriptor.layouts[0]?.stepRate = 1
+        vertexDescriptor.layouts[0]?.stepFunction = .perVertex
 
         let pipelineDescriptor = MTLRenderPipelineDescriptor()
         pipelineDescriptor.vertexFunction = vertexFn
@@ -395,10 +437,10 @@ class SatinRenderer: NSObject, ObservableObject {
         vertexDescriptor.attributes[2].offset = MemoryLayout<Float>.size * 7
         vertexDescriptor.attributes[2].bufferIndex = 0
 
-        let layout = vertexDescriptor.layouts[0]
-        layout.stride = MemoryLayout<Float>.size * 9
-        layout.stepRate = 1
-        layout.stepFunction = .perVertex
+        // MTLVertexDescriptor.layouts[n] returns MTLVertexBufferLayoutDescriptor?
+        vertexDescriptor.layouts[0]?.stride = MemoryLayout<Float>.size * 9
+        vertexDescriptor.layouts[0]?.stepRate = 1
+        vertexDescriptor.layouts[0]?.stepFunction = .perVertex
 
         let pipelineDescriptor = MTLRenderPipelineDescriptor()
         pipelineDescriptor.vertexFunction = vertexFn
@@ -618,6 +660,7 @@ class SatinRenderer: NSObject, ObservableObject {
         scene = Object()
         sceneObjectCount = scene3D.models.count
         pbrRenderables.removeAll()
+        basicRenderables.removeAll()
         modelIdToObject.removeAll()
 
         for model in scene3D.models {
@@ -698,27 +741,7 @@ class SatinRenderer: NSObject, ObservableObject {
     }
 
     private func buildObject(from model: Model) -> Object {
-        if let vb = model.vertexBuffer, let ib = model.indexBuffer,
-           model.vertexCount > 0, model.indexCount > 0 {
-            let vertexCount = model.vertexCount
-            let indexCount = model.indexCount
-            let data = GeometryData(
-                vertices: [],
-                normals: [],
-                uvs: [],
-                indices: []
-            )
-            let geometry = Geometry(data: data)
-            geometry.vertexBuffer = vb
-            geometry.indexBuffer = ib
-            geometry.vertexCount = vertexCount
-            geometry.indexCount = indexCount
-            let materialColor = model.usesPBR ? model.pbrMaterial.colorPreview : model.color
-            let material = BasicMaterial(color: materialColor)
-            let object = Object(geometry: geometry, material: material)
-            object.position = model.position
-            return object
-        }
+        // Gather interleaved vertex data from meshes (9 floats/vertex: pos.xyz+w, normal.xyz, uv.xy)
         var vertices: [Float] = []
         var indices: [UInt32] = []
         for mesh in model.meshes {
@@ -739,48 +762,106 @@ class SatinRenderer: NSObject, ObservableObject {
             }
         }
         if vertices.isEmpty {
-            vertices = [0,0,0, 0,0,0,1,0,0, 1,0,0, 0,0,0,1,0,0, 1,0,0, 0,0,0,1,0,0]
-            indices = [0,1,2, 2,1,3]
+            vertices = [0,0,0,0, 0,0,1,0,0, 1,0,0,0, 0,0,1,0,0, 1,0,0,0, 0,0,1,0,0]
+            indices = [0,1,2]
         }
-        let data = GeometryData(
-            vertices: vertices,
-            normals: [],
-            uvs: [],
-            indices: indices
-        )
-        let geometry = Geometry(data: data)
+
+        // Build raw MTLBuffers for direct rendering (basic pipeline)
+        // Evidence: scene.draw(encoder:) doesn't exist in Satin 13 — we draw from BasicRenderable instead
+        guard let vb = device.makeBuffer(bytes: vertices, length: vertices.count * MemoryLayout<Float>.stride, options: .storageModeShared),
+              let ib = device.makeBuffer(bytes: indices, length: indices.count * MemoryLayout<UInt32>.stride, options: .storageModeShared) else {
+            // Fallback: return empty Mesh (shouldn't happen on real devices)
+            return Mesh(geometry: Geometry(), material: BasicColorMaterial())
+        }
+
         let materialColor = model.usesPBR ? model.pbrMaterial.colorPreview : model.color
-        let material = BasicMaterial(color: materialColor)
-        let object = Object(geometry: geometry, material: material)
-        object.position = model.position
-        return object
+        let modelMatrix = model.transform
+        basicRenderables.append(BasicRenderable(
+            vertexBuffer: vb,
+            indexBuffer: ib,
+            indexCount: indices.count,
+            modelMatrix: modelMatrix,
+            color: materialColor,
+            modelId: model.id.uuidString
+        ))
+
+        // Build Satin Mesh for scene-graph operations (modelIdToObject, applyTransformsToScene, refreshNonPBRObjectGeometry)
+        // Evidence: vendor/Satin/Sources/Satin/Core/Geometry.swift:185 — addAttribute(_:for:)
+        // Evidence: vendor/Satin/Sources/Satin/Materials/BasicColorMaterial.swift:22 — BasicColorMaterial(color:blending:)
+        // Evidence: vendor/Satin/Sources/Satin/Core/Mesh.swift:152 — Mesh(geometry:material:) on Mesh
+        let geometry = buildSatinGeometry(vertices: vertices, indices: indices)
+        let material = BasicColorMaterial(color: materialColor)
+        let mesh = Mesh(geometry: geometry, material: material)
+        mesh.position = model.position
+        return mesh
+    }
+
+    /// Build a Satin 13 Geometry from interleaved vertex data (9 floats/vertex).
+    /// Separate attributes for Position (.float4), Normal (.float3), Texcoord (.float2).
+    private func buildSatinGeometry(vertices: [Float], indices: [UInt32]) -> Geometry {
+        let vcount = vertices.count / 9
+        var posData: [simd_float4] = []; posData.reserveCapacity(vcount)
+        var normData: [simd_float3] = []; normData.reserveCapacity(vcount)
+        var uvData: [simd_float2] = []; uvData.reserveCapacity(vcount)
+        for i in 0..<vcount {
+            let b = i * 9
+            posData.append(simd_float4(vertices[b], vertices[b+1], vertices[b+2], vertices[b+3]))
+            normData.append(simd_float3(vertices[b+4], vertices[b+5], vertices[b+6]))
+            uvData.append(simd_float2(vertices[b+7], vertices[b+8]))
+        }
+        let geometry = Geometry()
+        geometry.addAttribute(Float4BufferAttribute(defaultValue: .zero, data: posData, stepRate: 1, stepFunction: .perVertex), for: .Position)
+        geometry.addAttribute(Float3BufferAttribute(defaultValue: .zero, data: normData, stepRate: 1, stepFunction: .perVertex), for: .Normal)
+        geometry.addAttribute(Float2BufferAttribute(defaultValue: .zero, data: uvData, stepRate: 1, stepFunction: .perVertex), for: .Texcoord)
+        if !indices.isEmpty {
+            var idxCopy = indices
+            geometry.setElements(ElementBuffer(type: .uint32, data: &idxCopy, count: idxCopy.count, source: idxCopy))
+        }
+        return geometry
     }
 
     /// Rebuilds a non-PBR Satin Object's geometry buffers in-place from the model's current meshes.
     /// Used by the sculpt path to update non-PBR models without a full scene rebuild.
-    /// Risk: Satin Geometry properties (vertexBuffer, indexBuffer, vertexCount, indexCount)
-    /// may be computed/private in some Satin versions. The CI build passes with the same
-    /// property-assignment pattern used by buildObject(). If this path fails at runtime,
-    /// the safe fallback is a single rebuildSceneFrom() at stroke end (see BRAIN.md Risks).
+    /// In Satin 13, Geometry vertexBuffer/indexBuffer/vertexCount/indexCount are read-only —
+    /// we rebuild via addAttribute/setElements (same pattern as buildSatinGeometry) and
+    /// update the BasicRenderable entry for direct Metal rendering.
     private func refreshNonPBRObjectGeometry(for model: Model) {
-        guard let object = modelIdToObject[model.id.uuidString] else { return }
-        let (vb, ib, ic) = createBuffersFromMeshes(model.meshes)
-        guard let vBuf = vb, let iBuf = ib, ic > 0 else { return }
+        guard let mesh = modelIdToObject[model.id.uuidString] as? Mesh else { return }
 
-        // Rebuild interleaved vertex data to compute vertexCount
-        var totalFloats = 0
-        for mesh in model.meshes {
-            totalFloats += mesh.vertices.count * 9
+        // Rebuild interleaved vertex data from meshes
+        var vertices: [Float] = []
+        var indices: [UInt32] = []
+        for m in model.meshes {
+            let baseIndex = UInt32(vertices.count / 9)
+            for v in m.vertices {
+                vertices.append(v.position.x)
+                vertices.append(v.position.y)
+                vertices.append(v.position.z)
+                vertices.append(0)
+                vertices.append(v.normal.x)
+                vertices.append(v.normal.y)
+                vertices.append(v.normal.z)
+                vertices.append(v.uv.x)
+                vertices.append(v.uv.y)
+            }
+            for idx in m.indices {
+                indices.append(baseIndex + UInt32(idx))
+            }
         }
-        let vertexCount = totalFloats > 0 ? totalFloats / 9 : 0
-        guard vertexCount > 0 else { return }
+        guard !vertices.isEmpty, !indices.isEmpty else { return }
 
-        // Update the existing Satin Object's geometry in-place
-        // (same property-assignment pattern as buildObject)
-        object.geometry.vertexBuffer = vBuf
-        object.geometry.indexBuffer = iBuf
-        object.geometry.vertexCount = vertexCount
-        object.geometry.indexCount = ic
+        // Replace Mesh geometry with rebuilt Satin 13 Geometry
+        // Evidence: vendor/Satin/Sources/Satin/Core/Mesh.swift:118 — geometry is a settable stored property
+        mesh.geometry = buildSatinGeometry(vertices: vertices, indices: indices)
+
+        // Update the corresponding BasicRenderable for the next draw call
+        guard let idx = basicRenderables.firstIndex(where: { $0.modelId == model.id.uuidString }),
+              let vb = device.makeBuffer(bytes: vertices, length: vertices.count * MemoryLayout<Float>.stride, options: .storageModeShared),
+              let ib = device.makeBuffer(bytes: indices, length: indices.count * MemoryLayout<UInt32>.stride, options: .storageModeShared) else { return }
+        basicRenderables[idx].vertexBuffer = vb
+        basicRenderables[idx].indexBuffer = ib
+        basicRenderables[idx].indexCount = indices.count
+        basicRenderables[idx].modelMatrix = model.transform
     }
 
     func update() {
@@ -877,24 +958,48 @@ class SatinRenderer: NSObject, ObservableObject {
         encoder.setDepthStencilState(depthState)
 
         // ---- Basic pipeline pass ----
-        if let basicPS = basicPipelineState {
+        // Evidence: Satin 13 Object has no draw(encoder:) method.
+        // We draw non-PBR objects directly via MTLRenderCommandEncoder from basicRenderables.
+        if let basicPS = basicPipelineState, !basicRenderables.isEmpty {
             encoder.setRenderPipelineState(basicPS)
 
-            var basicUniforms = BasicUniforms(
-                modelMatrix: matrix_identity_float4x4,
-                viewMatrix: camera.viewMatrix,
-                projectionMatrix: camera.projectionMatrix,
-                ambientColor: SIMD3<Float>(0.18, 0.18, 0.18),
-                lightDirection: scene3D?.lighting.directionalLight.direction ?? simd_normalize(SIMD3<Float>(0.0, -1.0, -1.0)),
-                lightColor: scene3D?.lighting.directionalLight.color ?? SIMD3<Float>(1.0, 1.0, 1.0),
-                lightIntensity: scene3D?.lighting.directionalLight.intensity ?? 0.8,
-                normalMatrix: matrix_identity_float3x3
-            )
+            let ambientColor = SIMD3<Float>(0.18, 0.18, 0.18)
+            let lightDirection = scene3D?.lighting.directionalLight.direction ?? simd_normalize(SIMD3<Float>(0.0, -1.0, -1.0))
+            let lightColor = scene3D?.lighting.directionalLight.color ?? SIMD3<Float>(1.0, 1.0, 1.0)
+            let lightIntensity = scene3D?.lighting.directionalLight.intensity ?? 0.8
 
-            encoder.setVertexBytes(&basicUniforms, length: MemoryLayout<BasicUniforms>.stride, index: 1)
-            encoder.setFragmentBytes(&basicUniforms, length: MemoryLayout<BasicUniforms>.stride, index: 1)
+            for renderable in basicRenderables {
+                let m = renderable.modelMatrix
+                let normalMatrix3x3 = simd_float3x3(
+                    SIMD3<Float>(m.columns.0.x, m.columns.0.y, m.columns.0.z),
+                    SIMD3<Float>(m.columns.1.x, m.columns.1.y, m.columns.1.z),
+                    SIMD3<Float>(m.columns.2.x, m.columns.2.y, m.columns.2.z)
+                ).inverse.transpose
 
-            scene.draw(encoder: encoder)
+                var basicUniforms = BasicUniforms(
+                    modelMatrix: m,
+                    viewMatrix: camera.viewMatrix,
+                    projectionMatrix: camera.projectionMatrix,
+                    ambientColor: ambientColor,
+                    lightDirection: lightDirection,
+                    lightColor: lightColor,
+                    lightIntensity: lightIntensity,
+                    normalMatrix: normalMatrix3x3
+                )
+
+                encoder.setVertexBytes(&basicUniforms, length: MemoryLayout<BasicUniforms>.stride, index: 1)
+                encoder.setFragmentBytes(&basicUniforms, length: MemoryLayout<BasicUniforms>.stride, index: 1)
+
+                encoder.setVertexBuffer(renderable.vertexBuffer, offset: 0, index: 0)
+
+                encoder.drawIndexedPrimitives(
+                    type: .triangle,
+                    indexCount: renderable.indexCount,
+                    indexType: .uint32,
+                    indexBuffer: renderable.indexBuffer,
+                    indexBufferOffset: 0
+                )
+            }
         }
 
         // ---- PBR pipeline pass ----

@@ -15,15 +15,32 @@ class SatinMesh: Satin.Mesh {
     init(device: MTLDevice, vertices: [Float] = [], indices: [UInt16] = [], color: simd_float4 = simd_float4(0.5, 0.5, 0.5, 1.0)) {
         let geometry = Geometry()
         let vertexData = !vertices.isEmpty ? vertices : [0,0,0, 0,0,1, 1,0,0, 1,0,1]
-        let indexData = !indices.isEmpty ? indices : [0,1,2, 2,1,3]
-        if let buffer = device.makeBuffer(bytes: vertexData, length: vertexData.count * MemoryLayout<Float>.size, options: []) {
-            let attr = VertexBufferAttribute(buffer: buffer, format: MTLVertexFormat.float3, offset: 0, stride: MemoryLayout<SIMD3<Float>>.stride)
-            geometry.vertexAttributes[VertexAttribute.Position] = attr
+        var indexData = !indices.isEmpty ? indices : [0,1,2, 2,1,3]
+
+        // Build position attribute from flat [Float] → [simd_float3]
+        // Evidence: vendor/Satin/Sources/Satin/Geometry/Utilities/BufferAttribute.swift:376 — Float3BufferAttribute exists
+        // Evidence: vendor/Satin/Sources/Satin/Constants/Pipelines/VertexConstants.swift:53 — VertexAttributeIndex.Position
+        // Evidence: vendor/Satin/Sources/Satin/Core/Geometry.swift:185 — geometry.addAttribute(_:for:)
+        let positionCount = vertexData.count / 3
+        var positions: [simd_float3] = []
+        positions.reserveCapacity(positionCount)
+        for i in 0..<positionCount {
+            let base = i * 3
+            positions.append(simd_float3(vertexData[base], vertexData[base+1], vertexData[base+2]))
         }
-        if !indexData.isEmpty, let idxBuffer = device.makeBuffer(bytes: indexData, length: indexData.count * MemoryLayout<UInt16>.size, options: []) {
-            geometry.elementBuffer = ElementBuffer(buffer: idxBuffer, type: MTLIndexType.uint16, count: indexData.count)
+        let attr = Float3BufferAttribute(defaultValue: .zero, data: positions, stepRate: 1, stepFunction: .perVertex)
+        geometry.addAttribute(attr, for: .Position)
+
+        // Set up index element buffer
+        // Evidence: vendor/Satin/Sources/Satin/Geometry/Utilities/ElementBuffer.swift:34 — ElementBuffer(type:data:count:source:)
+        // Evidence: vendor/Satin/Sources/Satin/Core/Geometry.swift:168 — geometry.setElements(_:)
+        if !indexData.isEmpty {
+            geometry.setElements(ElementBuffer(type: .uint16, data: &indexData, count: indexData.count, source: indexData))
         }
+
+        // Evidence: vendor/Satin/Sources/Satin/Materials/BasicColorMaterial.swift:22 — BasicColorMaterial(color:blending:)
         let material = BasicColorMaterial(color: color)
+        // Evidence: vendor/Satin/Sources/Satin/Core/Mesh.swift:152 — Mesh(geometry:material:) exists on Mesh
         super.init(geometry: geometry, material: material)
         self.meshColor = color
         if !vertices.isEmpty {
