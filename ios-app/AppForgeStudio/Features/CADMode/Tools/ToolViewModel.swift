@@ -18,6 +18,7 @@ class ToolViewModel: ObservableObject {
     @Published var csgShapeAIndex: Int? = nil
     @Published var csgShapeBIndex: Int? = nil
     @Published var csgActiveOperation: CADTool? = nil
+    @Published var symmetryEnabled: Bool = false
     
     let bevel = BevelEngine()
     let boolean = BooleanEngine()
