@@ -22,7 +22,9 @@ settings:
 packages:
   Satin:
     url: https://github.com/Hi-Rez/Satin.git
-    from: 13.0.0
+    # Pinned to the exact revision mirrored in vendor/Satin (repo is archived;
+    # main == final state). Local vendor copy is the API source of truth.
+    revision: a91c469f517cef1946d5ed4dd9771df4843a30ef
   OCCTSwift:
     url: https://github.com/gsdali/OCCTSwift.git
     from: 1.0.0
