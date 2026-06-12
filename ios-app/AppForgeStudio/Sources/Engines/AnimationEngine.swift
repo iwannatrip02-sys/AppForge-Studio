@@ -147,8 +147,8 @@ struct LegacyKeyframe {
 // MARK: - Legacy Clip (non-generic, for backward compatibility)
 struct LegacyClip {
     let name: String
-    let duration: Float
-    let keyframes: [String: [LegacyKeyframe]]
+    var duration: Float
+    var keyframes: [String: [LegacyKeyframe]]
     var loop: Bool = true
 
     func evaluate(at time: Float) -> [String: simd_float4x4] {
@@ -160,7 +160,7 @@ struct LegacyClip {
                 continue
             }
             var prev = kfs[0]
-            guard let next = kfs.last else { continue }
+            guard var next = kfs.last else { continue }
             for i in 0..<(kfs.count - 1) {
                 if clampedTime >= kfs[i].time && clampedTime <= kfs[i+1].time {
                     prev = kfs[i]
@@ -373,7 +373,7 @@ class AnimationEngine: ObservableObject {
                     continue
                 }
                 var prev = sorted[0]
-                guard let next = sorted.last else { continue }
+                guard var next = sorted.last else { continue }
                 for i in 0..<(sorted.count - 1) {
                     if time >= sorted[i].time && time <= sorted[i+1].time {
                         prev = sorted[i]
@@ -458,7 +458,7 @@ class AnimationEngine: ObservableObject {
         }
         let rawT = (time - p.time) / (n.time - p.time)
         let t = p.easingEnum.apply(rawT)
-        return simd_mix(p.positionValue, n.positionValue, t)
+        return simd_mix(p.positionValue, n.positionValue, SIMD3<Float>(repeating: t))
     }
 
     private func interpolateRotation(keys: [KeyframeEntry], at time: Float) -> simd_quatf {
@@ -526,7 +526,7 @@ class AnimationEngine: ObservableObject {
         }
         let rawT = (time - p.time) / (n.time - p.time)
         let t = p.easingEnum.apply(rawT)
-        return simd_mix(p.scaleValue, n.scaleValue, t)
+        return simd_mix(p.scaleValue, n.scaleValue, SIMD3<Float>(repeating: t))
     }
 }
 
