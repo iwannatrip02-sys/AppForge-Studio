@@ -1,4 +1,4 @@
-#include <metal_stdlib>
+﻿#include <metal_stdlib>
 using namespace metal;
 
 // Forward declaration (defined below, used in the PBR fragment shader)
@@ -64,12 +64,12 @@ struct IBLUniforms {
 };
 
 // Fresnel-Schlick
-float3 fresnel_schlick(float cosTheta, float3 F0) {
+static float3 fresnel_schlick(float cosTheta, float3 F0) {
     return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
 }
 
 // GGX/Trowbridge-Reitz NDF
-float distribution_ggx(float3 N, float3 H, float roughness) {
+static float distribution_ggx(float3 N, float3 H, float roughness) {
     float a = roughness * roughness;
     float a2 = a * a;
     float NdotH = max(dot(N, H), 0.0);
@@ -82,33 +82,33 @@ float distribution_ggx(float3 N, float3 H, float roughness) {
 }
 
 // Smith Schlick-GGX Geometry
-float geometry_schlick_ggx(float NdotV, float roughness) {
+static float geometry_schlick_ggx(float NdotV, float roughness) {
     float r = roughness + 1.0;
     float k = (r * r) / 8.0;
     return NdotV / (NdotV * (1.0 - k) + k);
 }
 
-float geometry_smith(float3 N, float3 V, float3 L, float roughness) {
+static float geometry_smith(float3 N, float3 V, float3 L, float roughness) {
     float NdotV = max(dot(N, V), 0.0);
     float NdotL = max(dot(N, L), 0.0);
     return geometry_schlick_ggx(NdotV, roughness) * geometry_schlick_ggx(NdotL, roughness);
 }
 
-float3 fresnel_schlick_roughness(float cosTheta, float3 F0, float roughness) {
+static float3 fresnel_schlick_roughness(float cosTheta, float3 F0, float roughness) {
     return F0 + (max(float3(1.0 - roughness), F0) - F0) * pow(1.0 - cosTheta, 5.0);
 }
 
-float3 specularIBL(float3 N, float3 V, float roughness, texturecube<float> prefilter, sampler s, float3 F0, float levels) {
+static float3 specularIBL(float3 N, float3 V, float roughness, texturecube<float> prefilter, sampler s, float3 F0, float levels) {
     float3 R = reflect(-V, N);
     float3 prefilteredColor = prefilter.sample(s, R, level(roughness * levels)).rgb;
     return prefilteredColor;
 }
 
-float3 diffuseIBL(float3 N, texturecube<float> irradiance, sampler s) {
+static float3 diffuseIBL(float3 N, texturecube<float> irradiance, sampler s) {
     return irradiance.sample(s, N).rgb;
 }
 
-float3 calculate_pbr_directional(
+static float3 calculate_pbr_directional(
     float3 worldPos,
     float3 N,
     float3 V,
@@ -137,7 +137,7 @@ float3 calculate_pbr_directional(
     return (kD * material.albedo / M_PI_F + specular) * radiance * NdotL;
 }
 
-float3 calculate_pbr_point(
+static float3 calculate_pbr_point(
     float3 worldPos,
     float3 N,
     float3 V,
@@ -172,7 +172,7 @@ float3 calculate_pbr_point(
     return (kD * material.albedo / M_PI_F + specular) * radiance * NdotL;
 }
 
-float3 ACES_tone_map(float3 color) {
+static float3 ACES_tone_map(float3 color) {
     float a = 2.51;
     float b = 0.03;
     float c = 2.43;
