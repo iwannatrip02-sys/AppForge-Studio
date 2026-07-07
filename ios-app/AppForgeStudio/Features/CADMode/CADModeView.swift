@@ -595,50 +595,47 @@ struct CADModeView: View {
 
     @MainActor
     private func performBooleanUnion() {
-        guard canvasVM.scene.models.count >= 2 else { return }
-        let meshA = canvasVM.scene.models[0].meshes.first ?? Mesh()
-        let meshB = canvasVM.scene.models[1].meshes.first ?? Mesh()
-        guard !meshA.vertices.isEmpty, !meshB.vertices.isEmpty else { return }
-
-        sketchEngine.logOperation(type: .booleanUnion, description: "Union de 2 modelos")
-
-        let engine = BooleanEngine()
-        let result = engine.booleanUnion(a: meshA, b: meshB)
-        let model = Model(name: "Union_\(UUID().uuidString.prefix(8))")
-        model.meshes = [result]
-        canvasVM.scene.addModel(model)
-        canvasVM.objectWillChange.send()
+        performBoolean(.booleanUnion, description: "Union de 2 modelos", namePrefix: "Union")
     }
 
     @MainActor
     private func performBooleanSubtract() {
-        guard canvasVM.scene.models.count >= 2 else { return }
-        let meshA = canvasVM.scene.models[0].meshes.first ?? Mesh()
-        let meshB = canvasVM.scene.models[1].meshes.first ?? Mesh()
-        guard !meshA.vertices.isEmpty, !meshB.vertices.isEmpty else { return }
-
-        sketchEngine.logOperation(type: .booleanSubtract, description: "Diferencia de 2 modelos")
-
-        let engine = BooleanEngine()
-        let result = engine.booleanDifference(a: meshA, b: meshB)
-        let model = Model(name: "Subtract_\(UUID().uuidString.prefix(8))")
-        model.meshes = [result]
-        canvasVM.scene.addModel(model)
-        canvasVM.objectWillChange.send()
+        performBoolean(.booleanSubtract, description: "Diferencia de 2 modelos", namePrefix: "Subtract")
     }
 
     @MainActor
     private func performBooleanIntersect() {
+        performBoolean(.booleanIntersect, description: "Interseccion de 2 modelos", namePrefix: "Intersect")
+    }
+
+    /// Booleano entre los dos primeros modelos: B-rep real (OCCT) si ambos lo tienen,
+    /// fallback al motor de mallas si no.
+    @MainActor
+    private func performBoolean(_ op: CADOperationType, description: String, namePrefix: String) {
         guard canvasVM.scene.models.count >= 2 else { return }
-        let meshA = canvasVM.scene.models[0].meshes.first ?? Mesh()
-        let meshB = canvasVM.scene.models[1].meshes.first ?? Mesh()
+        let modelA = canvasVM.scene.models[0]
+        let modelB = canvasVM.scene.models[1]
+
+        sketchEngine.logOperation(type: op, description: description)
+
+        if let brepResult = BRepModeling.boolean(op, modelA, modelB) {
+            canvasVM.scene.addModel(brepResult)
+            canvasVM.objectWillChange.send()
+            return
+        }
+
+        // Fallback malla (modelos importados/esculpidos sin B-rep)
+        let meshA = modelA.meshes.first ?? Mesh()
+        let meshB = modelB.meshes.first ?? Mesh()
         guard !meshA.vertices.isEmpty, !meshB.vertices.isEmpty else { return }
-
-        sketchEngine.logOperation(type: .booleanIntersect, description: "Interseccion de 2 modelos")
-
         let engine = BooleanEngine()
-        let result = engine.booleanIntersection(a: meshA, b: meshB)
-        let model = Model(name: "Intersect_\(UUID().uuidString.prefix(8))")
+        let result: Mesh
+        switch op {
+        case .booleanSubtract: result = engine.booleanDifference(a: meshA, b: meshB)
+        case .booleanIntersect: result = engine.booleanIntersection(a: meshA, b: meshB)
+        default: result = engine.booleanUnion(a: meshA, b: meshB)
+        }
+        let model = Model(name: "\(namePrefix)_\(UUID().uuidString.prefix(8))")
         model.meshes = [result]
         canvasVM.scene.addModel(model)
         canvasVM.objectWillChange.send()
@@ -689,6 +686,7 @@ struct CADModeView: View {
         let name = "\(type)_\(UUID().uuidString.prefix(8))"
         let model = Model(name: name)
         model.meshes = [mesh]
+        model.cadShape = validShape  // retener B-rep: fuente de verdad para ops de ingeniería
 
         canvasVM.scene.addModel(model)
         canvasVM.scene.cadHistory.pushOperation(
@@ -747,21 +745,30 @@ struct CADModeView: View {
         csgStatusMessage = "Applying..."
         let operation = selectedTool
 
-        let engine = BooleanEngine()
-        let result: Mesh
+        let opType: CADOperationType
         switch operation {
-        case .booleanUnion:
-            result = engine.booleanUnion(a: meshA, b: meshB)
-        case .booleanSubtract:
-            result = engine.booleanDifference(a: meshA, b: meshB)
-        case .booleanIntersect:
-            result = engine.booleanIntersection(a: meshA, b: meshB)
-        default:
-            return
+        case .booleanUnion: opType = .booleanUnion
+        case .booleanSubtract: opType = .booleanSubtract
+        case .booleanIntersect: opType = .booleanIntersect
+        default: return
         }
-        let name = "\(operation.rawValue)_\(UUID().uuidString.prefix(8))"
-        let model = Model(name: name)
-        model.meshes = [result]
+
+        let model: Model
+        if let brepResult = BRepModeling.boolean(opType, canvasVM.scene.models[idxA],
+                                                 canvasVM.scene.models[idxB]) {
+            model = brepResult  // booleano B-rep real (OCCT)
+        } else {
+            // Fallback malla
+            let engine = BooleanEngine()
+            let result: Mesh
+            switch operation {
+            case .booleanSubtract: result = engine.booleanDifference(a: meshA, b: meshB)
+            case .booleanIntersect: result = engine.booleanIntersection(a: meshA, b: meshB)
+            default: result = engine.booleanUnion(a: meshA, b: meshB)
+            }
+            model = Model(name: "\(operation.rawValue)_\(UUID().uuidString.prefix(8))")
+            model.meshes = [result]
+        }
         canvasVM.scene.addModel(model)
         canvasVM.objectWillChange.send()
         sketchEngine.logOperation(type: .booleanUnion, description: "CSG \(operation.rawValue) de 2 modelos")
@@ -915,8 +922,29 @@ class PencilForceView: UIView {
 
 @MainActor
 private func executeCADTool(_ tool: CADTool, canvasVM: CanvasViewModel, toolVM: ToolViewModel) {
-    guard let firstMesh = canvasVM.scene.models.first?.meshes.first else { return }
+    guard let firstModel = canvasVM.scene.models.first,
+          let firstMesh = firstModel.meshes.first else { return }
     var mutableMesh = firstMesh
+
+    // Ruta B-rep real (OCCT) cuando el modelo conserva su CADShape.
+    if firstModel.cadShape != nil {
+        let applied: Bool
+        switch tool {
+        case .fillet:
+            applied = BRepModeling.fillet(firstModel, radius: Double(toolVM.filletRadius))
+        case .chamfer:
+            applied = BRepModeling.chamfer(firstModel, distance: Double(toolVM.chamferRadius))
+        case .shell:
+            applied = BRepModeling.shell(firstModel, thickness: Double(toolVM.shellThickness))
+        default:
+            applied = false
+        }
+        if applied {
+            canvasVM.objectWillChange.send()
+            return
+        }
+        // Si la feature B-rep no aplica o falla, continuar con la ruta de malla.
+    }
 
     switch tool {
     case .fillet:
