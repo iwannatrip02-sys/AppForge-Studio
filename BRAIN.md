@@ -1,7 +1,22 @@
 # AppForge Studio — BRAIN.md
-> Updated: 2026-05-29
+> Updated: 2026-07-07
 
-## ESTADO ACTUAL
+## ESTADO ACTUAL — CI VERDE 🟢
+
+2026-07-07 — **Primer build verde completo de la historia del repo** (run 28858291026, PR #6 → main `ca2ec00`):
+- Build simulador ✓ + **165 tests, 0 fallos** ✓ + archive device ✓ + IPA sin firmar empaquetada ✓
+- 20 olas de iteración: ~60 errores de compilación en ~25 archivos + 6 bugs de infra CI + 9 fallos de test reales
+- Causa raíz dominante: código escrito contra APIs imaginarias (propias y de OCCTSwift) porque nadie podía compilar
+- Bugs de PRODUCCIÓN encontrados por los tests: exports OBJ/STL/USDZ generaban 0 geometría
+  (buildMDLAsset con descriptor vacío + Vertex crudo con UUID); validador de mallas crasheaba con caras huérfanas;
+  USDZ requiere SceneKit en iOS (ModelIO no escribe .usdz)
+- Infra CI aprendida (NO tocar sin razón): firma ad-hoc `CODE_SIGN_IDENTITY=-` + `--deep` (metallib),
+  test bundle con Info.plist propio (BNDL) y bundle ID distinto, NUNCA `type: folder` para Resources
+  (un dir Resources/ dentro del .app rompe la instalación: iOS lo trata como bundle deep)
+- Toolchain Swift 6.3.2 instalado en Windows: `swiftc -parse` local + sourcekit-lsp para Serena
+- API real de OCCTSwift documentada en `.serena/memories/occtswift_api.md` — LEER antes de tocar CAD
+
+## ESTADO ANTERIOR (histórico)
 2026-05-27 — Verificación de integridad post-OpenCode (Gotchi):
 
 **Disco vs Docs — discrepancias encontradas:**

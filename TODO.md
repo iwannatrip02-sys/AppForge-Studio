@@ -1,13 +1,15 @@
 # AppForge Studio — TODO.md
-> Updated: 2026-05-29 02:06 UTC
-> Post-compilation-fix v1: los 7 bugs de compilacion resueltos. Satin 13.0.0. Shape unificado sin conflictos de tipos.
+> Updated: 2026-07-07
+> CI VERDE: build + 165 tests (0 fallos) + IPA. PR #6 mergeado a main (ca2ec00).
 
 ## Foco actual
-- Hacer que el proyecto compile en CI (GitHub Actions macOS) y ver si los tests pasan
+- Fase de features sobre base verde: conectar touch→sculpt, explotar OCCTSwift real
+  (push/pull con localPrism, drawings DXF/PDF, SheetMetal, FeatureRecognition)
+- Bajar la IPA sin firmar del CI y sideload para probar en iPad real
 
 ## Pendientes
-- [ ] Verificar que CI compila sin errores (push reciente, build #12 pendiente)
-- [ ] Verificar que los 49 tests pasan en iOS Simulator via CI
+- [x] CI compila sin errores *(done 2026-07-07 — 20 olas, ~60 errores)*
+- [x] Tests pasan en iOS Simulator via CI *(done 2026-07-07 — 165/165)*
 - [ ] Obtener cuenta Apple Developer ($99/año) para firmar y deployar
 - [ ] O conseguir Mac/Mac mini para compilar + sideloading gratuito (AltStore, 7 días)
 - [ ] Conectar sculpt al touch — los 10 deformers existen pero MetalView nunca los llama. rayTriangleIntersect() existe pero no se usa
