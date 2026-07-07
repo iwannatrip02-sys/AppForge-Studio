@@ -101,16 +101,21 @@ class ExportViewModel: ObservableObject {
 
         let result: Result<Void, ExportError>
         if selectedFormat == .step {
-            guard let mesh = model.meshes.first else {
+            // STEP real (B-rep AP214 vía OCCT) cuando el modelo conserva su CADShape;
+            // fallback al STEP sintetizado desde malla si no.
+            if BRepModeling.exportSTEP(model, to: tempURL) {
+                result = .success(())
+            } else if let mesh = model.meshes.first {
+                do {
+                    try exportServiceSTEP.exportMeshToSTEP(mesh: mesh, outputURL: tempURL)
+                    result = .success(())
+                } catch {
+                    result = .failure(.writeFailed(error.localizedDescription))
+                }
+            } else {
                 exportError = "No hay malla para exportar STEP."
                 isExporting = false
                 return
-            }
-            do {
-                try exportServiceSTEP.exportMeshToSTEP(mesh: mesh, outputURL: tempURL)
-                result = .success(())
-            } catch {
-                result = .failure(.writeFailed(error.localizedDescription))
             }
         } else {
             result = exportService.export(model: model, format: mappedFormat, to: tempURL)

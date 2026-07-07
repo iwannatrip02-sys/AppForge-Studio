@@ -14,10 +14,8 @@ final class DirectModelingEngine {
     /// Offset a face by a distance along its normal. Positive = push out, negative = pull in.
     /// OCCT BRepOffsetAPI_ThruSections or BRepOffsetAPI_MakeOffsetShape handle this.
     func pushPullFace(_ shape: CADShape, faceIndex: Int, distance: Double) -> CADShape? {
-        let faces = shape.faces()
-        guard faceIndex < faces.count else { return nil }
-        // TODO: per-face prism (BRepFeat/localPrism) — whole-shape offset approximation for now
-        return shape.offset(by: distance)
+        // Push/pull REAL por cara (BRepFeat prism boss/pocket) — ya no aproximación por offset
+        BRepModeling.pushPullFace(shape, faceIndex: faceIndex, distance: distance)
     }
 
     /// Move a face along a direction vector (more flexible than push/pull along normal)

@@ -14,6 +14,9 @@ class Model: ObservableObject {
     @Published var vertexCount: Int
     @Published var indexCount: Int
     @Published var meshes: [Mesh] = []
+    /// B-rep vivo (OCCT) — fuente de verdad geométrica cuando existe.
+    /// Las operaciones de ingeniería (booleanos/fillet/push-pull) van vía BRepModeling.
+    var cadShape: CADShape?
     @Published var color: SIMD4<Float>
     @Published var cadHistoryID: UUID?
     @Published var originOp: String?
