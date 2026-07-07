@@ -7,8 +7,14 @@
   booleanos OCCT reales entre modelos, push/pull por cara (BRepFeat boss/pocket),
   fillet/chamfer/shell B-rep in-place, STEP AP214 real. 179 tests verdes con
   oráculos de volumen exactos.
-- Siguiente (Fase B): UI de selección de caras para push/pull táctil; touch→sculpt;
-  drawings DXF/PDF, SheetMetal, FeatureRecognition (todo ya en el kernel OCCT)
+- FASE B COMPLETA (2026-07-07, PR #8): manipulación directa — pipeline
+  pantalla→rayo→malla→cara B-rep (ScenePicking, testeable), bug onTouch3D
+  (pasaba model.position), PushPullController + herramienta Push/Pull con barra
+  contextual, docs/DISENO_INTERFAZ.md canónico. 190 tests verdes.
+- Siguiente (Fase C, por orden del doc de diseño): highlight visual de cara
+  seleccionada (no negociable antes de más tools); router de gesto
+  geometría-vs-vacío; drag-en-cara para push/pull en vivo (necesita device);
+  drawings DXF/PDF, SheetMetal, FeatureRecognition (kernel listo)
 - Bajar la IPA sin firmar del CI y sideload para probar en iPad real
 
 ## Pendientes
