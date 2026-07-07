@@ -94,7 +94,7 @@ struct CADModeView: View {
                         )
                         PencilForceOverlay { force, location in
                             if force > 0.7 && !sketchEngine.entities.isEmpty && !isExtruding {
-                                extrudeDistance = force * 2.0
+                                extrudeDistance = Float(force) * 2.0
                                 performExtrusion()
                             }
                         }
