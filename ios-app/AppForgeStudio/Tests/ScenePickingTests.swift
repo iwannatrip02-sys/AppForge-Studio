@@ -7,7 +7,7 @@ import OCCTSwift
 /// Es la columna vertebral de la manipulación directa (tap-en-cara → push/pull).
 final class ScenePickingTests: XCTestCase {
 
-    /// Caja OCCT 2×2×2 (ocupa [0,2]³) con B-rep + malla.
+    /// Caja OCCT 2×2×2 CENTRADA en el origen (ocupa [-1,1]³ — así la crea OCCTSwift).
     private func makeBoxModel() throws -> Model {
         let shape = try XCTUnwrap(OCCTSwift.Shape.box(width: 2, height: 2, depth: 2))
         let mesh = try XCTUnwrap(OCCTBridge.toMesh(shape, quality: .medium))
@@ -18,8 +18,8 @@ final class ScenePickingTests: XCTestCase {
     }
 
     private func topDownCamera() -> Scene3D.Camera {
-        Scene3D.Camera(position: SIMD3<Float>(1, 1, 10),
-                       target: SIMD3<Float>(1, 1, 0),
+        Scene3D.Camera(position: SIMD3<Float>(0, 0, 10),
+                       target: SIMD3<Float>(0, 0, 0),
                        up: SIMD3<Float>(0, 1, 0),
                        fov: 45, nearPlane: 0.1, farPlane: 100)
     }
@@ -48,15 +48,15 @@ final class ScenePickingTests: XCTestCase {
         let hit = try XCTUnwrap(ScenePicker.hitTest(models: [model], ray: ray),
                                 "el rayo cenital debe impactar la caja")
         XCTAssertEqual(hit.modelIndex, 0)
-        XCTAssertEqual(hit.position.z, 2.0, accuracy: 0.01,
-                       "impacto en la cara superior (z=2), no atravesarla")
+        XCTAssertEqual(hit.position.z, 1.0, accuracy: 0.01,
+                       "impacto en la cara superior (z=1, caja centrada), no atravesarla")
         XCTAssertGreaterThan(hit.normal.z, 0.9, "la normal del hit apunta +Z")
     }
 
     func testHitTestMissesWhenRayPointsAway() throws {
         let model = try makeBoxModel()
-        let camera = Scene3D.Camera(position: SIMD3<Float>(1, 1, 10),
-                                    target: SIMD3<Float>(1, 1, 20),  // mirando lejos de la caja
+        let camera = Scene3D.Camera(position: SIMD3<Float>(0, 0, 10),
+                                    target: SIMD3<Float>(0, 0, 20),  // mirando lejos de la caja
                                     up: SIMD3<Float>(0, 1, 0),
                                     fov: 45, nearPlane: 0.1, farPlane: 100)
         let ray = CameraRay.from(screenPoint: CGPoint(x: 200, y: 200),
@@ -84,7 +84,7 @@ final class ScenePickingTests: XCTestCase {
     func testFacePickerMapsTopHitToPlusZFace() throws {
         let model = try makeBoxModel()
         let shape = try XCTUnwrap(model.cadShape)
-        let hitPoint = SIMD3<Float>(1, 1, 2)  // centro de la cara superior
+        let hitPoint = SIMD3<Float>(0, 0, 1)  // centro de la cara superior (caja centrada)
 
         let idx = try XCTUnwrap(BRepFacePicker.faceIndex(of: shape, nearest: hitPoint))
         let normal = try XCTUnwrap(shape.faces()[idx].normal)

@@ -12,6 +12,8 @@ Paquete SPM enorme y real (OCCT 8 completo: Document XDE 636KB, DXF/PDF/SVG expo
 - `brepData(withTriangles:withNormals:) throws -> Data`. NO existe `fromBrep(Data)` — usar `loadBREP(from: url)`.
 - Mesh: `mesh(linearDeflection:angularDeflection:) -> Mesh?` (Mesh OCCT: vertices [SIMD3<Float>], normals, indices [UInt32]). NO existe `triangulate()`.
 
+GOTCHA: las primitivas (box/cylinder/sphere...) están CENTRADAS en el origen — box(2,2,2) ocupa [-1,1]³, su cara superior está en z=1 (verificado por test de picking).
+
 ## Face
 `normal: SIMD3<Double>?`, `outerWire`, `bounds`, `isPlanar`, `area(tolerance:)`, `surfaceType`, curvaturas, `project(point:)`.
 

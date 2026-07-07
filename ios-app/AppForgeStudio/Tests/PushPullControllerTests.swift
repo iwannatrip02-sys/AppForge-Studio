@@ -17,10 +17,10 @@ final class PushPullControllerTests: XCTestCase {
         return model
     }
 
-    /// Hit sintético en el centro de la cara superior de la caja [0,2]³.
+    /// Hit sintético en el centro de la cara superior de la caja centrada [-1,1]³.
     private func topFaceHit() -> SurfaceHit {
-        SurfaceHit(modelIndex: 0, position: SIMD3<Float>(1, 1, 2),
-                   normal: SIMD3<Float>(0, 0, 1), distance: 8)
+        SurfaceHit(modelIndex: 0, position: SIMD3<Float>(0, 0, 1),
+                   normal: SIMD3<Float>(0, 0, 1), distance: 9)
     }
 
     func testSelectFaceFromSurfaceHit() throws {
