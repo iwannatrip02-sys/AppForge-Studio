@@ -8,7 +8,7 @@ final class CSGTests: XCTestCase {
 
     /// Triangula un shape y valida invariantes básicos de la malla resultante.
     @discardableResult
-    private func meshOrFail(_ shape: OCCTSwift.Shape?, _ label: String) throws -> Mesh {
+    private func meshOrFail(_ shape: OCCTSwift.Shape?, _ label: String) throws -> AppForgeStudio.Mesh {
         let mesh = try XCTUnwrap(shape.flatMap { OCCTBridge.toMesh($0, quality: .medium) },
                                  "\(label): no se pudo triangular")
         XCTAssertFalse(mesh.vertices.isEmpty, "\(label): sin vértices")
