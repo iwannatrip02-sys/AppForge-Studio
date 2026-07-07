@@ -102,3 +102,18 @@ struct ToolbarView: View {
         .buttonStyle(.plain)
     }
 }
+
+/// Segmented picker Mundo/Local para el espacio de transformación.
+struct ToolbarSpacePicker: View {
+    @Binding var transformSpace: WorkspaceToolViewModel.TransformSpace
+
+    var body: some View {
+        Picker("Espacio", selection: $transformSpace) {
+            ForEach(WorkspaceToolViewModel.TransformSpace.allCases, id: \.self) { space in
+                Text(space.rawValue).tag(space)
+            }
+        }
+        .pickerStyle(.segmented)
+        .frame(width: 140)
+    }
+}

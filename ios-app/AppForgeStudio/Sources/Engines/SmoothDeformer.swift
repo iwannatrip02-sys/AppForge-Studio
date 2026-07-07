@@ -12,9 +12,9 @@ struct SmoothDeformer: Deformer {
                 avgPosition += neighborPos
             }
             avgPosition /= Float(neighbors.count)
-            vertex.position = simd_mix(vertex.position, avgPosition, influence * strength)
+            vertex.position = simd_mix(vertex.position, avgPosition, SIMD3<Float>(repeating: influence * strength))
         } else {
-            vertex.position = simd_mix(vertex.position, point.position, influence * 0.1)
+            vertex.position = simd_mix(vertex.position, point.position, SIMD3<Float>(repeating: influence * 0.1))
         }
     }
 }
