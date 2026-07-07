@@ -95,6 +95,8 @@ jobs:
               -destination 'generic/platform=iOS Simulator' \
               -configuration Debug \
               -derivedDataPath DerivedData \
+              CODE_SIGN_STYLE=Manual \
+              CODE_SIGN_IDENTITY=- \
               OTHER_CPLUSPLUSFLAGS='$(inherited) -Wno-c++11-narrowing' \
               2>&1 | tee build.log
           else
@@ -125,6 +127,8 @@ jobs:
             -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M4)' \
             -configuration Debug \
             -derivedDataPath DerivedData \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY=- \
             OTHER_CPLUSPLUSFLAGS='$(inherited) -Wno-c++11-narrowing' \
             2>&1 | tee test.log
 
