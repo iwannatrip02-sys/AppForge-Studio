@@ -230,7 +230,8 @@ class GestureHandlerView: UIView {
 
 extension GestureHandlerView: UIPencilInteractionDelegate {
     func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
-        let location = interaction.location(in: self)
+        // UIPencilInteraction no expone ubicación del tap; usar el centro de la vista
+        let location = CGPoint(x: bounds.midX, y: bounds.midY)
         onPencilDoubleTap?(location, lastPencilForce)
     }
 }

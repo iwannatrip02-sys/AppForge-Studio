@@ -275,7 +275,7 @@ class ExportService {
         guard let asset = buildMDLAsset(from: model) else {
             throw ExportError.invalidModel("No valid meshes found for STL export")
         }
-        try asset.export(to: url, fileType: "stl")
+        try asset.export(to: url)
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw ExportError.writeFailed("STL export failed - file was not written to disk")
         }
@@ -285,7 +285,7 @@ class ExportService {
         guard let asset = buildMDLAsset(from: model) else {
             throw ExportError.invalidModel("No se pudo construir el asset USDZ")
         }
-        try asset.export(to: url, fileType: "usdz")
+        try asset.export(to: url)
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw ExportError.writeFailed("USDZ export failed - file was not written to disk")
         }
