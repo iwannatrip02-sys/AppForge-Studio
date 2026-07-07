@@ -1,6 +1,10 @@
 import XCTest
+import simd
 @testable import AppForgeStudio
 
+/// Tests contra la API REAL de GeometryConstraintManager:
+/// gestión de constraints + solver 2D vía resolveConstraints(with:) -> SolverMetrics.
+/// (La versión anterior probaba una API inexistente: evaluateConstraint/solve(positions:).)
 final class GeometryConstraintManagerTests: XCTestCase {
     var manager: GeometryConstraintManager!
 
@@ -9,110 +13,28 @@ final class GeometryConstraintManagerTests: XCTestCase {
         manager = GeometryConstraintManager()
     }
 
-    // MARK: - Evaluate Constraint Tests
+    // MARK: - Modelo de constraint (determinista, sin solver)
 
-    func testEvaluateHorizontalConstraint() {
-        let constraint = GeometryConstraint(type: .horizontal, entityIDs: [UUID()])
-        let pos: [UUID: SIMD3<Float>] = [constraint.entityIDs[0]: SIMD3<Float>(1, 2, 3)]
-        let residual = manager.evaluateConstraint(constraint, positions: pos)
-        XCTAssertEqual(residual, 2.0, accuracy: 0.001)
+    func testRequiredEntityCounts() {
+        XCTAssertEqual(GeometryConstraint(type: .horizontal, entityIDs: [UUID()]).requiredEntityCount, 1)
+        XCTAssertEqual(GeometryConstraint(type: .distance, entityIDs: []).requiredEntityCount, 2)
+        XCTAssertEqual(GeometryConstraint(type: .midpoint, entityIDs: []).requiredEntityCount, 3)
+        XCTAssertEqual(GeometryConstraint(type: .perpendicular, entityIDs: []).requiredEntityCount, 4)
     }
 
-    func testEvaluateVerticalConstraint() {
-        let constraint = GeometryConstraint(type: .vertical, entityIDs: [UUID()])
-        let pos: [UUID: SIMD3<Float>] = [constraint.entityIDs[0]: SIMD3<Float>(5, 1, 2)]
-        let residual = manager.evaluateConstraint(constraint, positions: pos)
-        XCTAssertEqual(residual, 5.0, accuracy: 0.001)
+    func testDistanceConstraintWithoutValueIsInvalid() {
+        let c = GeometryConstraint(type: .distance, entityIDs: [UUID(), UUID()])
+        XCTAssertFalse(c.isValid, "distance sin value debe ser inválido")
+        let cWithValue = GeometryConstraint(type: .distance, entityIDs: [UUID(), UUID()], value: 5)
+        XCTAssertTrue(cWithValue.isValid)
     }
 
-    func testEvaluateDistanceConstraint() {
-        let id1 = UUID()
-        let id2 = UUID()
-        let constraint = GeometryConstraint(type: .distance, entityIDs: [id1, id2], value: 10.0)
-        let pos: [UUID: SIMD3<Float>] = [id1: .zero, id2: SIMD3<Float>(3, 4, 0)]
-        let residual = manager.evaluateConstraint(constraint, positions: pos)
-        XCTAssertEqual(residual, 5.0, accuracy: 0.001)
+    func testDefaultLabelFallsBackToTypeName() {
+        let c = GeometryConstraint(type: .horizontal, entityIDs: [UUID()])
+        XCTAssertFalse(c.label.isEmpty, "label vacío debe caer al rawValue del tipo")
     }
 
-    func testEvaluateAngleConstraint() {
-        let apex = UUID()
-        let p1 = UUID()
-        let p2 = UUID()
-        let constraint = GeometryConstraint(type: .angle, entityIDs: [apex, p1, p2], value: 90.0)
-        let pos: [UUID: SIMD3<Float>] = [apex: .zero, p1: SIMD3<Float>(1, 0, 0), p2: SIMD3<Float>(0, 0, 1)]
-        let residual = manager.evaluateConstraint(constraint, positions: pos)
-        XCTAssertEqual(residual, 0.0, accuracy: 0.001)
-    }
-
-    func testEvaluatePerpendicularConstraint() {
-        let id1 = UUID()
-        let id2 = UUID()
-        let constraint = GeometryConstraint(type: .perpendicular, entityIDs: [id1, id2])
-        let pos: [UUID: SIMD3<Float>] = [id1: SIMD3<Float>(1, 0, 0), id2: SIMD3<Float>(0, 1, 0)]
-        let residual = manager.evaluateConstraint(constraint, positions: pos)
-        XCTAssertEqual(residual, 0.0, accuracy: 0.001)
-    }
-
-    func testEvaluateEqualConstraint() {
-        let id1 = UUID()
-        let id2 = UUID()
-        let constraint = GeometryConstraint(type: .equal, entityIDs: [id1, id2])
-        let pos: [UUID: SIMD3<Float>] = [id1: SIMD3<Float>(3, 0, 0), id2: SIMD3<Float>(0, 4, 0)]
-        let residual = manager.evaluateConstraint(constraint, positions: pos)
-        XCTAssertEqual(residual, 1.0, accuracy: 0.001)
-    }
-
-    func testEvaluateMidpointConstraint() {
-        let p1 = UUID()
-        let p2 = UUID()
-        let p3 = UUID()
-        let constraint = GeometryConstraint(type: .midpoint, entityIDs: [p1, p2, p3])
-        let pos: [UUID: SIMD3<Float>] = [p1: .zero, p2: SIMD3<Float>(2, 0, 0), p3: SIMD3<Float>(1, 0, 0)]
-        let residual = manager.evaluateConstraint(constraint, positions: pos)
-        XCTAssertEqual(residual, 0.0, accuracy: 0.001)
-    }
-
-    func testEvaluateConcentricConstraint() {
-        let id1 = UUID()
-        let id2 = UUID()
-        let constraint = GeometryConstraint(type: .concentric, entityIDs: [id1, id2])
-        let pos: [UUID: SIMD3<Float>] = [id1: .zero, id2: SIMD3<Float>(5, 0, 0)]
-        let residual = manager.evaluateConstraint(constraint, positions: pos)
-        XCTAssertEqual(residual, 5.0, accuracy: 0.001)
-    }
-
-    func testEvaluateCollinearConstraint() {
-        let p1 = UUID()
-        let p2 = UUID()
-        let p3 = UUID()
-        let constraint = GeometryConstraint(type: .collinear, entityIDs: [p1, p2, p3])
-        let pos: [UUID: SIMD3<Float>] = [p1: .zero, p2: SIMD3<Float>(2, 0, 0), p3: SIMD3<Float>(1, 0, 0)]
-        let residual = manager.evaluateConstraint(constraint, positions: pos)
-        XCTAssertEqual(residual, 0.0, accuracy: 0.001)
-    }
-
-    // MARK: - Solve Tests
-
-    func testSolveSingleConstraintUpdatesPositions() {
-        let id = UUID()
-        let constraint = GeometryConstraint(type: .horizontal, entityIDs: [id])
-        manager.addConstraint(constraint)
-        var positions: [UUID: SIMD3<Float>] = [id: SIMD3<Float>(1, 5, 3)]
-        let residual = manager.solve(positions: &positions)
-        XCTAssertLessThan(residual, 0.001)
-        XCTAssertEqual(positions[id]?.y, 0.0, accuracy: 0.001)
-    }
-
-    func testResolveConstraintsConverges() {
-        let id = UUID()
-        let constraint = GeometryConstraint(type: .vertical, entityIDs: [id])
-        manager.addConstraint(constraint)
-        manager.entityPositionProvider = { _ in SIMD3<Float>(3, 1, 2) }
-        manager.entityPositionUpdater = { _, newPos in }
-        manager.resolveConstraints()
-        XCTAssertFalse(manager.isSolving)
-        XCTAssertGreaterThanOrEqual(manager.lastIterationCount, 1)
-    }
+    // MARK: - Gestión de constraints
 
     func testAddRemoveUpdateConstraint() {
         let c1 = GeometryConstraint(type: .horizontal, entityIDs: [UUID()])
@@ -134,14 +56,8 @@ final class GeometryConstraintManagerTests: XCTestCase {
         XCTAssertTrue(c.isActive)
         manager.toggleConstraint(c.id)
         XCTAssertFalse(manager.constraints.first?.isActive ?? true)
-    }
-
-    func testAllFunctions() {
-        let c1 = GeometryConstraint(type: .horizontal, entityIDs: [UUID()])
-        let c2 = GeometryConstraint(type: .vertical, entityIDs: [UUID()])
-        manager.addConstraint(c1)
-        manager.addConstraint(c2)
-        XCTAssertEqual(manager.allFunctions.count, 2)
+        XCTAssertEqual(manager.activeConstraintCount, 0)
+        XCTAssertTrue(manager.getActiveConstraints().isEmpty)
     }
 
     func testClearAll() {
@@ -149,5 +65,67 @@ final class GeometryConstraintManagerTests: XCTestCase {
         manager.addConstraint(GeometryConstraint(type: .vertical, entityIDs: [UUID()]))
         manager.clearAll()
         XCTAssertEqual(manager.constraintCount, 0)
+    }
+
+    // MARK: - Solver 2D (resolveConstraints(with:))
+
+    func testSolveWithNoConstraintsConvergesImmediately() {
+        var points = [
+            SketchPoint(position: SIMD2<Float>(0, 0)),
+            SketchPoint(position: SIMD2<Float>(1, 0)),
+        ]
+        let metrics = manager.resolveConstraints(with: &points)
+        XCTAssertTrue(metrics.converged)
+        XCTAssertEqual(metrics.iterationCount, 0)
+    }
+
+    func testSolveAlreadySatisfiedDistanceConstraint() {
+        // Los 2 primeros puntos quedan fijos en el solver; el tercero lleva la constraint.
+        let p0 = SketchPoint(position: SIMD2<Float>(0, 0))
+        let p1 = SketchPoint(position: SIMD2<Float>(1, 0))
+        let p2 = SketchPoint(position: SIMD2<Float>(3, 4))
+        var points = [p0, p1, p2]
+
+        // distancia p0→p2 = 5, ya satisfecha exactamente
+        manager.addConstraint(GeometryConstraint(type: .distance,
+                                                 entityIDs: [p0.id, p2.id],
+                                                 value: 5))
+        let metrics = manager.resolveConstraints(with: &points)
+        XCTAssertTrue(metrics.converged, "configuración ya satisfecha debe converger")
+
+        let solved = points[2].position
+        let dist = simd_distance(SIMD2<Float>(0, 0), solved)
+        XCTAssertEqual(dist, 5.0, accuracy: 0.05, "la distancia debe mantenerse en 5")
+    }
+
+    func testSolveUpdatesLastSolveMetrics() {
+        let p0 = SketchPoint(position: SIMD2<Float>(0, 0))
+        let p1 = SketchPoint(position: SIMD2<Float>(1, 0))
+        let p2 = SketchPoint(position: SIMD2<Float>(2, 3))
+        var points = [p0, p1, p2]
+
+        manager.addConstraint(GeometryConstraint(type: .distance,
+                                                 entityIDs: [p0.id, p2.id],
+                                                 value: 4))
+        let metrics = manager.resolveConstraints(with: &points)
+        XCTAssertEqual(manager.lastSolve.iterationCount, metrics.iterationCount,
+                       "lastSolve debe reflejar la última resolución")
+        XCTAssertEqual(manager.lastSolve.converged, metrics.converged)
+    }
+
+    func testInactiveConstraintIsIgnoredBySolver() {
+        let p0 = SketchPoint(position: SIMD2<Float>(0, 0))
+        let p1 = SketchPoint(position: SIMD2<Float>(1, 0))
+        let p2 = SketchPoint(position: SIMD2<Float>(7, 9))
+        var points = [p0, p1, p2]
+
+        var c = GeometryConstraint(type: .distance, entityIDs: [p0.id, p2.id], value: 1)
+        c.isActive = false
+        manager.addConstraint(c)
+
+        _ = manager.resolveConstraints(with: &points)
+        XCTAssertEqual(points[2].position.x, 7, accuracy: 0.001,
+                       "constraint inactiva no debe mover puntos")
+        XCTAssertEqual(points[2].position.y, 9, accuracy: 0.001)
     }
 }
