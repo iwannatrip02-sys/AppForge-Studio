@@ -43,10 +43,18 @@ final class BRepHistory: ObservableObject {
     }
 
     @discardableResult
-    func undo() -> Bool { swapTop(from: &undoStack, to: &redoStack) }
+    func undo() -> Bool {
+        let restored = swapTop(from: &undoStack, to: &redoStack)
+        syncCounts()
+        return restored
+    }
 
     @discardableResult
-    func redo() -> Bool { swapTop(from: &redoStack, to: &undoStack) }
+    func redo() -> Bool {
+        let restored = swapTop(from: &redoStack, to: &undoStack)
+        syncCounts()
+        return restored
+    }
 
     func clear() {
         undoStack.removeAll()
@@ -56,8 +64,10 @@ final class BRepHistory: ObservableObject {
 
     /// Restaura el tope de `from` (saltando modelos ya liberados) y guarda el estado
     /// actual del modelo en `to` para poder revertir la reversión.
+    /// El llamador (undo/redo) debe invocar `syncCounts()` DESPUÉS de retornar: hacerlo
+    /// aquí (p.ej. en un `defer`) lee `undoStack`/`redoStack` mientras siguen tomados
+    /// como `inout` `from`/`to` → "Fatal access conflict" (exclusividad de Swift).
     private func swapTop(from: inout [Entry], to: inout [Entry]) -> Bool {
-        defer { syncCounts() }
         while let entry = from.popLast() {
             guard let model = entry.model else { continue }  // modelo borrado: descartar
             to.append(Entry(model: model, shape: model.cadShape, meshes: model.meshes))
