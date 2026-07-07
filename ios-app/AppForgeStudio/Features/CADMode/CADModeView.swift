@@ -133,9 +133,9 @@ struct CADModeView: View {
                     parametricView
                 }
             }
-            .onChange(of: selectedTool) { newTool in
-                executeCADTool(newTool, canvasVM: canvasVM, toolVM: toolVM)
-            }
+        }
+        .onChange(of: selectedTool) { newTool in
+            executeCADTool(newTool, canvasVM: canvasVM, toolVM: toolVM)
         }
         .sheet(isPresented: $showMeasurements) {
             NavigationView {
