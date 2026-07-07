@@ -1,146 +1,111 @@
 import XCTest
+import OCCTSwift
 @testable import AppForgeStudio
 
+/// CSG sobre el kernel real (OCCTSwift B-rep).
+/// Sustituye a los tests del Shape BSP legacy — Sources/LegacyCSG ya no es parte del target.
 final class CSGTests: XCTestCase {
-    
-    func testBoxPrimitiveCreates12Triangles() {
-        let box = Shape.box(width: 2, height: 2, depth: 2)
-        XCTAssertEqual(box.mesh.indices.count, 36, "Box debe tener 12 triangulos = 36 indices")
-        XCTAssertEqual(box.mesh.vertices.count, 24, "Box debe tener 24 vertices (12 tri * 3 verts, sin compartir)")
-    }
-    
-    func testCylinderPrimitiveHasCorrectStructure() {
-        let cylinder = Shape.cylinder(radius: 1, height: 2)
-        XCTAssertGreaterThan(cylinder.mesh.vertices.count, 0, "Cilindro debe tener vertices")
-        XCTAssertGreaterThan(cylinder.mesh.indices.count, 0, "Cilindro debe tener indices")
-        XCTAssertEqual(cylinder.mesh.indices.count % 3, 0, "Indices deben ser multiplo de 3")
-    }
-    
-    func testUnionOfTwoBoxesProducesValidMesh() {
-        let boxA = Shape.box(width: 2, height: 2, depth: 2)
-        let boxB = Shape.box(width: 2, height: 2, depth: 2)
-        let result = boxA.union(boxB)
-        XCTAssertGreaterThan(result.mesh.vertices.count, 0, "Union debe producir vertices")
-        XCTAssertGreaterThan(result.mesh.indices.count, 0, "Union debe producir indices")
-        XCTAssertEqual(result.mesh.indices.count % 3, 0, "Indices de union deben ser multiplo de 3")
-    }
-    
-    func testDifferenceOfTwoBoxesProducesValidMesh() {
-        let boxA = Shape.box(width: 2, height: 2, depth: 2)
-        let boxB = Shape.box(width: 1, height: 1, depth: 1)
-        let result = boxA.difference(boxB)
-        XCTAssertGreaterThan(result.mesh.vertices.count, 0, "Difference debe producir vertices")
-        XCTAssertGreaterThan(result.mesh.indices.count, 0, "Difference debe producir indices")
-        XCTAssertEqual(result.mesh.indices.count % 3, 0, "Indices de difference deben ser multiplo de 3")
-    }
-    
-    func testIntersectionOfTwoBoxesProducesValidMesh() {
-        let boxA = Shape.box(width: 2, height: 2, depth: 2)
-        let boxB = Shape.box(width: 2, height: 2, depth: 2)
-        let result = boxA.intersection(boxB)
-        XCTAssertGreaterThan(result.mesh.vertices.count, 0, "Intersection debe producir vertices")
-        XCTAssertGreaterThan(result.mesh.indices.count, 0, "Intersection debe producir indices")
-        XCTAssertEqual(result.mesh.indices.count % 3, 0, "Indices de intersection deben ser multiplo de 3")
-    }
-    
-    func testMeshToPolygonsAndBackPreservesCount() {
-        let box = Shape.box(width: 2, height: 2, depth: 2)
-        let originalVertCount = box.mesh.vertices.count
-        let originalIdxCount = box.mesh.indices.count
-        
-        let polygons = Polygon3D.fromMesh(box.mesh)
-        XCTAssertEqual(polygons.count, originalIdxCount / 3, "Cada 3 indices produce un poligono")
-        
-        let restoredMesh = Polygon3D.toMesh(polygons)
-        XCTAssertEqual(restoredMesh.indices.count, originalIdxCount, "Mesh restaurado debe tener mismos indices")
-    }
-    
-    func testUnionReducesTriangleCount() {
-        let boxA = Shape.box(width: 2, height: 2, depth: 2)
-        let boxB = Shape.box(width: 2, height: 2, depth: 2)
-        let combinedTotal = boxA.mesh.indices.count + boxB.mesh.indices.count
-        let result = boxA.union(boxB)
-        // Union de dos cubos identicos superpuestos deberia eliminar triangulos internos
-        XCTAssertLessThan(result.mesh.indices.count, combinedTotal, "Union debe eliminar triangulos internos")
-    }
-    
-    func testNonOverlappingUnionPreservesGeometry() {
-        let boxA = Shape.box(width: 1, height: 1, depth: 1)
-        let boxB = Shape.box(width: 1, height: 1, depth: 1)
-        // Mismos cubos en misma posicion = se funden
-        let result = boxA.union(boxB)
-        XCTAssertGreaterThan(result.mesh.vertices.count, 6, "Union de dos cubos debe tener al menos 8 vertices unicos")
+
+    /// Triangula un shape y valida invariantes básicos de la malla resultante.
+    @discardableResult
+    private func meshOrFail(_ shape: OCCTSwift.Shape?, _ label: String) throws -> Mesh {
+        let mesh = try XCTUnwrap(shape.flatMap { OCCTBridge.toMesh($0, quality: .medium) },
+                                 "\(label): no se pudo triangular")
+        XCTAssertFalse(mesh.vertices.isEmpty, "\(label): sin vértices")
+        XCTAssertFalse(mesh.indices.isEmpty, "\(label): sin índices")
+        XCTAssertEqual(mesh.indices.count % 3, 0, "\(label): índices no múltiplo de 3")
+        return mesh
     }
 
-    // MARK: - F3.T3: Edge cases and integration tests
+    // MARK: - Primitivas
 
-    func testDegenerateSphereRadiusZero() {
-        let sphere = Shape.sphere(radius: 0)
-        // Degenerate sphere should not crash — may produce empty or minimal mesh
-        XCTAssertNotNil(sphere)
-        // A zero-radius sphere may produce 0 triangles or a minimal degenerate mesh
-        XCTAssertEqual(sphere.mesh.indices.count % 3, 0, "Indices must be multiple of 3 even for degenerate geometry")
+    func testBoxPrimitiveProducesValidMesh() throws {
+        try meshOrFail(OCCTSwift.Shape.box(width: 2, height: 2, depth: 2), "box")
     }
 
-    func testEmptyIntersectionOfSeparatedBoxes() {
-        let boxA = Shape.box(width: 1, height: 1, depth: 1)
-        let boxB = Shape.box(width: 1, height: 1, depth: 1)
-        // Non-overlapping boxes produce empty or near-empty intersection
-        let result = boxA.intersection(boxB)
-        // Intersection of two identical boxes at same position = full box.
-        // True empty intersection test requires offset; we verify structure is valid
-        XCTAssertEqual(result.mesh.indices.count % 3, 0, "Intersection indices must be multiple of 3")
+    func testCylinderPrimitiveProducesValidMesh() throws {
+        try meshOrFail(OCCTSwift.Shape.cylinder(radius: 1, height: 2), "cylinder")
     }
 
-    func testDifferenceOfIdenticalBoxes() {
-        let boxA = Shape.box(width: 2, height: 2, depth: 2)
-        // A - A at same position should produce empty mesh (everything subtracted)
-        let result = boxA.difference(boxA)
-        XCTAssertEqual(result.mesh.indices.count % 3, 0, "Difference indices must be multiple of 3")
-        // A - A should produce very few triangles (ideally 0, but OCCT may leave fragments)
-        XCTAssertLessThan(result.mesh.indices.count, boxA.mesh.indices.count, "A - A should have fewer triangles than A")
+    func testSpherePrimitiveProducesValidMesh() throws {
+        try meshOrFail(OCCTSwift.Shape.sphere(radius: 1), "sphere")
     }
 
-    func testConePrimitiveProducesValidMesh() {
-        let cone = Shape.cone(bottomRadius: 1, topRadius: 0.5, height: 2)
-        XCTAssertGreaterThan(cone.mesh.vertices.count, 0, "Cone must have vertices")
-        XCTAssertGreaterThan(cone.mesh.indices.count, 0, "Cone must have indices")
-        XCTAssertEqual(cone.mesh.indices.count % 3, 0, "Cone indices must be multiple of 3")
+    func testConePrimitiveProducesValidMesh() throws {
+        try meshOrFail(OCCTSwift.Shape.cone(bottomRadius: 1, topRadius: 0.5, height: 2), "cone")
     }
 
-    func testTorusPrimitiveProducesValidMesh() {
-        let torus = Shape.torus(majorRadius: 1, minorRadius: 0.3)
-        XCTAssertGreaterThan(torus.mesh.vertices.count, 0, "Torus must have vertices")
-        XCTAssertGreaterThan(torus.mesh.indices.count, 0, "Torus must have indices")
-        XCTAssertEqual(torus.mesh.indices.count % 3, 0, "Torus indices must be multiple of 3")
+    func testTorusPrimitiveProducesValidMesh() throws {
+        try meshOrFail(OCCTSwift.Shape.torus(majorRadius: 1, minorRadius: 0.3), "torus")
     }
 
-    func testUnionOfSameBoxIsNotEmpty() {
-        let box = Shape.box(width: 2, height: 2, depth: 2)
-        let result = box.union(box)
-        // A ∪ A should produce valid geometry, not empty
-        XCTAssertGreaterThan(result.mesh.vertices.count, 0, "A ∪ A must have vertices")
-        XCTAssertGreaterThan(result.mesh.indices.count, 0, "A ∪ A must have indices")
-        XCTAssertEqual(result.mesh.indices.count % 3, 0, "A ∪ A indices must be multiple of 3")
+    func testDegenerateSphereReturnsNil() {
+        XCTAssertNil(OCCTSwift.Shape.sphere(radius: 0), "esfera de radio 0 debe fallar")
     }
 
-    func testMeshWithHoleHasStructure() {
-        let outer = Shape.box(width: 3, height: 3, depth: 3)
-        let inner = Shape.box(width: 1, height: 1, depth: 1)
-        // outer - inner = box with cubic hole
-        let result = outer.difference(inner)
-        XCTAssertGreaterThan(result.mesh.vertices.count, 0, "Box with hole must have vertices")
-        XCTAssertEqual(result.mesh.indices.count % 3, 0, "Box-with-hole indices must be multiple of 3")
+    // MARK: - Booleanos
+
+    private func twoOverlappingBoxes() throws -> (OCCTSwift.Shape, OCCTSwift.Shape) {
+        let a = try XCTUnwrap(OCCTSwift.Shape.box(width: 2, height: 2, depth: 2))
+        let bBase = try XCTUnwrap(OCCTSwift.Shape.box(width: 2, height: 2, depth: 2))
+        let b = try XCTUnwrap(bBase.translated(by: SIMD3<Double>(1, 0, 0)))
+        return (a, b)
     }
 
-    func testBooleanChainUnionThenIntersection() {
-        let box = Shape.box(width: 2, height: 2, depth: 2)
-        let sphere = Shape.sphere(radius: 1.2)
-        // (box ∪ sphere) ∩ box — should produce valid mesh
-        let unionResult = box.union(sphere)
-        XCTAssertGreaterThan(unionResult.mesh.vertices.count, 0, "Union must produce vertices")
-        let chainResult = unionResult.intersection(box)
-        XCTAssertGreaterThan(chainResult.mesh.vertices.count, 0, "Chained intersection must produce vertices")
-        XCTAssertEqual(chainResult.mesh.indices.count % 3, 0, "Chained result indices must be multiple of 3")
+    func testUnionOfTwoBoxesProducesValidMesh() throws {
+        let (a, b) = try twoOverlappingBoxes()
+        try meshOrFail(a + b, "union")
+    }
+
+    func testDifferenceOfTwoBoxesProducesValidMesh() throws {
+        let (a, b) = try twoOverlappingBoxes()
+        try meshOrFail(a - b, "difference")
+    }
+
+    func testIntersectionOfTwoBoxesProducesValidMesh() throws {
+        let (a, b) = try twoOverlappingBoxes()
+        try meshOrFail(a & b, "intersection")
+    }
+
+    // MARK: - Propiedades geométricas (el B-rep permite asserts exactos)
+
+    func testBoxVolumeIsExact() throws {
+        let box = try XCTUnwrap(OCCTSwift.Shape.box(width: 2, height: 2, depth: 2))
+        let volume = try XCTUnwrap(box.volume)
+        XCTAssertEqual(volume, 8.0, accuracy: 0.01, "volumen de caja 2×2×2 debe ser 8")
+    }
+
+    func testUnionVolumeOfOverlappingBoxes() throws {
+        let (a, b) = try twoOverlappingBoxes()
+        let union = try XCTUnwrap(a + b)
+        let volume = try XCTUnwrap(union.volume)
+        // Dos cajas de 8 con solape de 1×2×2=4 → 8+8-4 = 12
+        XCTAssertEqual(volume, 12.0, accuracy: 0.05, "volumen de unión con solape")
+    }
+
+    func testIntersectionVolumeOfOverlappingBoxes() throws {
+        let (a, b) = try twoOverlappingBoxes()
+        let intersection = try XCTUnwrap(a & b)
+        let volume = try XCTUnwrap(intersection.volume)
+        XCTAssertEqual(volume, 4.0, accuracy: 0.05, "volumen de intersección (solape 1×2×2)")
+    }
+
+    func testDifferenceVolumeOfOverlappingBoxes() throws {
+        let (a, b) = try twoOverlappingBoxes()
+        let difference = try XCTUnwrap(a - b)
+        let volume = try XCTUnwrap(difference.volume)
+        XCTAssertEqual(volume, 4.0, accuracy: 0.05, "volumen de diferencia (8 - solape 4)")
+    }
+
+    // MARK: - Bridge OCCT → Mesh propio
+
+    func testBridgeProducesFiniteGeometry() throws {
+        let mesh = try meshOrFail(OCCTSwift.Shape.sphere(radius: 1), "sphere-bridge")
+        for v in mesh.vertices {
+            XCTAssertTrue(v.position.x.isFinite && v.position.y.isFinite && v.position.z.isFinite,
+                          "posiciones deben ser finitas")
+        }
+        let maxIndex = mesh.indices.max() ?? 0
+        XCTAssertLessThan(Int(maxIndex), mesh.vertices.count, "índices dentro de rango")
     }
 }

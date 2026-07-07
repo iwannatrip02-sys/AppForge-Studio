@@ -92,3 +92,4 @@ targets:
         INFOPLIST_FILE: AppForgeStudio/Info.plist
     dependencies:
       - target: AppForgeStudio
+      - package: OCCTSwift
