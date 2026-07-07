@@ -50,9 +50,11 @@ targets:
       - path: Sources/Services
       - path: Sources/Theme
       - path: Sources/RenderEngine
+      # Recursos individuales (NUNCA type: folder — un dir Resources/ literal dentro
+      # del .app hace que iOS lo trate como bundle deep y falle la instalación)
       - path: Resources
-        type: folder
-        createFolderReferences: false
+        excludes:
+          - "Localizable.strings"
       - path: Sources/Shaders/BooleanComputeShaders.metal
         type: file
         buildPhase: sources
