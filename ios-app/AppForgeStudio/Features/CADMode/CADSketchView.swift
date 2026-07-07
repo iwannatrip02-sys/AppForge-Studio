@@ -152,9 +152,7 @@ struct CADSketchView: View {
                                 sketchEngine.entities.append(.rectangle(SketchRectangle(origin: pt.id, size: SIMD2<Float>(0.1, 0.1))))
                             case .arc:
                                 sketchEngine.entities.append(.arc(SketchArc(center: pt.id, radius: 0.05, startAngle: 0, endAngle: 3.14159)))
-                            case .point:
-                                break
-                            case .select:
+                            case .trim, .extend:
                                 break
                             }
                         }

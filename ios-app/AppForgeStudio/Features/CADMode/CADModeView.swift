@@ -70,7 +70,8 @@ struct CADModeView: View {
                     .onChange(of: extrudedMesh) { newMesh in
                         if let mesh = newMesh {
                             let name = "Extruded_\(UUID().uuidString.prefix(8))"
-                            let model = Model(name: name, meshes: [mesh])
+                            let model = Model(name: name)
+                            model.meshes = [mesh]
                             canvasVM.scene.addModel(model)
                             canvasVM.objectWillChange.send()
                             selectedTool = .select
@@ -179,7 +180,7 @@ struct CADModeView: View {
                     .font(.caption)
                     .foregroundColor(theme.textPrimary)
                 Spacer()
-                Text("\(canvasVM.scene.cadHistory.getAllOperations().count) ops")
+                Text("\(canvasVM.scene.cadHistory.getActiveOperationChain().count) ops")
                     .font(.caption2)
                     .foregroundColor(theme.textSecondary)
             }
@@ -187,30 +188,25 @@ struct CADModeView: View {
             .background(theme.surfaceSecondary)
 
             List {
-                ForEach(canvasVM.scene.cadHistory.getAllOperations(), id: \.id) { node in
+                ForEach(canvasVM.scene.cadHistory.getActiveOperationChain(), id: \.id) { op in
                     HStack {
                         Circle()
-                            .fill(node.id == canvasVM.scene.cadHistory.current.id ? theme.accent : theme.textSecondary)
+                            .fill(op.id == canvasVM.scene.cadHistory.currentNode?.operation.id ? theme.accent : theme.textSecondary)
                             .frame(width: 6, height: 6)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(node.operation)
+                            Text(op.description)
                                 .font(.system(size: 11))
-                                .foregroundColor(node.id == canvasVM.scene.cadHistory.current.id ? theme.textPrimary : theme.textSecondary)
-                            if !node.params.isEmpty {
-                                Text(node.params.map { "\($0.key): \(String(format: "%.2f", $0.value))" }.joined(separator: ", "))
+                                .foregroundColor(op.id == canvasVM.scene.cadHistory.currentNode?.operation.id ? theme.textPrimary : theme.textSecondary)
+                            if !op.parameters.isEmpty {
+                                Text(op.parameters.map { "\($0.key): \(String(format: "%.2f", $0.value))" }.joined(separator: ", "))
                                     .font(.system(size: 8))
                                     .foregroundColor(theme.textSecondary)
                             }
                         }
                         Spacer()
-                        Text(node.timestamp, style: .time)
+                        Text(op.timestamp, style: .time)
                             .font(.system(size: 8))
                             .foregroundColor(theme.textSecondary)
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        canvasVM.scene.cadHistory.reset(to: node)
-                        canvasVM.objectWillChange.send()
                     }
                 }
             }
@@ -661,52 +657,46 @@ struct CADModeView: View {
         let size = Double(primitiveSize)
         let occt = OCCTEngine.shared
 
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
-            let shape: OCCTSwift.Shape?
-            let opDescription: String
+        let shape: CADShape?
+        let opDescription: String
 
-            switch type {
-            case "Box":
-                shape = occt.box(width: size, height: size, depth: size)
-                opDescription = "Box \(String(format: "%.1f", size))mm"
-            case "Sphere":
-                shape = occt.sphere(radius: size * 0.5)
-                opDescription = "Sphere r=\(String(format: "%.1f", size * 0.5))mm"
-            case "Cylinder":
-                shape = occt.cylinder(radius: size * 0.5, height: size)
-                opDescription = "Cylinder r=\(String(format: "%.1f", size * 0.5)) h=\(String(format: "%.1f", size))mm"
-            case "Cone":
-                shape = occt.cone(bottomRadius: size * 0.5, topRadius: 0, height: size)
-                opDescription = "Cone r=\(String(format: "%.1f", size * 0.5)) h=\(String(format: "%.1f", size))mm"
-            case "Torus":
-                shape = occt.torus(majorRadius: size * 0.5, minorRadius: size * 0.15)
-                opDescription = "Torus R=\(String(format: "%.1f", size * 0.5)) r=\(String(format: "%.1f", size * 0.15))mm"
-            default:
-                return
-            }
-
-            guard let validShape = shape,
-                  let mesh = OCCTBridge.toMesh(validShape, quality: .medium) else {
-                DispatchQueue.main.async {
-                    self.csgStatusMessage = "Failed to create \(type)"
-                }
-                return
-            }
-
-            let name = "\(type)_\(UUID().uuidString.prefix(8))"
-            let model = Model(name: name, meshes: [mesh])
-
-            DispatchQueue.main.async {
-                self.canvasVM.scene.addModel(model)
-                self.canvasVM.scene.cadHistory.pushOperation(
-                    CADOperation(type: .createShape, description: opDescription,
-                                 parameters: ["size": Double(self.primitiveSize)])
-                )
-                self.canvasVM.objectWillChange.send()
-                self.sketchEngine.logOperation(type: .createShape, description: opDescription)
-            }
+        switch type {
+        case "Box":
+            shape = occt.box(width: size, height: size, depth: size)
+            opDescription = "Box \(String(format: "%.1f", size))mm"
+        case "Sphere":
+            shape = occt.sphere(radius: size * 0.5)
+            opDescription = "Sphere r=\(String(format: "%.1f", size * 0.5))mm"
+        case "Cylinder":
+            shape = occt.cylinder(radius: size * 0.5, height: size)
+            opDescription = "Cylinder r=\(String(format: "%.1f", size * 0.5)) h=\(String(format: "%.1f", size))mm"
+        case "Cone":
+            shape = occt.cone(bottomRadius: size * 0.5, topRadius: 0, height: size)
+            opDescription = "Cone r=\(String(format: "%.1f", size * 0.5)) h=\(String(format: "%.1f", size))mm"
+        case "Torus":
+            shape = occt.torus(majorRadius: size * 0.5, minorRadius: size * 0.15)
+            opDescription = "Torus R=\(String(format: "%.1f", size * 0.5)) r=\(String(format: "%.1f", size * 0.15))mm"
+        default:
+            return
         }
+
+        guard let validShape = shape,
+              let mesh = OCCTBridge.toMesh(validShape, quality: .medium) else {
+            csgStatusMessage = "Failed to create \(type)"
+            return
+        }
+
+        let name = "\(type)_\(UUID().uuidString.prefix(8))"
+        let model = Model(name: name)
+        model.meshes = [mesh]
+
+        canvasVM.scene.addModel(model)
+        canvasVM.scene.cadHistory.pushOperation(
+            CADOperation(type: .createShape, description: opDescription,
+                         parameters: ["size": Double(primitiveSize)])
+        )
+        canvasVM.objectWillChange.send()
+        sketchEngine.logOperation(type: .createShape, description: opDescription)
     }
 
     private func startCSGOperation(_ tool: CADTool) {
@@ -930,12 +920,13 @@ private func executeCADTool(_ tool: CADTool, canvasVM: CanvasViewModel, toolVM: 
 
     switch tool {
     case .fillet:
-        let engine = FilletEngine()
+        // Mesh-based fillet ≈ bevel with segments (FilletEngine works on B-rep CADShape, not Mesh)
+        let engine = BevelEngine()
         if mutableMesh.indices.count >= 6 {
             let e0 = Int(mutableMesh.indices[0])
             let e1 = Int(mutableMesh.indices[1])
             let radius = toolVM.filletRadius
-            _ = engine.computeFillet(edges: [(e0, e1)], radius: radius, mesh: &mutableMesh)
+            _ = engine.bevel(mesh: &mutableMesh, edgeIndices: [(e0, e1)], bevelSize: radius, segments: 4)
         }
 
     case .chamfer:

@@ -14,34 +14,31 @@ final class DirectModelingEngine {
     /// Offset a face by a distance along its normal. Positive = push out, negative = pull in.
     /// OCCT BRepOffsetAPI_ThruSections or BRepOffsetAPI_MakeOffsetShape handle this.
     func pushPullFace(_ shape: CADShape, faceIndex: Int, distance: Double) -> CADShape? {
-        guard let faces = shape.faces, faceIndex < faces.count else { return nil }
-        let face = faces[faceIndex]
-        return OCCTSwift.Shape.offset(face, distance: distance)
+        let faces = shape.faces()
+        guard faceIndex < faces.count else { return nil }
+        // TODO: per-face prism (BRepFeat/localPrism) — whole-shape offset approximation for now
+        return shape.offset(by: distance)
     }
-    
+
     /// Move a face along a direction vector (more flexible than push/pull along normal)
     func moveFace(_ shape: CADShape, faceIndex: Int, direction: SIMD3<Double>) -> CADShape? {
-        guard let faces = shape.faces, faceIndex < faces.count else { return nil }
-        var transformed = shape
-        let moveOp = Transform.translation(direction)
-        if let moved = transformed.transformed(by: moveOp) {
-            transformed = moved
-        }
-        return transformed
+        let faces = shape.faces()
+        guard faceIndex < faces.count else { return nil }
+        return shape.translated(by: direction)
     }
-    
+
     // MARK: - Edge manipulation
-    
+
     /// Move an edge along its adjacent face normals (blend-like behavior)
     func moveEdge(_ shape: CADShape, edgeIndex: Int, distance: Double) -> CADShape? {
-        guard let edges = shape.edges, edgeIndex < edges.count else { return nil }
+        guard edgeIndex < shape.edges().count else { return nil }
         return shape.filleted(radius: distance) // Simplified: use fillet for edge modification
     }
-    
+
     // MARK: - Scale/Rotate body
-    
+
     func scaleBody(_ shape: CADShape, factor: SIMD3<Double>) -> CADShape? {
-        return shape.scaled(factor)
+        return shape.scaled(by: factor.x) // OCCT transform scaling is uniform; uses x component
     }
     
     func rotateBody(_ shape: CADShape, axis: SIMD3<Double>, angle: Double) -> CADShape? {
@@ -159,8 +156,7 @@ final class ProjectPersistence {
     
     /// Load a CAD shape from a .brep file
     func loadShape(from url: URL) throws -> CADShape? {
-        let data = try Data(contentsOf: url)
-        return try CADShape.fromBrep(data)
+        return try CADShape.loadBREP(from: url)
     }
     
     /// Save project metadata as JSON
@@ -251,9 +247,9 @@ final class ProfessionalExportEngine {
             let mesh = shape.mesh(linearDeflection: preset.linearDeflection)!
             try exportOBJ(mesh, to: url)
         case "GLTF":
-            try Exporter.writeGLTF(shape: shape, to: url)
+            try Exporter.writeGLTF(shape: shape, to: url, binary: false)
         case "GLB":
-            try Exporter.writeGLB(shape: shape, to: url)
+            try Exporter.writeGLTF(shape: shape, to: url, binary: true)
         case "PLY":
             try Exporter.writePLY(shape: shape, to: url)
         default:

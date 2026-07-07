@@ -181,7 +181,7 @@ struct ViewportArea: View {
     var body: some View {
         ZStack {
             AppTheme.bgCanvas
-            ContentView(canvasVM: appState.canvasVM, renderer: appState.satinRenderer, brushEngine: appState.toolVM.brushEngine, isPaintMode: false)
+            ContentView(canvasVM: appState.canvasVM, renderer: appState.satinRenderer, isPaintMode: false)
         }
         .clipShape(RoundedRectangle(cornerRadius: AppTheme.radiusLG))
         .padding(AppTheme.space1)
@@ -236,28 +236,28 @@ struct FloatingParams: View {
                 ParamField("Direction", "Y+")
                 ParamField("Taper", "0°")
                 HStack(spacing: 4) {
-                    ChipBtn("Solid", active: true)
-                    ChipBtn("Cut")
-                    ChipBtn("Both")
+                    ChipBtn(label: "Solid", active: true)
+                    ChipBtn(label: "Cut")
+                    ChipBtn(label: "Both")
                 }
             case "fillet":
                 ParamField("Radius", "2.5mm")
                 HStack(spacing: 4) {
-                    ChipBtn("Constant", active: true)
-                    ChipBtn("Variable")
+                    ChipBtn(label: "Constant", active: true)
+                    ChipBtn(label: "Variable")
                 }
             case "shell":
                 ParamField("Thickness", "2.0mm")
                 HStack(spacing: 4) {
-                    ChipBtn("Inside", active: true)
-                    ChipBtn("Outside")
-                    ChipBtn("Both")
+                    ChipBtn(label: "Inside", active: true)
+                    ChipBtn(label: "Outside")
+                    ChipBtn(label: "Both")
                 }
             case "boolean":
                 HStack(spacing: 4) {
-                    ChipBtn("Union", active: true, color: AppTheme.axisY)
-                    ChipBtn("Subtract", color: AppTheme.axisX)
-                    ChipBtn("Intersect", color: AppTheme.axisZ)
+                    ChipBtn(label: "Union", active: true, color: AppTheme.axisY)
+                    ChipBtn(label: "Subtract", color: AppTheme.axisX)
+                    ChipBtn(label: "Intersect", color: AppTheme.axisZ)
                 }
             default: EmptyView()
             }

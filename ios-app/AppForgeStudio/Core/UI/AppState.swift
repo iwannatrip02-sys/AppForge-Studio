@@ -69,8 +69,9 @@ class AppState: ObservableObject {
         self.themeManager = ThemeManager()
         self.canvasVM = CanvasViewModel()
         self.toolVM = ToolViewModel()
-        let device = MTLCreateSystemDefaultDevice() ??
+        guard let device = MTLCreateSystemDefaultDevice() else {
             fatalError("Metal no soportado en este dispositivo")
+        }
         self.modelCache = ModelCacheService(device: device)
         self.modelLoader = ModelLoadService(device: device, cacheService: modelCache)
         self.exportVM = ExportViewModel(exportService: ExportService(device: device))

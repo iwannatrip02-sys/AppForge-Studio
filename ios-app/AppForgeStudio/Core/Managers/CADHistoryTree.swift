@@ -157,7 +157,8 @@ class CADHistoryTree: ObservableObject {
         for op in operations {
             switch op.type {
             case .createShape:
-                let model = Model(name: op.description, meshes: [], transform: matrix_identity_float4x4)
+                let model = Model(name: op.description)
+                model.meshes = []
                 models.append(model)
             case .delete:
                 models.removeAll { op.affectedModelIDs.contains($0.id) }

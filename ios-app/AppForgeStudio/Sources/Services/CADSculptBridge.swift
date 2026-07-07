@@ -11,7 +11,7 @@ final class CADSculptBridge {
     
     /// Extract a face from a B-rep shape as a high-detail triangulated mesh for sculpting.
     func faceToMesh(_ shape: CADShape, quality: MeshQuality = .high) -> Mesh {
-        OCCTBridge.toMesh(shape, quality: quality)
+        OCCTBridge.toMesh(shape, quality: quality) ?? Mesh(vertices: [], indices: [])
     }
     
     /// Convert sculpted mesh back to a CADShape for boolean operations.

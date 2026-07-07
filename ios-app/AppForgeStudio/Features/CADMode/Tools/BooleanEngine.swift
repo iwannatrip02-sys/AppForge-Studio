@@ -24,17 +24,7 @@ class BooleanEngine {
     
     // MARK: - Shape a Mesh (extraer triangulos de un Shape)
     private func shapeToMesh(_ shape: OCCTSwift.Shape) -> Mesh {
-        do {
-            let triangles = try shape.triangulate()
-            let vertices = triangles.vertices.map { tv in
-                Vertex(position: SIMD3<Float>(Float(tv.x), Float(tv.y), Float(tv.z)),
-                       normal: SIMD3<Float>(0, 0, 1),
-                       uv: SIMD2<Float>(0, 0))
-            }
-            return Mesh(vertices: vertices, indices: triangles.indices)
-        } catch {
-            return Mesh()
-        }
+        return OCCTBridge.shapeToMesh(shape) ?? Mesh()
     }
     
     // MARK: - Operaciones Booleanas

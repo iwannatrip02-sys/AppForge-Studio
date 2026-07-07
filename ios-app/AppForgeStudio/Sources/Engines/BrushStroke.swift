@@ -52,8 +52,8 @@ struct StrokeSegment {
         var result: [BrushPoint] = []
         for i in 0...segments {
             let t = Float(i) / Float(segments)
-            let pos = simd_mix(start.position, end.position, t)
-            let nrm = simd_mix(start.normal, end.normal, t)
+            let pos = simd_mix(start.position, end.position, SIMD3<Float>(repeating: t))
+            let nrm = simd_mix(start.normal, end.normal, SIMD3<Float>(repeating: t))
             let pres = start.pressure + (end.pressure - start.pressure) * t
             result.append(BrushPoint(position: pos, normal: nrm, pressure: pres, tilt: start.tilt))
         }

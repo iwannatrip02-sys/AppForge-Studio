@@ -72,7 +72,6 @@ class ModelLoadService {
     private func createMesh(from mdMesh: MDLMesh) -> Mesh? {
         guard let mtkMesh = try? MTKMesh(mesh: mdMesh, device: device) else { return nil }
         let vertexCount = mtkMesh.vertexCount
-        let vertexAttr = mtkMesh.vertexDescriptor.attributes[0] as! MDLVertexAttribute
         let buffer = mtkMesh.vertexBuffers[0]
         let vertexPtr = buffer.buffer.contents().bindMemory(to: Float.self, capacity: vertexCount * 8)
         var vertices: [Vertex] = []
