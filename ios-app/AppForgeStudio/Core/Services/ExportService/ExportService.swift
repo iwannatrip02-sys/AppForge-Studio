@@ -2,6 +2,8 @@ import Foundation
 import simd
 import ModelIO
 import MetalKit
+import SceneKit
+import SceneKit.ModelIO
 import OSLog
 
 enum ExportFormat: String, CaseIterable {
@@ -290,8 +292,10 @@ class ExportService {
         guard let asset = buildMDLAsset(from: model) else {
             throw ExportError.invalidModel("No se pudo construir el asset USDZ")
         }
-        try asset.export(to: url)
-        guard FileManager.default.fileExists(atPath: url.path) else {
+        // ModelIO no escribe .usdz en iOS ("Unknown extension") — SceneKit sí.
+        let scene = SCNScene(mdlAsset: asset)
+        let success = scene.write(to: url, options: nil, delegate: nil, progressHandler: nil)
+        guard success, FileManager.default.fileExists(atPath: url.path) else {
             throw ExportError.writeFailed("USDZ export failed - file was not written to disk")
         }
     }
