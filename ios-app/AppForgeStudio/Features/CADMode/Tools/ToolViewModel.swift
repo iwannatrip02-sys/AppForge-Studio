@@ -44,12 +44,19 @@ class ToolViewModel: ObservableObject {
                 let i0 = Int(mesh.indices[0]), i1 = Int(mesh.indices[1])
                 _ = bevel.bevel(mesh: &mesh, edgeIndices: [(i0, i1)], bevelSize: 0.05, segments: 2)
             }
-        case .booleanUnion:
+        case .booleanUnion, .booleanSubtract, .booleanIntersect:
             var offsetMesh = mesh
             for i in 0..<offsetMesh.vertices.count {
                 offsetMesh.vertices[i].position.x += 0.15
             }
-            mesh = boolean.booleanUnion(a: mesh, b: offsetMesh)
+            switch selectedTool {
+            case .booleanSubtract:
+                mesh = boolean.booleanDifference(a: mesh, b: offsetMesh)
+            case .booleanIntersect:
+                mesh = boolean.booleanIntersection(a: mesh, b: offsetMesh)
+            default:
+                mesh = boolean.booleanUnion(a: mesh, b: offsetMesh)
+            }
         case .fillet:
             // Mesh-based fillet ≈ bevel con segmentos (no hay puente Mesh→B-rep aún)
             if mesh.indices.count >= 6 {
