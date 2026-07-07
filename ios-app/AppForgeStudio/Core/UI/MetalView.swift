@@ -48,16 +48,21 @@ struct MetalView: UIViewRepresentable {
     var onTouch3D: ((SIMD3<Float>, SIMD3<Float>) -> Void)?
     var onObjectSelected: ((Int?) -> Void)?
     var onSculptStroke: ((SculptPoint) -> Void)?
+    /// Hit real de superficie (posición+normal+modelo) al tocar geometría —
+    /// base de la manipulación directa (push/pull, selección de caras).
+    var onSurfaceHit: ((SurfaceHit) -> Void)?
     var metalBackground: UIColor = .darkGray
-    
+
     func makeCoordinator() -> Coordinator {
-        Coordinator(
+        let c = Coordinator(
             scene: $scene, strokes: $strokes,
             renderer: renderer, onTouch3D: onTouch3D,
             onObjectSelected: onObjectSelected,
             onSculptStroke: onSculptStroke,
             animationEngine: animationEngine
         )
+        c.onSurfaceHit = onSurfaceHit
+        return c
     }
     
     func makeUIView(context: UIViewRepresentableContext<MetalView>) -> MTKView {
@@ -93,6 +98,7 @@ struct MetalView: UIViewRepresentable {
         var onTouch3D: ((SIMD3<Float>, SIMD3<Float>) -> Void)?
         var onObjectSelected: ((Int?) -> Void)?
         var onSculptStroke: ((SculptPoint) -> Void)?
+        var onSurfaceHit: ((SurfaceHit) -> Void)?
         var onPinchExtrude: ((Float, Float) -> Void)?  // (distance, taper)
         
         private var lastPanLocation: CGPoint = .zero
@@ -258,54 +264,16 @@ struct MetalView: UIViewRepresentable {
         @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
             let location = gesture.location(in: gesture.view)
             guard let view = gesture.view as? MTKView else { return }
-            let size = view.bounds.size
-            
-            let rayOrigin = scene.camera.position
-            let aspect = Float(size.width / max(size.height, 1))
-            let ndc = SIMD2<Float>(
-                (2.0 * Float(location.x) / Float(size.width) - 1.0) * aspect,
-                1.0 - 2.0 * Float(location.y) / Float(size.height)
-            )
-            let fovRad = scene.camera.fov * .pi / 180
-            let halfH = tan(fovRad * 0.5)
-            let halfW = halfH * aspect
-            
-            let forward = simd_normalize(scene.camera.target - scene.camera.position)
-            let right = simd_normalize(simd_cross(forward, scene.camera.up))
-            let up = simd_cross(right, forward)
-            
-            let rayDir = simd_normalize(forward + right * ndc.x * halfW + up * ndc.y * halfH)
-            
-            var closestDist: Float = .greatestFiniteMagnitude
-            var closestIndex: Int?
-            
-            for (i, model) in scene.models.enumerated() {
-                for mesh in model.meshes {
-                    for j in stride(from: 0, to: mesh.indices.count, by: 3) {
-                        guard j + 2 < mesh.indices.count else { break }
-                        let i0 = Int(mesh.indices[j])
-                        let i1 = Int(mesh.indices[j+1])
-                        let i2 = Int(mesh.indices[j+2])
-                        guard i0 < mesh.vertices.count, i1 < mesh.vertices.count, i2 < mesh.vertices.count else { continue }
-                        if let hit = rayTriangleIntersect(
-                            rayOrigin: rayOrigin, rayDir: rayDir,
-                            v0: mesh.vertices[i0].position,
-                            v1: mesh.vertices[i1].position,
-                            v2: mesh.vertices[i2].position
-                        ) {
-                            let dist = simd_distance(rayOrigin, hit)
-                            if dist < closestDist {
-                                closestDist = dist
-                                closestIndex = i
-                            }
-                        }
-                    }
-                }
-            }
-            
-            onObjectSelected?(closestIndex)
-            if let hitPos = closestIndex != nil ? scene.models[closestIndex!].position : nil {
-                onTouch3D?(hitPos, rayDir)
+
+            let ray = CameraRay.from(screenPoint: location, viewSize: view.bounds.size,
+                                     camera: scene.camera)
+            let hit = ScenePicker.hitTest(models: scene.models, ray: ray)
+
+            onObjectSelected?(hit?.modelIndex)
+            if let hit = hit {
+                // Punto de impacto REAL (antes se pasaba model.position — bug de precisión)
+                onTouch3D?(hit.position, ray.direction)
+                onSurfaceHit?(hit)
             }
         }
         

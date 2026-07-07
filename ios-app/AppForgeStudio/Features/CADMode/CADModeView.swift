@@ -17,6 +17,7 @@ struct CADModeView: View {
     @StateObject private var sketchEngine = CADSketchEngine()
     @StateObject private var constraintEngine = ConstraintEngine()
     @StateObject private var assemblyEngine = AssemblyEngine()
+    @StateObject private var pushPullController = PushPullController()
     @EnvironmentObject var themeManager: ThemeManager
 
     private var theme: AppTheme { themeManager.currentTheme }
@@ -84,8 +85,15 @@ struct CADModeView: View {
                 if selectedTab == .model {
                     toolbarSection
                     parameterBar
+                    if selectedTool == .pushPull {
+                        pushPullBar
+                    }
                     ZStack {
-                        ContentView(canvasVM: canvasVM, renderer: renderer)
+                        ContentView(canvasVM: canvasVM, renderer: renderer, onSurfaceHit: { hit in
+                            if selectedTool == .pushPull {
+                                pushPullController.selectFace(from: hit, in: canvasVM.scene.models)
+                            }
+                        })
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                         SnapGuideOverlay(
                             snapPoints: snapPoints,
@@ -171,6 +179,38 @@ struct CADModeView: View {
             Spacer()
         }
         .background(theme.surface)
+    }
+
+    /// Barra del push/pull interactivo: estado de selección + distancia + aplicar.
+    /// Distancia positiva añade material (boss); negativa excava (pocket).
+    private var pushPullBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: pushPullController.hasSelection ? "square.stack.3d.up.fill" : "hand.tap")
+                .foregroundColor(pushPullController.hasSelection ? theme.accent : theme.textSecondary)
+            Text(pushPullController.statusMessage)
+                .font(.caption2)
+                .foregroundColor(theme.textSecondary)
+                .lineLimit(1)
+            Spacer()
+            Slider(value: $pushPullController.distance, in: -2.0...2.0)
+                .frame(width: 130)
+                .disabled(!pushPullController.hasSelection)
+            Text(String(format: "%+.2f", pushPullController.distance))
+                .font(.caption2.monospacedDigit())
+                .frame(width: 44)
+                .foregroundColor(pushPullController.distance >= 0 ? theme.accent : .orange)
+            Button(pushPullController.distance >= 0 ? "Añadir" : "Excavar") {
+                HapticService.shared.medium()
+                if pushPullController.apply() {
+                    canvasVM.objectWillChange.send()
+                }
+            }
+            .font(.caption.bold())
+            .disabled(!pushPullController.hasSelection)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(theme.surfaceSecondary)
     }
 
     private var parametricView: some View {

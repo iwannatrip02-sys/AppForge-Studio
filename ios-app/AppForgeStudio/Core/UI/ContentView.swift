@@ -12,6 +12,8 @@ struct ContentView: View {
     // TODO(F3): BrushEngine deleted — paint brush support pending reimplementation
     var brushEngine: AnyObject? = nil
     var isPaintMode: Bool = false
+    /// Propagado a MetalView: hit real al tocar geometría (push/pull, selección de caras)
+    var onSurfaceHit: ((SurfaceHit) -> Void)? = nil
     @EnvironmentObject var themeManager: ThemeManager
 
     @State private var lastDrag: CGSize = .zero
@@ -24,7 +26,7 @@ struct ContentView: View {
                 var s = canvasVM.scene
                 s.strokes = newVal
                 canvasVM.scene = s
-            }), renderer: renderer, animationEngine: canvasVM.animationEngine, onTouch3D: handleTouch, metalBackground: themeManager.currentTheme.metalBackground)
+            }), renderer: renderer, animationEngine: canvasVM.animationEngine, onTouch3D: handleTouch, onSurfaceHit: onSurfaceHit, metalBackground: themeManager.currentTheme.metalBackground)
                 .edgesIgnoringSafeArea(.all)
 
             VStack {
