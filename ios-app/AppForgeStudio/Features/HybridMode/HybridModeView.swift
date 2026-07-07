@@ -196,7 +196,6 @@ struct HybridModeView: View {
                 ContentView(
                     canvasVM: canvasVM,
                     renderer: renderer,
-                    brushEngine: toolVM.brushEngine,
                     isPaintMode: activeMode == .paint
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -400,7 +399,8 @@ struct HybridModeView: View {
                 guard let model = canvasVM.scene.models.first else { return }
                 let mesh = model.meshes.first ?? Mesh(vertices: [], indices: [])
                 let subdivided = subdivisionVM.subdivide(mesh, levels: 1)
-                let newModel = Model(name: model.name + "_subd", meshes: [subdivided])
+                let newModel = Model(name: model.name + "_subd")
+                newModel.meshes = [subdivided]
                 canvasVM.scene.addModel(newModel)
                 canvasVM.objectWillChange.send()
                 if let layerId = activeLayer?.id {
@@ -470,7 +470,7 @@ struct HybridModeView: View {
 
     // MARK: - Helpers
 
-    private func appMode(for layerType: HybridLayerType) -> CanvasViewModel.AppMode {
+    private func appMode(for layerType: HybridLayerType) -> AppMode {
         switch layerType {
         case .cad: return .cad
         case .sculpt: return .sculpt

@@ -5,11 +5,11 @@ private let logger = Logger(subsystem: "com.appforgestudio", category: "Preferen
 struct PreferencesView: View {
     @AppStorage("renderQuality") private var renderQuality: RenderQuality = .high
     @AppStorage("showGrid") private var showGrid = true
-    @AppStorage("gridSize") private var gridSize: Float = 1.0
+    @AppStorage("gridSize") private var gridSize: Double = 1.0
     @AppStorage("autoSave") private var autoSave = true
     @AppStorage("autoSaveInterval") private var autoSaveInterval: Double = 300
-    @AppStorage("defaultExportFormat") private var defaultExportFormat: ExportFormat = .stl
-    @AppStorage("theme") private var theme: AppTheme = .system
+    @AppStorage("defaultExportFormat") private var defaultExportFormat: PreferencesExportFormat = .stl
+    @AppStorage("theme") private var theme: PreferencesAppTheme = .system
     @AppStorage("undoLimit") private var undoLimit: Double = 50
     
     var body: some View {
@@ -47,7 +47,7 @@ struct PreferencesView: View {
                         }
                     }
                     Picker("Default Export", selection: $defaultExportFormat) {
-                        ForEach(ExportFormat.allCases) { f in
+                        ForEach(PreferencesExportFormat.allCases) { f in
                             Text(f.label).tag(f)
                         }
                     }
@@ -56,7 +56,7 @@ struct PreferencesView: View {
                 // MARK: - Appearance Section
                 Section("Appearance") {
                     Picker("Theme", selection: $theme) {
-                        ForEach(AppTheme.allCases) { t in
+                        ForEach(PreferencesAppTheme.allCases) { t in
                             Text(t.label).tag(t)
                         }
                     }
@@ -93,7 +93,7 @@ enum RenderQuality: String, CaseIterable, Identifiable {
     }
 }
 
-enum ExportFormat: String, CaseIterable, Identifiable {
+enum PreferencesExportFormat: String, CaseIterable, Identifiable {
     case stl, obj, usdz, gltf, fbx
     var id: String { rawValue }
     var label: String {
@@ -107,7 +107,7 @@ enum ExportFormat: String, CaseIterable, Identifiable {
     }
 }
 
-enum AppTheme: String, CaseIterable, Identifiable {
+enum PreferencesAppTheme: String, CaseIterable, Identifiable {
     case system, light, dark
     var id: String { rawValue }
     var label: String {

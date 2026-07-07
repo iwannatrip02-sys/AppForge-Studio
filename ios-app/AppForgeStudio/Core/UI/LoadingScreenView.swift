@@ -18,7 +18,7 @@ struct LoadingScreenView: View {
                     .progressViewStyle(CircularProgressViewStyle(tint: .white))
                     .scaleEffect(1.5)
                 
-                Text('Cargando modelo 3D...')
+                Text("Cargando modelo 3D...")
                     .font(.headline)
                     .foregroundColor(.white.opacity(0.8))
                 
@@ -26,7 +26,7 @@ struct LoadingScreenView: View {
                     .progressViewStyle(LinearProgressViewStyle(tint: .blue))
                     .frame(width: 200)
                 
-                Text(String(format: '%.0f%%', min(progress * 100, 100)))
+                Text(String(format: "%.0f%%", min(progress * 100, 100)))
                     .font(.caption)
                     .foregroundColor(.gray)
             }

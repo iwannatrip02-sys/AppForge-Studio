@@ -31,13 +31,13 @@ struct MaterialData: Codable, Identifiable {
     }
     
     static let defaultMaterials: [MaterialData] = [
-        MaterialData(name: "White Plastic", albedo: SIMD3<Float>(0.9, 0.9, 0.9), roughness: 0.8, metallic: 0.0),
-        MaterialData(name: "Red Plastic", albedo: SIMD3<Float>(0.9, 0.2, 0.2), roughness: 0.7, metallic: 0.0),
-        MaterialData(name: "Blue Plastic", albedo: SIMD3<Float>(0.2, 0.4, 0.9), roughness: 0.7, metallic: 0.0),
-        MaterialData(name: "Gold", albedo: SIMD3<Float>(1.0, 0.84, 0.0), roughness: 0.1, metallic: 1.0),
-        MaterialData(name: "Silver", albedo: SIMD3<Float>(0.9, 0.9, 0.95), roughness: 0.05, metallic: 1.0),
-        MaterialData(name: "Copper", albedo: SIMD3<Float>(0.95, 0.64, 0.54), roughness: 0.1, metallic: 1.0),
-        MaterialData(name: "Rubber", albedo: SIMD3<Float>(0.2, 0.2, 0.2), roughness: 0.95, metallic: 0.0),
-        MaterialData(name: "Glass", albedo: SIMD3<Float>(0.8, 0.9, 1.0), roughness: 0.0, metallic: 0.0, emission: SIMD3<Float>(0.1, 0.15, 0.2))
+        MaterialData(name: "White Plastic", albedo: SIMD3<Float>(0.9, 0.9, 0.9), metallic: 0.0, roughness: 0.8),
+        MaterialData(name: "Red Plastic", albedo: SIMD3<Float>(0.9, 0.2, 0.2), metallic: 0.0, roughness: 0.7),
+        MaterialData(name: "Blue Plastic", albedo: SIMD3<Float>(0.2, 0.4, 0.9), metallic: 0.0, roughness: 0.7),
+        MaterialData(name: "Gold", albedo: SIMD3<Float>(1.0, 0.84, 0.0), metallic: 1.0, roughness: 0.1),
+        MaterialData(name: "Silver", albedo: SIMD3<Float>(0.9, 0.9, 0.95), metallic: 1.0, roughness: 0.05),
+        MaterialData(name: "Copper", albedo: SIMD3<Float>(0.95, 0.64, 0.54), metallic: 1.0, roughness: 0.1),
+        MaterialData(name: "Rubber", albedo: SIMD3<Float>(0.2, 0.2, 0.2), metallic: 0.0, roughness: 0.95),
+        MaterialData(name: "Glass", albedo: SIMD3<Float>(0.8, 0.9, 1.0), metallic: 0.0, roughness: 0.0, emission: SIMD3<Float>(0.1, 0.15, 0.2))
     ]
 }

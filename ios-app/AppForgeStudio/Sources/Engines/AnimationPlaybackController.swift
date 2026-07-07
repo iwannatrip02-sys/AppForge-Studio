@@ -2,6 +2,7 @@ import Foundation
 import QuartzCore
 import Combine
 
+@MainActor
 class AnimationPlaybackController: ObservableObject {
     @Published var currentTime: TimeInterval = 0
     @Published var isPlaying: Bool = false

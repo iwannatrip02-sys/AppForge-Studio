@@ -1,13 +1,13 @@
-#include <metal_stdlib>
+﻿#include <metal_stdlib>
 using namespace metal;
 
-float2 direction_to_uv(float3 dir) {
+static float2 direction_to_uv(float3 dir) {
     float phi = atan2(dir.z, dir.x);
     float theta = acos(dir.y);
     return float2(phi / (2.0 * M_PI_F) + 0.5, theta / M_PI_F);
 }
 
-float3 face_uv_to_direction(uint face, float2 uv) {
+static float3 face_uv_to_direction(uint face, float2 uv) {
     float u = uv.x * 2.0 - 1.0;
     float v = uv.y * 2.0 - 1.0;
     switch (face) {
@@ -20,7 +20,7 @@ float3 face_uv_to_direction(uint face, float2 uv) {
     }
 }
 
-float radical_inverse_vdc(uint bits) {
+static float radical_inverse_vdc(uint bits) {
     bits = (bits << 16u) | (bits >> 16u);
     bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
     bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
@@ -29,11 +29,11 @@ float radical_inverse_vdc(uint bits) {
     return float(bits) * 2.3283064365386963e-10;
 }
 
-float2 hammersley(uint i, uint N) {
+static float2 hammersley(uint i, uint N) {
     return float2(float(i) / float(N), radical_inverse_vdc(i));
 }
 
-float3 importance_sample_ggx(float2 xi, float3 N, float roughness) {
+static float3 importance_sample_ggx(float2 xi, float3 N, float roughness) {
     float a = roughness * roughness;
     float phi = 2.0 * M_PI_F * xi.x;
     float cosTheta = sqrt((1.0 - xi.y) / (1.0 + (a * a - 1.0) * xi.y));
@@ -52,7 +52,7 @@ float3 importance_sample_ggx(float2 xi, float3 N, float roughness) {
     return normalize(sampleVec);
 }
 
-float geometry_schlick_ggx_ibl(float NdotV, float roughness) {
+static float geometry_schlick_ggx_ibl(float NdotV, float roughness) {
     float a = roughness;
     float k = (a * a) / 2.0;
     float nom = NdotV;
@@ -60,7 +60,7 @@ float geometry_schlick_ggx_ibl(float NdotV, float roughness) {
     return nom / denom;
 }
 
-float geometry_smith_ibl(float3 N, float3 V, float3 L, float roughness) {
+static float geometry_smith_ibl(float3 N, float3 V, float3 L, float roughness) {
     float NdotV = max(dot(N, V), 0.0);
     float NdotL = max(dot(N, L), 0.0);
     return geometry_schlick_ggx_ibl(NdotV, roughness) * geometry_schlick_ggx_ibl(NdotL, roughness);

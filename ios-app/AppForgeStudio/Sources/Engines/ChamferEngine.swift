@@ -54,7 +54,7 @@ class ChamferEngine {
 
             let posA = mesh.vertices[a].position
             let posB = mesh.vertices[b].position
-            let edgeLen = distance(posA, posB)
+            let edgeLen = simd_distance(posA, posB)
             guard edgeLen > 1e-6 else { continue }
             let edgeDir = (posB - posA) / edgeLen
             let midEdge = (posA + posB) * 0.5
@@ -72,14 +72,14 @@ class ChamferEngine {
 
             for i in 0...segments {
                 let t = Float(i) / Float(segments)
-                let edgePos = simd_mix(posA, posB, t)
+                let edgePos = simd_mix(posA, posB, SIMD3<Float>(repeating: t))
                 var row = [Int]()
 
                 for j in 0...segments {
                     let s = Float(j) / Float(segments)
-                    let offset = simd_mix(offset1, offset2, s)
+                    let offset = simd_mix(offset1, offset2, SIMD3<Float>(repeating: s))
                     let pos = edgePos + offset
-                    let normal = normalize(simd_mix(fm.n1, fm.n2, s))
+                    let normal = normalize(simd_mix(fm.n1, fm.n2, SIMD3<Float>(repeating: s)))
                     let v = Vertex(position: pos, normal: normal, uv: .zero)
                     row.append(newVertices.count)
                     newVertices.append(v)

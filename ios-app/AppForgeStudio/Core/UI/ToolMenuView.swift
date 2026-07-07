@@ -11,7 +11,7 @@ struct ToolMenuView: View {
         VStack(spacing: 0) {
             if isExpanded {
                 ForEach(ToolMode.allCases) { tool in
-                    ToolButton(tool: tool, isSelected: selectedTool == tool) {
+                    ToolMenuButton(tool: tool, isSelected: selectedTool == tool) {
                         selectedTool = tool
                         isExpanded = false
                     }
@@ -34,11 +34,11 @@ struct ToolMenuView: View {
     }
 }
 
-struct ToolButton: View {
+struct ToolMenuButton: View {
     let tool: ToolMode
     let isSelected: Bool
     let action: () -> Void
-    
+
     var body: some View {
         Button(action: action) {
             VStack(spacing: 2) {

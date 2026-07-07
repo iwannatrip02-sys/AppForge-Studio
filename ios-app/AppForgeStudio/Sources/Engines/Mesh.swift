@@ -4,7 +4,7 @@ import Metal
 import OSLog
 
 private let logger = Logger(subsystem: "com.appforgestudio", category: "Mesh")
-struct Vertex {
+struct Vertex: Equatable {
     let id: UUID = UUID()
     var position: SIMD3<Float>
     var normal: SIMD3<Float>
@@ -105,7 +105,7 @@ struct Mesh {
         }
         for i in 0..<vertices.count {
             let len = simd_length(vertices[i].normal)
-            if len > 1e-6 { vertices[i].normal /= len }
+            if len > Float(1e-6) { vertices[i].normal /= len }
         }
     }
 
@@ -115,6 +115,17 @@ struct Mesh {
         if !indices.isEmpty {
             indexBuffer = device.makeBuffer(bytes: indices, length: MemoryLayout<UInt32>.stride * indices.count, options: .storageModeShared)
         }
+    }
+}
+
+extension Mesh: Equatable {
+    static func == (lhs: Mesh, rhs: Mesh) -> Bool {
+        guard lhs.vertices.count == rhs.vertices.count,
+              lhs.indices == rhs.indices else { return false }
+        for i in 0..<lhs.vertices.count {
+            if lhs.vertices[i] != rhs.vertices[i] { return false }
+        }
+        return true
     }
 }
 

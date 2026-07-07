@@ -88,7 +88,7 @@ struct RenderModeView: View {
             .background(themeManager.currentTheme.surface)
         }
         .sheet(isPresented: $showExport) {
-            ExportView()
+            ExportView(exportVM: ExportViewModel(exportService: ExportService(device: renderer.device)))
         }
         .background(themeManager.currentTheme.background)
     }

@@ -16,15 +16,21 @@ final class WireManager {
     }
     
     func circle(center: SIMD2<Double>, radius: Double) -> Wire? {
-        Wire.circle(center: center, radius: radius)
+        Wire.circle(origin: SIMD3<Double>(center.x, center.y, 0), radius: radius)
     }
-    
+
     func polygon(center: SIMD2<Double>, radius: Double, sides: Int) -> Wire? {
-        Wire.polygon(center: center, radius: radius, sides: sides)
+        guard sides >= 3 else { return nil }
+        let points = (0..<sides).map { i -> SIMD2<Double> in
+            let angle = Double(i) / Double(sides) * 2 * .pi
+            return SIMD2<Double>(center.x + radius * cos(angle), center.y + radius * sin(angle))
+        }
+        return Wire.polygon(points)
     }
-    
+
     func arc(center: SIMD2<Double>, radius: Double, startAngle: Double, endAngle: Double) -> Wire? {
-        Wire.arc(center: center, radius: radius, startAngle: startAngle, endAngle: endAngle)
+        Wire.arc(center: SIMD3<Double>(center.x, center.y, 0), radius: radius,
+                 startAngle: startAngle, endAngle: endAngle)
     }
     
     // MARK: - Profile to 3D
@@ -56,10 +62,27 @@ final class ConstraintManager {
     
     /// Solve a sketch with constraints applied to points and entities.
     func solve(points: [SketchPoint], constraints: [CADConstraint]) -> [SketchPoint] {
-        // Use OCCT's Gcc solver for analytical constraint resolution.
-        // For now, delegate to the existing Newton-Raphson SolverSwift.
-        let solver = Solver()
-        return solver.solve(points: points, constraints: constraints) ?? points
+        // Resolución analítica simple (horizontal/vertical/coincident).
+        // TODO(F3): delegar al solver Newton-Raphson (GeometryConstraintManager) o OCCT Gcc.
+        var result = points
+        for constraint in constraints {
+            guard constraint.pointA < result.count, constraint.pointB < result.count else { continue }
+            switch constraint.type {
+            case .horizontal:
+                let avgY = (result[constraint.pointA].position.y + result[constraint.pointB].position.y) * 0.5
+                result[constraint.pointA].position.y = avgY
+                result[constraint.pointB].position.y = avgY
+            case .vertical:
+                let avgX = (result[constraint.pointA].position.x + result[constraint.pointB].position.x) * 0.5
+                result[constraint.pointA].position.x = avgX
+                result[constraint.pointB].position.x = avgX
+            case .coincident:
+                result[constraint.pointB].position = result[constraint.pointA].position
+            default:
+                break
+            }
+        }
+        return result
     }
     
     func inferConstraints(points: [SketchPoint]) -> [CADConstraint] {

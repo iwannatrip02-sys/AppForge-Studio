@@ -2,7 +2,7 @@ import Foundation
 import simd
 
 protocol Deformer {
-    func deform(vertex: inout Vertex, at point: SculptPoint, radius: Float, strength: Float, falloff: Float, adjacency: [SIMD3<Float>]? = nil)
+    func deform(vertex: inout Vertex, at point: SculptPoint, radius: Float, strength: Float, falloff: Float, adjacency: [SIMD3<Float>]?)
 }
 
 struct DeformerFactory {

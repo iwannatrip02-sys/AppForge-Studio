@@ -19,7 +19,7 @@ class BevelEngine {
             let midPos = (mesh.vertices[a].position + mesh.vertices[b].position) * 0.5
             for s in 0...segments {
                 let t = Float(s) / Float(segments)
-                let alongEdge = simd_mix(mesh.vertices[a].position, mesh.vertices[b].position, t)
+                let alongEdge = mesh.vertices[a].position + (mesh.vertices[b].position - mesh.vertices[a].position) * t
                 let dir = normalize(midPos - alongEdge) * bevelSize
                 let pos = alongEdge + dir
                 let v = Vertex(position: pos, normal: mesh.vertices[a].normal, uv: mesh.vertices[a].uv)

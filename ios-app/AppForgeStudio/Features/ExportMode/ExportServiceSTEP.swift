@@ -27,12 +27,12 @@ class ExportServiceSTEP {
             let cpID1 = nextID()
             let cpID2 = nextID()
 
-            content += "#\(cpID1)=CARTESIAN_POINT('',(\(format(line.start.x)),\(format(line.start.y)),0.0));\n"
-            content += "#\(cpID2)=CARTESIAN_POINT('',(\(format(line.end.x)),\(format(line.end.y)),0.0));\n"
+            content += "#\(cpID1)=CARTESIAN_POINT('',(\(format(line.0.x)),\(format(line.0.y)),0.0));\n"
+            content += "#\(cpID2)=CARTESIAN_POINT('',(\(format(line.1.x)),\(format(line.1.y)),0.0));\n"
 
             let dirID = nextID()
-            let dx = line.end.x - line.start.x
-            let dy = line.end.y - line.start.y
+            let dx = line.1.x - line.0.x
+            let dy = line.1.y - line.0.y
             let dz: CGFloat = 0
             let length = sqrt(dx * dx + dy * dy + dz * dz)
             let nx = length > 0 ? dx / length : 0

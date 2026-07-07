@@ -59,7 +59,8 @@ class CanvasViewModel: ObservableObject {
         if let device = MTLCreateSystemDefaultDevice() {
             mesh.uploadToGPU(device: device)
         }
-        let model = Model(name: "Default", meshes: [mesh])
+        let model = Model(name: "Default")
+        model.meshes = [mesh]
         scene.addModel(model)
     }
 

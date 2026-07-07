@@ -83,6 +83,9 @@ final class DynamicTopologyTests: XCTestCase {
     func testNoEdgeSplitWhenEdgeShortEnough() {
         var mesh = makeSquare()
         engine.maxEdgeLength = 2.0 // edges are 1.0, below threshold
+        engine.maxFaceArea = 10.0  // neutralizar métrica de área (defaults diminutos disparan)
+        engine.minEdgeLength = 0.0001
+        engine.minFaceArea = 0.0000001
         let initialTriCount = mesh.indices.count / 3
 
         let trigger = engine.apply(to: &mesh, at: SIMD3<Float>(0.5, 0.5, 0), radius: 2.0)
@@ -122,6 +125,9 @@ final class DynamicTopologyTests: XCTestCase {
     func testNoFaceSplitWhenFaceSmallEnough() {
         var mesh = makeSquare()
         engine.maxFaceArea = 10.0 // face area ≈ 0.5, well below threshold
+        engine.maxEdgeLength = 5.0 // neutralizar métrica de arista (default 0.02 dispara)
+        engine.minEdgeLength = 0.0001
+        engine.minFaceArea = 0.0000001
         let initialTriCount = mesh.indices.count / 3
 
         let trigger = engine.apply(to: &mesh, at: SIMD3<Float>(0.5, 0.5, 0), radius: 2.0)
@@ -173,6 +179,9 @@ final class DynamicTopologyTests: XCTestCase {
     func testNoFaceCollapseWhenFaceLargeEnough() {
         var mesh = makeSquare()
         engine.minFaceArea = 0.001 // square face area ≈ 0.5, above threshold
+        engine.maxEdgeLength = 5.0 // neutralizar splits (la diagonal pasa a dist 0 del brush)
+        engine.maxFaceArea = 10.0
+        engine.minEdgeLength = 0.0001
         let initialTriCount = mesh.indices.count / 3
 
         let trigger = engine.apply(to: &mesh, at: SIMD3<Float>(0.5, 0.5, 0), radius: 0.01)

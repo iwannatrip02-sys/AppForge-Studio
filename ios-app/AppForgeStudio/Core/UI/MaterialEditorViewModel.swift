@@ -88,7 +88,7 @@ class MaterialEditorViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        $metallic.dropFirst().sink { [weak self] v in self?.pushScalarToModel(\.metallic, value: v) }.store(in: &cancellables)
+        $metallic.dropFirst().sink { [weak self] v in self?.pushScalarToModel(\.metalness, value: v) }.store(in: &cancellables)
         $roughness.dropFirst().sink { [weak self] v in self?.pushScalarToModel(\.roughness, value: v) }.store(in: &cancellables)
         $ao.dropFirst().sink { [weak self] v in self?.pushScalarToModel(\.ao, value: v) }.store(in: &cancellables)
         $emissionIntensity.dropFirst().sink { [weak self] v in self?.pushScalarToModel(\.emissionIntensity, value: v) }.store(in: &cancellables)
@@ -132,7 +132,7 @@ class MaterialEditorViewModel: ObservableObject {
         albedoR = mat.albedo.x
         albedoG = mat.albedo.y
         albedoB = mat.albedo.z
-        metallic = mat.metallic
+        metallic = mat.metalness
         roughness = mat.roughness
         ao = mat.ao
         emissionR = mat.emission.x
@@ -146,8 +146,8 @@ class MaterialEditorViewModel: ObservableObject {
               idx < canvasVM.scene.models.count else { return }
         canvasVM.scene.models[idx].pbrMaterial = PBRMaterial(
             albedo: SIMD3<Float>(albedoR, albedoG, albedoB),
-            metallic: metallic,
             roughness: roughness,
+            metalness: metallic,
             ao: ao,
             emission: SIMD3<Float>(emissionR, emissionG, emissionB),
             emissionIntensity: emissionIntensity

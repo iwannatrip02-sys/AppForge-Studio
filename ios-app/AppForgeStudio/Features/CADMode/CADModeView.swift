@@ -70,7 +70,8 @@ struct CADModeView: View {
                     .onChange(of: extrudedMesh) { newMesh in
                         if let mesh = newMesh {
                             let name = "Extruded_\(UUID().uuidString.prefix(8))"
-                            let model = Model(name: name, meshes: [mesh])
+                            let model = Model(name: name)
+                            model.meshes = [mesh]
                             canvasVM.scene.addModel(model)
                             canvasVM.objectWillChange.send()
                             selectedTool = .select
@@ -93,7 +94,7 @@ struct CADModeView: View {
                         )
                         PencilForceOverlay { force, location in
                             if force > 0.7 && !sketchEngine.entities.isEmpty && !isExtruding {
-                                extrudeDistance = force * 2.0
+                                extrudeDistance = Float(force) * 2.0
                                 performExtrusion()
                             }
                         }
@@ -132,9 +133,9 @@ struct CADModeView: View {
                     parametricView
                 }
             }
-            .onChange(of: selectedTool) { newTool in
-                executeCADTool(newTool, canvasVM: canvasVM, toolVM: toolVM)
-            }
+        }
+        .onChange(of: selectedTool) { newTool in
+            executeCADTool(newTool, canvasVM: canvasVM, toolVM: toolVM)
         }
         .sheet(isPresented: $showMeasurements) {
             NavigationView {
@@ -179,7 +180,7 @@ struct CADModeView: View {
                     .font(.caption)
                     .foregroundColor(theme.textPrimary)
                 Spacer()
-                Text("\(canvasVM.scene.cadHistory.getAllOperations().count) ops")
+                Text("\(canvasVM.scene.cadHistory.getActiveOperationChain().count) ops")
                     .font(.caption2)
                     .foregroundColor(theme.textSecondary)
             }
@@ -187,30 +188,25 @@ struct CADModeView: View {
             .background(theme.surfaceSecondary)
 
             List {
-                ForEach(canvasVM.scene.cadHistory.getAllOperations(), id: \.id) { node in
+                ForEach(canvasVM.scene.cadHistory.getActiveOperationChain(), id: \.id) { op in
                     HStack {
                         Circle()
-                            .fill(node.id == canvasVM.scene.cadHistory.current.id ? theme.accent : theme.textSecondary)
+                            .fill(op.id == canvasVM.scene.cadHistory.currentNode?.operation.id ? theme.accent : theme.textSecondary)
                             .frame(width: 6, height: 6)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(node.operation)
+                            Text(op.description)
                                 .font(.system(size: 11))
-                                .foregroundColor(node.id == canvasVM.scene.cadHistory.current.id ? theme.textPrimary : theme.textSecondary)
-                            if !node.params.isEmpty {
-                                Text(node.params.map { "\($0.key): \(String(format: "%.2f", $0.value))" }.joined(separator: ", "))
+                                .foregroundColor(op.id == canvasVM.scene.cadHistory.currentNode?.operation.id ? theme.textPrimary : theme.textSecondary)
+                            if !op.parameters.isEmpty {
+                                Text(op.parameters.map { "\($0.key): \(String(format: "%.2f", $0.value))" }.joined(separator: ", "))
                                     .font(.system(size: 8))
                                     .foregroundColor(theme.textSecondary)
                             }
                         }
                         Spacer()
-                        Text(node.timestamp, style: .time)
+                        Text(op.timestamp, style: .time)
                             .font(.system(size: 8))
                             .foregroundColor(theme.textSecondary)
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        canvasVM.scene.cadHistory.reset(to: node)
-                        canvasVM.objectWillChange.send()
                     }
                 }
             }
@@ -570,7 +566,10 @@ struct CADModeView: View {
         sketchEngine.logOperation(type: .extrude, description: "Extrusion de sketch", parameters: ["distance": Double(extrudeDistance)])
 
         DispatchQueue.global(qos: .userInitiated).async {
-            let mesh = ExtrusionEngine.extrudeSketch(sketchEngine.entities, points: sketchEngine.points, distance: extrudeDistance)
+            // TODO(F3): re-wire extrudeSketch — ExtrusionEngine renamed to CADShapeExtrusionEngine
+            // which uses Wire/CADShape API; SketchEntity→Wire bridging needed.
+            // For now, extrusion is a no-op that compiles.
+            let mesh: Mesh? = nil
 
             DispatchQueue.main.async {
                 isExtruding = false
@@ -594,6 +593,7 @@ struct CADModeView: View {
         HapticService.shared.selection()
     }
 
+    @MainActor
     private func performBooleanUnion() {
         guard canvasVM.scene.models.count >= 2 else { return }
         let meshA = canvasVM.scene.models[0].meshes.first ?? Mesh()
@@ -602,17 +602,15 @@ struct CADModeView: View {
 
         sketchEngine.logOperation(type: .booleanUnion, description: "Union de 2 modelos")
 
-        DispatchQueue.global(qos: .userInitiated).async {
-            let engine = BooleanEngine()
-            let result = engine.booleanUnion(a: meshA, b: meshB)
-            DispatchQueue.main.async {
-                let model = Model(name: "Union_\(UUID().uuidString.prefix(8))", meshes: [result])
-                canvasVM.scene.addModel(model)
-                canvasVM.objectWillChange.send()
-            }
-        }
+        let engine = BooleanEngine()
+        let result = engine.booleanUnion(a: meshA, b: meshB)
+        let model = Model(name: "Union_\(UUID().uuidString.prefix(8))")
+        model.meshes = [result]
+        canvasVM.scene.addModel(model)
+        canvasVM.objectWillChange.send()
     }
 
+    @MainActor
     private func performBooleanSubtract() {
         guard canvasVM.scene.models.count >= 2 else { return }
         let meshA = canvasVM.scene.models[0].meshes.first ?? Mesh()
@@ -621,17 +619,15 @@ struct CADModeView: View {
 
         sketchEngine.logOperation(type: .booleanSubtract, description: "Diferencia de 2 modelos")
 
-        DispatchQueue.global(qos: .userInitiated).async {
-            let engine = BooleanEngine()
-            let result = engine.booleanDifference(a: meshA, b: meshB)
-            DispatchQueue.main.async {
-                let model = Model(name: "Subtract_\(UUID().uuidString.prefix(8))", meshes: [result])
-                canvasVM.scene.addModel(model)
-                canvasVM.objectWillChange.send()
-            }
-        }
+        let engine = BooleanEngine()
+        let result = engine.booleanDifference(a: meshA, b: meshB)
+        let model = Model(name: "Subtract_\(UUID().uuidString.prefix(8))")
+        model.meshes = [result]
+        canvasVM.scene.addModel(model)
+        canvasVM.objectWillChange.send()
     }
 
+    @MainActor
     private func performBooleanIntersect() {
         guard canvasVM.scene.models.count >= 2 else { return }
         let meshA = canvasVM.scene.models[0].meshes.first ?? Mesh()
@@ -640,15 +636,12 @@ struct CADModeView: View {
 
         sketchEngine.logOperation(type: .booleanIntersect, description: "Interseccion de 2 modelos")
 
-        DispatchQueue.global(qos: .userInitiated).async {
-            let engine = BooleanEngine()
-            let result = engine.booleanIntersection(a: meshA, b: meshB)
-            DispatchQueue.main.async {
-                let model = Model(name: "Intersect_\(UUID().uuidString.prefix(8))", meshes: [result])
-                canvasVM.scene.addModel(model)
-                canvasVM.objectWillChange.send()
-            }
-        }
+        let engine = BooleanEngine()
+        let result = engine.booleanIntersection(a: meshA, b: meshB)
+        let model = Model(name: "Intersect_\(UUID().uuidString.prefix(8))")
+        model.meshes = [result]
+        canvasVM.scene.addModel(model)
+        canvasVM.objectWillChange.send()
     }
 
     private func performGroupAssembly() {
@@ -664,52 +657,46 @@ struct CADModeView: View {
         let size = Double(primitiveSize)
         let occt = OCCTEngine.shared
 
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
-            let shape: OCCTSwift.Shape?
-            let opDescription: String
+        let shape: CADShape?
+        let opDescription: String
 
-            switch type {
-            case "Box":
-                shape = occt.box(width: size, height: size, depth: size)
-                opDescription = "Box \(String(format: "%.1f", size))mm"
-            case "Sphere":
-                shape = occt.sphere(radius: size * 0.5)
-                opDescription = "Sphere r=\(String(format: "%.1f", size * 0.5))mm"
-            case "Cylinder":
-                shape = occt.cylinder(radius: size * 0.5, height: size)
-                opDescription = "Cylinder r=\(String(format: "%.1f", size * 0.5)) h=\(String(format: "%.1f", size))mm"
-            case "Cone":
-                shape = occt.cone(bottomRadius: size * 0.5, topRadius: 0, height: size)
-                opDescription = "Cone r=\(String(format: "%.1f", size * 0.5)) h=\(String(format: "%.1f", size))mm"
-            case "Torus":
-                shape = occt.torus(majorRadius: size * 0.5, minorRadius: size * 0.15)
-                opDescription = "Torus R=\(String(format: "%.1f", size * 0.5)) r=\(String(format: "%.1f", size * 0.15))mm"
-            default:
-                return
-            }
-
-            guard let validShape = shape,
-                  let mesh = OCCTBridge.toMesh(validShape, quality: .medium) else {
-                DispatchQueue.main.async {
-                    self.csgStatusMessage = "Failed to create \(type)"
-                }
-                return
-            }
-
-            let name = "\(type)_\(UUID().uuidString.prefix(8))"
-            let model = Model(name: name, meshes: [mesh])
-
-            DispatchQueue.main.async {
-                self.canvasVM.scene.addModel(model)
-                self.canvasVM.scene.cadHistory.pushOperation(
-                    CADOperation(type: .createShape, description: opDescription,
-                                 parameters: ["size": Double(self.primitiveSize)])
-                )
-                self.canvasVM.objectWillChange.send()
-                self.sketchEngine.logOperation(type: .createShape, description: opDescription)
-            }
+        switch type {
+        case "Box":
+            shape = occt.box(width: size, height: size, depth: size)
+            opDescription = "Box \(String(format: "%.1f", size))mm"
+        case "Sphere":
+            shape = occt.sphere(radius: size * 0.5)
+            opDescription = "Sphere r=\(String(format: "%.1f", size * 0.5))mm"
+        case "Cylinder":
+            shape = occt.cylinder(radius: size * 0.5, height: size)
+            opDescription = "Cylinder r=\(String(format: "%.1f", size * 0.5)) h=\(String(format: "%.1f", size))mm"
+        case "Cone":
+            shape = occt.cone(bottomRadius: size * 0.5, topRadius: 0, height: size)
+            opDescription = "Cone r=\(String(format: "%.1f", size * 0.5)) h=\(String(format: "%.1f", size))mm"
+        case "Torus":
+            shape = occt.torus(majorRadius: size * 0.5, minorRadius: size * 0.15)
+            opDescription = "Torus R=\(String(format: "%.1f", size * 0.5)) r=\(String(format: "%.1f", size * 0.15))mm"
+        default:
+            return
         }
+
+        guard let validShape = shape,
+              let mesh = OCCTBridge.toMesh(validShape, quality: .medium) else {
+            csgStatusMessage = "Failed to create \(type)"
+            return
+        }
+
+        let name = "\(type)_\(UUID().uuidString.prefix(8))"
+        let model = Model(name: name)
+        model.meshes = [mesh]
+
+        canvasVM.scene.addModel(model)
+        canvasVM.scene.cadHistory.pushOperation(
+            CADOperation(type: .createShape, description: opDescription,
+                         parameters: ["size": Double(primitiveSize)])
+        )
+        canvasVM.objectWillChange.send()
+        sketchEngine.logOperation(type: .createShape, description: opDescription)
     }
 
     private func startCSGOperation(_ tool: CADTool) {
@@ -746,6 +733,7 @@ struct CADModeView: View {
         }
     }
 
+    @MainActor
     private func performCSGWithSelectedShapes() {
         guard let idxA = toolVM.csgShapeAIndex,
               let idxB = toolVM.csgShapeBIndex,
@@ -759,29 +747,25 @@ struct CADModeView: View {
         csgStatusMessage = "Applying..."
         let operation = selectedTool
 
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
-            let engine = BooleanEngine()
-            let result: Mesh
-            switch operation {
-            case .booleanUnion:
-                result = engine.booleanUnion(a: meshA, b: meshB)
-            case .booleanSubtract:
-                result = engine.booleanDifference(a: meshA, b: meshB)
-            case .booleanIntersect:
-                result = engine.booleanIntersection(a: meshA, b: meshB)
-            default:
-                return
-            }
-            DispatchQueue.main.async {
-                let name = "\(operation.rawValue)_\(UUID().uuidString.prefix(8))"
-                let model = Model(name: name, meshes: [result])
-                self.canvasVM.scene.addModel(model)
-                self.canvasVM.objectWillChange.send()
-                self.sketchEngine.logOperation(type: .booleanUnion, description: "CSG \(operation.rawValue) de 2 modelos")
-                self.resetCSGSelection()
-            }
+        let engine = BooleanEngine()
+        let result: Mesh
+        switch operation {
+        case .booleanUnion:
+            result = engine.booleanUnion(a: meshA, b: meshB)
+        case .booleanSubtract:
+            result = engine.booleanDifference(a: meshA, b: meshB)
+        case .booleanIntersect:
+            result = engine.booleanIntersection(a: meshA, b: meshB)
+        default:
+            return
         }
+        let name = "\(operation.rawValue)_\(UUID().uuidString.prefix(8))"
+        let model = Model(name: name)
+        model.meshes = [result]
+        canvasVM.scene.addModel(model)
+        canvasVM.objectWillChange.send()
+        sketchEngine.logOperation(type: .booleanUnion, description: "CSG \(operation.rawValue) de 2 modelos")
+        resetCSGSelection()
     }
 
     @ViewBuilder
@@ -888,7 +872,7 @@ struct PencilForceOverlay: UIViewRepresentable {
     }
 }
 
-private class PencilForceView: UIView {
+class PencilForceView: UIView {
     var onPencilForce: ((CGFloat, CGPoint) -> Void)?
     private let feedbackGen = UIImpactFeedbackGenerator(style: .light)
 
@@ -929,18 +913,20 @@ private class PencilForceView: UIView {
 
 // MARK: - CAD Tool Execution
 
+@MainActor
 private func executeCADTool(_ tool: CADTool, canvasVM: CanvasViewModel, toolVM: ToolViewModel) {
     guard let firstMesh = canvasVM.scene.models.first?.meshes.first else { return }
     var mutableMesh = firstMesh
 
     switch tool {
     case .fillet:
-        let engine = FilletEngine()
+        // Mesh-based fillet ≈ bevel with segments (FilletEngine works on B-rep CADShape, not Mesh)
+        let engine = BevelEngine()
         if mutableMesh.indices.count >= 6 {
             let e0 = Int(mutableMesh.indices[0])
             let e1 = Int(mutableMesh.indices[1])
             let radius = toolVM.filletRadius
-            _ = engine.computeFillet(edges: [(e0, e1)], radius: radius, mesh: &mutableMesh)
+            _ = engine.bevel(mesh: &mutableMesh, edgeIndices: [(e0, e1)], bevelSize: radius, segments: 4)
         }
 
     case .chamfer:
@@ -957,21 +943,9 @@ private func executeCADTool(_ tool: CADTool, canvasVM: CanvasViewModel, toolVM: 
         _ = engine.computeShell(faceIndex: 0, thickness: toolVM.shellThickness, mesh: &mutableMesh)
 
     case .loft:
-        let engine = LoftEngine()
-        let profile1 = mutableMesh.vertices
-        let profile2 = profile1.map { v in
-            Vertex(position: v.position + SIMD3<Float>(0, 0, 0.3),
-                   normal: v.normal, uv: v.uv)
-        }
-        let profile3 = profile1.map { v in
-            Vertex(position: v.position + SIMD3<Float>(0.15, 0, 0.4),
-                   normal: v.normal, uv: v.uv)
-        }
-        let loftedMesh = engine.computeLoft(curves: [profile1, profile2, profile3], segments: 8)
-        if !loftedMesh.vertices.isEmpty {
-            let model = Model(name: "Loft_\(UUID().uuidString.prefix(8))", meshes: [loftedMesh])
-            canvasVM.scene.addModel(model)
-        }
+        // TODO(F3): LoftEngine.loft(profiles:solid:quality:) expects [Wire], not [Vertex].
+        // Vertex→Wire bridging not yet implemented. No-op until F3.
+        logger.warning("TODO(F3): Loft operation skipped — Wire bridging needed")
 
     case .sweep:
         let engine = SweepEngine()
@@ -984,7 +958,8 @@ private func executeCADTool(_ tool: CADTool, canvasVM: CanvasViewModel, toolVM: 
         ]
         let sweptMesh = engine.computeSweep(profile: profile, path: path, segments: 12)
         if !sweptMesh.vertices.isEmpty {
-            let model = Model(name: "Sweep_\(UUID().uuidString.prefix(8))", meshes: [sweptMesh])
+            let model = Model(name: "Sweep_\(UUID().uuidString.prefix(8))")
+            model.meshes = [sweptMesh]
             canvasVM.scene.addModel(model)
         }
 

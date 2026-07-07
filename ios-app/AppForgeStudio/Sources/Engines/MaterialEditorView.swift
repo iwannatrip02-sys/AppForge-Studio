@@ -309,7 +309,7 @@ private struct PresetBrowserView: View {
                     )
                     .overlay(
                         Group {
-                            if preset.material.metallic > 0.5 {
+                            if preset.material.metalness > 0.5 {
                                 VStack {
                                     RoundedRectangle(cornerRadius: 12)
                                         .fill(LinearGradient(
@@ -328,7 +328,7 @@ private struct PresetBrowserView: View {
                     .lineLimit(1)
 
                 HStack(spacing: 4) {
-                    if preset.material.metallic > 0 {
+                    if preset.material.metalness > 0 {
                         Image(systemName: "bolt.fill")
                             .font(.system(size: 7))
                             .foregroundColor(.yellow)

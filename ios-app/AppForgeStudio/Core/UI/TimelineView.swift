@@ -9,7 +9,7 @@ struct TimelineView: View {
 
     private var theme: AppTheme { themeManager.currentTheme }
     @State private var showAddKeyframe = false
-    @State private var draggedKeyframe: KeyframeEntry? = nil
+    @State private var draggedKeyframe: AnimationEngine.KeyframeEntry? = nil
     @State private var dragOffset: CGFloat = 0
     
     var body: some View {
@@ -105,7 +105,7 @@ struct TimelineView: View {
         }
     }
     
-    private func keyframeRow(kf: KeyframeEntry, duration: Float) -> some View {
+    private func keyframeRow(kf: AnimationEngine.KeyframeEntry, duration: Float) -> some View {
         let pos = duration > 0 ? CGFloat(kf.time / duration) : 0
         let color: Color = {
             switch kf.type {
@@ -121,6 +121,7 @@ struct TimelineView: View {
                 RoundedRectangle(cornerRadius: 4)
                     .fill(theme.surfaceSecondary)
                     .frame(height: 28)
+
                 
                 Circle()
                     .fill(color)
@@ -166,5 +167,50 @@ struct TimelineView: View {
                 .frame(width: 40)
         }
         .padding(.vertical, 2)
+    }
+}
+
+/// Sheet para añadir un keyframe al clip seleccionado.
+struct AddKeyframeSheet: View {
+    @ObservedObject var engine: AnimationEngine
+    @Binding var isPresented: Bool
+    @State private var keyframeType: String = "posicion"
+    @State private var time: Double = 0
+
+    private var clipDuration: Double {
+        Double(engine.clips[engine.selectedClipName]?.duration ?? 1.0)
+    }
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Picker("Tipo", selection: $keyframeType) {
+                    Text("Posición").tag("posicion")
+                    Text("Rotación").tag("rotacion")
+                    Text("Escala").tag("escala")
+                }
+                .pickerStyle(.segmented)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Slider(value: $time, in: 0...max(clipDuration, 0.001))
+                    Text(String(format: "Tiempo: %.2fs / %.2fs", time, clipDuration))
+                        .font(.caption.monospacedDigit())
+                }
+            }
+            .navigationTitle("Nuevo Keyframe")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Añadir") {
+                        engine.addKeyframe(type: keyframeType, time: Float(time),
+                                           modelName: engine.selectedClipName)
+                        isPresented = false
+                    }
+                    .disabled(engine.selectedClipName.isEmpty)
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancelar") { isPresented = false }
+                }
+            }
+        }
     }
 }

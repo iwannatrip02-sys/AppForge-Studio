@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import simd
 
+@MainActor
 class ToolViewModel: ObservableObject {
     @Published var selectedTool: CADTool = .select
     @Published var gridSnapEnabled: Bool = false
@@ -17,21 +18,22 @@ class ToolViewModel: ObservableObject {
     @Published var csgShapeAIndex: Int? = nil
     @Published var csgShapeBIndex: Int? = nil
     @Published var csgActiveOperation: CADTool? = nil
+    @Published var symmetryEnabled: Bool = false
     
-    let extrusion = ExtrusionEngine()
     let bevel = BevelEngine()
     let boolean = BooleanEngine()
     let loopCut = LoopCutEngine()
-    let measure = MeasureEngine()
-    let brushEngine = BrushEngine()
+    let chamferEngine = ChamferEngine()
+    let shellEngine = ShellEngine()
+    let sweepEngine = SweepEngine()
     let occt = OCCTEngine.shared
+    // TODO(F3): ExtrusionEngine→CADShapeExtrusionEngine, MeasureEngine→CADShapeMeasureEngine pending migration
     
     func executeTool(mesh: inout Mesh) {
         switch selectedTool {
         case .extrude:
-            let faceIndices = stride(from: 0, to: min(mesh.indices.count, 9), by: 3).map { mesh.indices[$0] }
-            guard !faceIndices.isEmpty else { return }
-            mesh = extrusion.extrude(mesh: &mesh, faceIndices: faceIndices, direction: SIMD3<Float>(0, 0, 1), distance: 0.1)
+            // TODO(F3): re-wire ExtrusionEngine → CADShapeExtrusionEngine
+            break
         case .loopCut:
             if mesh.indices.count >= 6 {
                 let i0 = Int(mesh.indices[0]), i1 = Int(mesh.indices[1])
@@ -42,54 +44,70 @@ class ToolViewModel: ObservableObject {
                 let i0 = Int(mesh.indices[0]), i1 = Int(mesh.indices[1])
                 _ = bevel.bevel(mesh: &mesh, edgeIndices: [(i0, i1)], bevelSize: 0.05, segments: 2)
             }
-        case .booleanUnion:
+        case .booleanUnion, .booleanSubtract, .booleanIntersect:
             var offsetMesh = mesh
             for i in 0..<offsetMesh.vertices.count {
                 offsetMesh.vertices[i].position.x += 0.15
             }
-            mesh = boolean.booleanUnion(a: mesh, b: offsetMesh)
-        case .fillet:
-            guard let shape = occt.meshToShape(mesh) else { return }
-            let result = occt.fillet(shape: shape, radius: Double(filletRadius))
-            mesh = occt.shapeToMesh(result)
-        case .chamfer:
-            guard let shape = occt.meshToShape(mesh) else { return }
-            let result = occt.chamfer(shape: shape, radius: Double(chamferRadius))
-            mesh = occt.shapeToMesh(result)
-        case .shell:
-            guard let shape = occt.meshToShape(mesh) else { return }
-            let result = occt.shell(shape: shape, thickness: Double(shellThickness))
-            mesh = occt.shapeToMesh(result)
-        case .loft:
-            guard let shape = occt.meshToShape(mesh) else { return }
-            let offsetShape = occt.createBox(width: 0.2, height: 0.2, depth: 0.2)
-            let result = occt.loft(profiles: [shape, offsetShape])
-            mesh = occt.shapeToMesh(result)
-        case .sweep:
-            guard let profileShape = occt.meshToShape(mesh) else { return }
-            let path: [SIMD3<Double>] = [
-                SIMD3<Double>(0, 0, 0),
-                SIMD3<Double>(0, 0, Double(sweepHeight) * 1.0),
-                SIMD3<Double>(0.2, 0, Double(sweepHeight) * 0.8),
-                SIMD3<Double>(0.4, 0.1, Double(sweepHeight) * 0.6)
-            ]
-            let result = occt.sweep(profile: profileShape, along: path)
-            mesh = occt.shapeToMesh(result)
-        case .measure:
-            if let shape = occt.meshToShape(mesh) {
-                measurementArea = Float(occt.measureArea(shape))
-                measurementVolume = Float(occt.measureVolume(shape))
-                let box = occt.measureBoundingBox(shape)
-                measurementDistance = Float(simd_distance(
-                    SIMD3<Float>(Float(box.min.x), Float(box.min.y), Float(box.min.z)),
-                    SIMD3<Float>(Float(box.max.x), Float(box.max.y), Float(box.max.z))
-                ))
-            } else {
-                measurementArea = measure.measureArea(mesh: mesh)
-                measurementVolume = measure.measureVolume(mesh: mesh)
-                measurementDistance = measure.measureDistance(p1: .zero, p2: SIMD3<Float>(1, 0, 0))
+            switch selectedTool {
+            case .booleanSubtract:
+                mesh = boolean.booleanDifference(a: mesh, b: offsetMesh)
+            case .booleanIntersect:
+                mesh = boolean.booleanIntersection(a: mesh, b: offsetMesh)
+            default:
+                mesh = boolean.booleanUnion(a: mesh, b: offsetMesh)
             }
+        case .fillet:
+            // Mesh-based fillet ≈ bevel con segmentos (no hay puente Mesh→B-rep aún)
+            if mesh.indices.count >= 6 {
+                let i0 = Int(mesh.indices[0]), i1 = Int(mesh.indices[1])
+                _ = bevel.bevel(mesh: &mesh, edgeIndices: [(i0, i1)], bevelSize: filletRadius, segments: 4)
+            }
+        case .chamfer:
+            if mesh.indices.count >= 6 {
+                let i0 = Int(mesh.indices[0]), i1 = Int(mesh.indices[1])
+                _ = chamferEngine.computeChamfer(edges: [(i0, i1)], distance: chamferRadius, mesh: &mesh)
+            }
+        case .shell:
+            _ = shellEngine.computeShell(faceIndex: 0, thickness: shellThickness, mesh: &mesh)
+        case .loft:
+            // TODO(F3): loft real requiere perfiles Wire (OCCT); falta puente Mesh→Wire
+            break
+        case .sweep:
+            let path: [(position: SIMD3<Float>, tangent: SIMD3<Float>)] = [
+                (SIMD3<Float>(0, 0, 0), SIMD3<Float>(0, 0, 1)),
+                (SIMD3<Float>(0.05, 0, sweepHeight * 0.5), SIMD3<Float>(0, 0.2, 1)),
+                (SIMD3<Float>(0, 0, sweepHeight), SIMD3<Float>(0, 0, 1))
+            ]
+            let swept = sweepEngine.computeSweep(profile: mesh.vertices, path: path, segments: 12)
+            if !swept.vertices.isEmpty { mesh = swept }
+        case .measure:
+            // Medición directa sobre la malla (área por triángulos, volumen por tetraedros firmados)
+            guard !mesh.vertices.isEmpty else { break }
+            var minP = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
+            var maxP = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
+            for v in mesh.vertices {
+                minP = simd_min(minP, v.position)
+                maxP = simd_max(maxP, v.position)
+            }
+            measurementDistance = simd_distance(minP, maxP)
+            var area: Float = 0
+            var volume: Float = 0
+            var i = 0
+            while i + 2 < mesh.indices.count {
+                let a = mesh.vertices[Int(mesh.indices[i])].position
+                let b = mesh.vertices[Int(mesh.indices[i + 1])].position
+                let c = mesh.vertices[Int(mesh.indices[i + 2])].position
+                area += simd_length(simd_cross(b - a, c - a)) * 0.5
+                volume += simd_dot(a, simd_cross(b, c)) / 6
+                i += 3
+            }
+            measurementArea = area
+            measurementVolume = abs(volume)
         case .select, .move, .rotate, .scale:
+            break
+        case .revolve, .sketch:
+            // TODO(F3): revolve requiere perfil Wire; sketch se maneja en CADSketchView
             break
         case .line, .circle, .rectangle, .arc, .dimension, .constraint:
             break

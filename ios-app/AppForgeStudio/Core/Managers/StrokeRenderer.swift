@@ -44,7 +44,7 @@ class StrokeRenderer {
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else { return }
         encoder.setRenderPipelineState(pipelineState)
         
-        let mvp = projectionMatrix * viewMatrix
+        var mvp = projectionMatrix * viewMatrix
         encoder.setVertexBytes(&mvp, length: MemoryLayout<float4x4>.stride, index: 1)
         
         var allVertices: [QuadVertex] = []
@@ -56,7 +56,7 @@ class StrokeRenderer {
             for i in 0..<(pts.count - 1) {
                 let p0 = pts[i]
                 let p1 = pts[i + 1]
-                let mid = simd_mix(p0.position, p1.position, 0.5)
+                let mid = (p0.position + p1.position) * 0.5
                 let dir = simd_normalize(p1.position - p0.position)
                 let up = SIMD3<Float>(0, 1, 0)
                 let right = simd_normalize(simd_cross(dir, up))

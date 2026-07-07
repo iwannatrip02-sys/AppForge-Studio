@@ -162,9 +162,10 @@ final class SculptDeformerTests: XCTestCase {
         var vertices = makeQuadVertices()
         let engine = makeEngine(deformer: .smooth)
 
-        // Place sculpt point far above the quad so movement direction is clear
+        // Punto sobre el quad DENTRO del radio del brush (2.0): dist máx ≈ 1.22.
+        // A z=2.0 la distancia supera el radio y applyDeformer hace early-return.
         let point = SculptPoint(
-            position: SIMD3<Float>(0.5, 0.5, 2.0),
+            position: SIMD3<Float>(0.5, 0.5, 1.0),
             normal: SIMD3<Float>(0, 0, 1),
             pressure: 1.0,
             dragDelta: .zero
@@ -173,12 +174,12 @@ final class SculptDeformerTests: XCTestCase {
         let originalPositions = vertices.map { $0.position }
         engine.apply(at: point, to: &vertices)
 
-        // Each vertex should move toward (0.5, 0.5, 2.0)
+        // Each vertex should move toward (0.5, 0.5, 1.0)
         for (i, v) in vertices.enumerated() {
             let orig = originalPositions[i]
-            // Movement in Z should be positive (toward z=2)
+            // Movement in Z should be positive (toward z=1)
             XCTAssertGreaterThan(v.position.z, orig.z,
-                "Vertex \(i) should move toward z=2")
+                "Vertex \(i) should move toward z=1")
         }
     }
 

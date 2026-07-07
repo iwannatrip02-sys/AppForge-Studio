@@ -88,7 +88,8 @@ class ExportViewModel: ObservableObject {
 
         exportProgress = 0.3
 
-        let mappedFormat: ExportFormat
+        // AppForgeStudio.ExportFormat = enum global del servicio (el anidado lo eclipsa aquí)
+        let mappedFormat: AppForgeStudio.ExportFormat
         switch selectedFormat {
         case .obj: mappedFormat = .obj
         case .stl: mappedFormat = .stl

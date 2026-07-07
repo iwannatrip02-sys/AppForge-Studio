@@ -60,7 +60,7 @@ struct MetalView: UIViewRepresentable {
         )
     }
     
-    func makeUIView(context: Context) -> MTKView {
+    func makeUIView(context: UIViewRepresentableContext<MetalView>) -> MTKView {
         let v = MTKView()
         v.device = MTLCreateSystemDefaultDevice()
         v.delegate = context.coordinator
@@ -75,7 +75,7 @@ struct MetalView: UIViewRepresentable {
         return v
     }
     
-    func updateUIView(_ uiView: MTKView, context: Context) {
+    func updateUIView(_ uiView: MTKView, context: UIViewRepresentableContext<MetalView>) {
         renderer.updateScene(scene)
         renderer.animationEngine = animationEngine
         renderer.playbackController = playbackController
@@ -253,7 +253,8 @@ struct MetalView: UIViewRepresentable {
                 isExtruding = false
             default: break
             }
-        
+        }
+
         @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
             let location = gesture.location(in: gesture.view)
             guard let view = gesture.view as? MTKView else { return }

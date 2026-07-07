@@ -169,7 +169,7 @@ struct PBRMaterial: Identifiable, Codable, Equatable {
 
 // MARK: - Presets de materiales
 
-struct MaterialPresets {
+struct PBRMaterialPresets {
     static let plastic = PBRMaterial(name: "Plastico", albedo: SIMD3<Float>(0.2, 0.6, 0.9), roughness: 0.4, metalness: 0.0, ao: 1.0)
     static let metal = PBRMaterial(name: "Metal", albedo: SIMD3<Float>(0.8, 0.8, 0.8), roughness: 0.2, metalness: 1.0, ao: 0.8)
     static let wood = PBRMaterial(name: "Madera", albedo: SIMD3<Float>(0.6, 0.4, 0.2), roughness: 0.8, metalness: 0.0, ao: 0.9)
@@ -204,7 +204,7 @@ class MaterialManager: ObservableObject {
            let decoded = try? JSONDecoder().decode([PBRMaterial].self, from: data) {
             materials = decoded
         } else {
-            materials = MaterialPresets.all
+            materials = PBRMaterialPresets.all
         }
         selectedMaterialID = materials.first?.id
     }
@@ -216,7 +216,7 @@ class MaterialManager: ObservableObject {
     }
     
     func addMaterial(name: String = "Nuevo Material", from source: PBRMaterial? = nil) {
-        let base = source ?? MaterialPresets.plastic
+        let base = source ?? PBRMaterialPresets.plastic
         let material = PBRMaterial(name: name, albedo: base.albedo, roughness: base.roughness,
                                     metalness: base.metalness, ao: base.ao, normalScale: base.normalScale,
                                     emission: base.emission, emissionIntensity: base.emissionIntensity,

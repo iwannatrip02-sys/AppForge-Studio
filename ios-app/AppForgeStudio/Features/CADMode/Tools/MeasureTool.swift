@@ -111,7 +111,8 @@ struct MeasureTool: View {
             pointB = hitPos
             isSettingPointA = true
             if let a = pointA, let b = pointB {
-                measuredDistance = MeasureEngine().measureDistance(p1: a, p2: b)
+                // TODO(F3): re-wire MeasureEngine → CADShapeMeasureEngine (API uses CADShape, not SIMD3)
+                measuredDistance = simd_distance(a, b)
                 toolVM.measurementDistance = measuredDistance
                 showResult = true
             }

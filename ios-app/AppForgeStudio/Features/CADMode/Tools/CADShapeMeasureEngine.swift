@@ -4,7 +4,7 @@ import OCCTSwift
 
 /// B-rep precision measurement via OCCT 8.0.0. Properties are computed (optionals).
 @MainActor
-final class MeasureEngine {
+final class CADShapeMeasureEngine {
     private let engine = OCCTEngine.shared
     
     func volume(of shape: CADShape) -> Double { engine.measureVolume(shape) ?? 0 }

@@ -100,9 +100,9 @@ final class GPUStructLayoutTests: XCTestCase {
     func testSimdFloat3x3MatchesMetalFloat3x3() {
         XCTAssertEqual(MemoryLayout<simd_float3x3>.stride, 48,
             "simd_float3x3 stride debe ser 48 bytes (3 columnas × 16 bytes c/u)")
-        // size = 3 × 12 = 36 (raw data without inter-column padding)
-        XCTAssertEqual(MemoryLayout<simd_float3x3>.size, 36,
-            "simd_float3x3 size debe ser 36 bytes (9 floats × 4)")
+        // size = 48: cada columna es SIMD3<Float> con padding a 16 bytes (igual que Metal)
+        XCTAssertEqual(MemoryLayout<simd_float3x3>.size, 48,
+            "simd_float3x3 size debe ser 48 bytes (3 columnas × 16 con padding)")
     }
 
     /// Compute expected FrameUniforms stride from component sizes.

@@ -17,8 +17,9 @@ final class SceneManager: ObservableObject {
     
     // MARK: - Layer Management
     
-    func addLayer(name: String = "Layer \(layers.count + 1)") -> SceneLayer {
-        let layer = SceneLayer(name: name)
+    func addLayer(name: String? = nil) -> SceneLayer {
+        let layerName = name ?? "Layer \(layers.count + 1)"
+        let layer = SceneLayer(name: layerName)
         layers.append(layer)
         if activeLayerId == nil {
             activeLayerId = layer.id
@@ -40,10 +41,10 @@ final class SceneManager: ObservableObject {
             return
         }
         layers[index].isVisible.toggle()
-        logger.debug("Toggled visibility for layer \(id.uuidString), now visible: \(layers[index].isVisible)")
+        logger.debug("Toggled visibility for layer \(id.uuidString), now visible: \(self.layers[index].isVisible)")
     }
     
-    func visibleMeshes() -> [Model] {
+    func visibleMeshes() -> [ModelWrapper] {
         return layers
             .filter { $0.isVisible }
             .flatMap { $0.meshes }
@@ -99,23 +100,20 @@ struct ModelWrapper: Identifiable, Codable {
     let id: UUID
     var name: String
     var transform: TransformWrapper
-    var materialIndex: Int
-    
     init(model: Model) {
         self.id = model.id
         self.name = model.name
         self.transform = TransformWrapper(
-            position: model.transform.position,
-            rotation: model.transform.rotation,
-            scale: model.transform.scale
+            position: model.position,
+            rotation: model.rotation.vector,
+            scale: model.scale
         )
-        self.materialIndex = model.materialIndex
     }
 }
 
 struct TransformWrapper: Codable {
     var position: SIMD3<Float>
-    var rotation: SIMD3<Float>
+    var rotation: SIMD4<Float>
     var scale: SIMD3<Float>
 }
 

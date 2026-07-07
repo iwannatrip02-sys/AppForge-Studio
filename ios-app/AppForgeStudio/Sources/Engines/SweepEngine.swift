@@ -78,8 +78,8 @@ class SweepEngine {
         let p0 = path[idx]
         let p1 = path[min(idx + 1, n - 1)]
         return (
-            simd_mix(p0.position, p1.position, localT),
-            normalize(simd_mix(p0.tangent, p1.tangent, localT))
+            simd_mix(p0.position, p1.position, SIMD3<Float>(repeating: localT)),
+            normalize(simd_mix(p0.tangent, p1.tangent, SIMD3<Float>(repeating: localT)))
         )
     }
 }

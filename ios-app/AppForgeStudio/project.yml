@@ -9,7 +9,7 @@ options:
 
 settings:
   base:
-    SWIFT_VERSION: "6.1"
+    SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     TARGETED_DEVICE_FAMILY: "2"
     INFOPLIST_FILE: AppForgeStudio/Info.plist
@@ -22,7 +22,9 @@ settings:
 packages:
   Satin:
     url: https://github.com/Hi-Rez/Satin.git
-    from: 13.0.0
+    # Pinned to the exact revision mirrored in vendor/Satin (repo is archived;
+    # main == final state). Local vendor copy is the API source of truth.
+    revision: a91c469f517cef1946d5ed4dd9771df4843a30ef
   OCCTSwift:
     url: https://github.com/gsdali/OCCTSwift.git
     from: 1.0.0
@@ -34,13 +36,13 @@ targets:
     sources:
       - path: Core/UI
       - path: Core/Managers
+      - path: Core/Services/ExportService
       - path: Features/CADMode
       - path: Features/SculptMode
       - path: Features/PaintMode
       - path: Features/ExportMode
       - path: Features/AnimationMode
       - path: Features/HybridMode
-      - path: Features/RenderMode
       - path: Sources/Engines
       - path: Sources/CSG
       - path: Sources/CAD
@@ -48,9 +50,11 @@ targets:
       - path: Sources/Services
       - path: Sources/Theme
       - path: Sources/RenderEngine
+      # Recursos individuales (NUNCA type: folder — un dir Resources/ literal dentro
+      # del .app hace que iOS lo trate como bundle deep y falle la instalación)
       - path: Resources
-        type: folder
-        createFolderReferences: false
+        excludes:
+          - "Localizable.strings"
       - path: Sources/Shaders/BooleanComputeShaders.metal
         type: file
         buildPhase: sources
@@ -87,6 +91,10 @@ targets:
       - path: Tests
     settings:
       base:
-        INFOPLIST_FILE: AppForgeStudio/Info.plist
+        # Bundle de tests: plist propio (BNDL) y bundle ID distinto al de la app.
+        # Compartir INFOPLIST_FILE/bundle ID con la app rompe la instalación en simulador.
+        INFOPLIST_FILE: AppForgeStudioTests-Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.appforgestudio.app.tests
     dependencies:
       - target: AppForgeStudio
+      - package: OCCTSwift

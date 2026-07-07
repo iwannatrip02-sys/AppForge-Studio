@@ -4,7 +4,7 @@ import OCCTSwift
 
 /// Parametric extrusion from 2D profile to 3D solid.
 @MainActor
-final class ExtrusionEngine {
+final class CADShapeExtrusionEngine {
     private let engine = OCCTEngine.shared
     
     func extrude(profile: Wire, direction: SIMD3<Double>, length: Double, quality: MeshQuality = .medium) -> Mesh {

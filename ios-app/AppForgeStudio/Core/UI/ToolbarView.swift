@@ -4,7 +4,7 @@ import OSLog
 
 private let logger = Logger(subsystem: "com.appforgestudio", category: "ToolbarView")
 struct ToolbarView: View {
-    @ObservedObject var toolVM: ToolViewModel
+    @ObservedObject var toolVM: WorkspaceToolViewModel
     @Binding var scene: Scene3D
     @EnvironmentObject var themeManager: ThemeManager
 
@@ -13,10 +13,10 @@ struct ToolbarView: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                if toolVM.currentMode == .CAD || toolVM.currentMode == .Hybrid {
-                    toolbarButton(icon: "magnet", label: "Snap", isActive: toolVM.snapEnabled) {
+                if toolVM.activeMode == .cad || toolVM.activeMode == .hybrid {
+                    toolbarButton(icon: "magnet", label: "Snap", isActive: toolVM.gridSnapEnabled) {
                         HapticService.shared.light()
-                        toolVM.snapEnabled.toggle()
+                        toolVM.gridSnapEnabled.toggle()
                     }
                     .keyboardShortcut("s", modifiers: [.command])
                     .help("Snap to grid")
@@ -37,7 +37,7 @@ struct ToolbarView: View {
                     Divider().frame(height: 24).foregroundColor(theme.border)
                 }
 
-                if toolVM.currentMode == .Sculpt || toolVM.currentMode == .Paint {
+                if toolVM.activeMode == .sculpt || toolVM.activeMode == .paint {
                     ForEach(toolVM.brushPresets.map { $0["name"] as? String ?? "" }.filter { !$0.isEmpty }, id: \.self) { name in
                         toolbarButton(icon: "paintbrush.fill", label: name) {
                             HapticService.shared.light()
@@ -50,7 +50,7 @@ struct ToolbarView: View {
                     Divider().frame(height: 24).foregroundColor(theme.border)
                 }
 
-                if toolVM.currentMode == .Animation {
+                if toolVM.activeMode == .animation {
                     toolbarButton(icon: "repeat", label: "Loop", isActive: false) {
                         HapticService.shared.light()
                     }
@@ -100,5 +100,20 @@ struct ToolbarView: View {
             .cornerRadius(theme.cornerRadiusSmall)
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Segmented picker Mundo/Local para el espacio de transformación.
+struct ToolbarSpacePicker: View {
+    @Binding var transformSpace: WorkspaceToolViewModel.TransformSpace
+
+    var body: some View {
+        Picker("Espacio", selection: $transformSpace) {
+            ForEach(WorkspaceToolViewModel.TransformSpace.allCases, id: \.self) { space in
+                Text(space.rawValue).tag(space)
+            }
+        }
+        .pickerStyle(.segmented)
+        .frame(width: 140)
     }
 }

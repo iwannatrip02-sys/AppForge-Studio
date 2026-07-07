@@ -9,7 +9,8 @@ private let logger = Logger(subsystem: "com.appforgestudio", category: "ContentV
 struct ContentView: View {
     @ObservedObject var canvasVM: CanvasViewModel
     var renderer: SatinRenderer
-    var brushEngine: BrushEngine?
+    // TODO(F3): BrushEngine deleted — paint brush support pending reimplementation
+    var brushEngine: AnyObject? = nil
     var isPaintMode: Bool = false
     @EnvironmentObject var themeManager: ThemeManager
 
@@ -70,7 +71,7 @@ struct ContentView: View {
                         lastDrag = value.translation
                     } else {
                         if currentStroke == nil {
-                            currentStroke = BrushStroke(brushType: brushEngine?.currentBrush ?? .round,
+                            currentStroke = BrushStroke(brushType: .round,
                                                        color: SIMD4<Float>(0, 0.5, 1, 1),
                                                        mode: .paint)
                         }
@@ -100,7 +101,7 @@ struct ContentView: View {
     }
 
     private func handleTouch(origin: SIMD3<Float>, direction: SIMD3<Float>) {
-        if isPaintMode, let engine = brushEngine {
+        if isPaintMode {
             let point = BrushPoint(position: origin, normal: direction, pressure: 1.0, tilt: .zero)
             if currentStroke != nil {
                 currentStroke?.addPoint(point)

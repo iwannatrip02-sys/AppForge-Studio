@@ -14,13 +14,11 @@ final class FilletEngine {
 }
 
 @MainActor
-final class ChamferEngine {
+final class OCCTChamferEngine {
     private let engine = OCCTEngine.shared
-    
+
     func chamfer(_ shape: CADShape, distance: Double, quality: MeshQuality = .medium) -> Mesh {
         let result = engine.chamfer(shape, distance: distance)
         return result?.appforgeMesh(quality: quality) ?? shape.appforgeMesh(quality: quality)
     }
 }
-
-typealias BevelEngine = ChamferEngine

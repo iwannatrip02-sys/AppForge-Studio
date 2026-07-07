@@ -27,10 +27,7 @@ class ModelLoadService {
         guard FileManager.default.fileExists(atPath: url.path) else {
             return .failure(.fileNotFound(url.lastPathComponent))
         }
-        guard let asset = MDLAsset(url: url) else {
-            return .failure(.invalidFormat(url.lastPathComponent))
-        }
-        asset.load()
+        let asset = MDLAsset(url: url)
         var meshes: [Mesh] = []
         for i in 0..<asset.count {
             guard let object = asset.object(at: i) as? MDLMesh else { continue }
@@ -42,7 +39,8 @@ class ModelLoadService {
         if meshes.isEmpty {
             return .failure(.meshCreationFailed(url.lastPathComponent))
         }
-        let model = Model(name: url.lastPathComponent, meshes: meshes)
+        let model = Model(name: url.lastPathComponent)
+        model.meshes = meshes
         cacheService?.cache(model, for: url)
         return .success(model)
     }
@@ -56,15 +54,17 @@ class ModelLoadService {
         case .sphere:
             mesh = MDLMesh(sphereWithExtent: SIMD3<Float>(1,1,1), segments: SIMD2<UInt32>(24,24), inwardNormals: false, geometryType: .triangles, allocator: allocator)
         case .cylinder:
-            mesh = MDLMesh(cylinderWithExtent: SIMD3<Float>(1,1,1), segments: SIMD2<UInt32>(24,24), inwardNormals: false, geometryType: .triangles, allocator: allocator)
+            mesh = MDLMesh(cylinderWithExtent: SIMD3<Float>(1,1,1), segments: SIMD2<UInt32>(24,24), inwardNormals: false, topCap: true, bottomCap: true, geometryType: .triangles, allocator: allocator)
         case .plane:
             mesh = MDLMesh(planeWithExtent: SIMD3<Float>(2,0,2), segments: SIMD2<UInt32>(2,2), geometryType: .triangles, allocator: allocator)
         case .torus:
-            mesh = MDLMesh(cylinderWithExtent: SIMD3<Float>(0.8,0.3,0.8), segments: SIMD2<UInt32>(24,24), inwardNormals: false, geometryType: .triangles, allocator: allocator)
+            mesh = MDLMesh(cylinderWithExtent: SIMD3<Float>(0.8,0.3,0.8), segments: SIMD2<UInt32>(24,24), inwardNormals: false, topCap: false, bottomCap: false, geometryType: .triangles, allocator: allocator)
         }
         guard var result = createMesh(from: mesh) else { return nil }
         result.uploadToGPU(device: device)
-        return Model(name: type.rawValue, meshes: [result])
+        let model = Model(name: type.rawValue)
+        model.meshes = [result]
+        return model
     }
     
     // MARK: - Private Helpers
@@ -72,7 +72,6 @@ class ModelLoadService {
     private func createMesh(from mdMesh: MDLMesh) -> Mesh? {
         guard let mtkMesh = try? MTKMesh(mesh: mdMesh, device: device) else { return nil }
         let vertexCount = mtkMesh.vertexCount
-        let vertexAttr = mtkMesh.vertexDescriptor.attributes[0] as! MDLVertexAttribute
         let buffer = mtkMesh.vertexBuffers[0]
         let vertexPtr = buffer.buffer.contents().bindMemory(to: Float.self, capacity: vertexCount * 8)
         var vertices: [Vertex] = []

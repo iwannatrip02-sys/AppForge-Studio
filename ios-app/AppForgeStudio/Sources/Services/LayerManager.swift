@@ -23,7 +23,7 @@ enum HybridLayerType: String, Codable, CaseIterable, Sendable {
 /// Non-destructive modeling layer — every CAD operation or sculpt stroke
 /// is a LayerOperation that can be reordered, toggled, or deleted.
 /// This beats both Shapr3D (history without layers) and Nomad (layers without params).
-struct ModelLayer: Identifiable, Codable {
+struct ModelLayer: Identifiable {
     let id: UUID
     var name: String
     var isVisible: Bool = true
@@ -126,11 +126,13 @@ final class LayerManager: ObservableObject {
     }
     
     func duplicateLayer(_ layer: ModelLayer) {
-        var copy = layer
-        copy.id = UUID()
-        copy.name = "\(layer.name) Copy"
+        var copy = ModelLayer(name: "\(layer.name) Copy", layerType: layer.layerType)
+        copy.isVisible = layer.isVisible
+        copy.isLocked = layer.isLocked
+        copy.opacity = layer.opacity
+        copy.blendMode = layer.blendMode
+        copy.operations = layer.operations
         copy.isDirty = true
-        copy.cachedMesh = nil
         layers.append(copy)
     }
     

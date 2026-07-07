@@ -3,7 +3,7 @@ import OCCTSwift
 
 /// Boolean CSG operations backed by OCCT 8.0.0. All operations return Shape?.
 @MainActor
-final class BooleanEngine {
+final class OCCTBooleanEngine {
     private let engine = OCCTEngine.shared
     
     func union(_ a: CADShape, _ b: CADShape, quality: MeshQuality = .medium) -> Mesh {

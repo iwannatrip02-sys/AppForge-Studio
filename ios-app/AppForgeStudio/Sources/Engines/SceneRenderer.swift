@@ -4,7 +4,7 @@ import Foundation
 import OSLog
 
 private let logger = Logger(subsystem: "com.appforgestudio", category: "SceneRenderer")
-struct Uniforms {
+struct SceneUniforms {
     var modelMatrix: simd_float4x4
     var viewMatrix: simd_float4x4
     var projectionMatrix: simd_float4x4
@@ -95,10 +95,14 @@ class SceneRenderer {
             guard let vertexBuffer = model.vertexBuffer,
                   let indexBuffer = model.indexBuffer else { continue }
             
-            var uniforms = Uniforms(
+            let camera = scene.camera
+            let viewMatrix = lookAt(eye: camera.position, target: camera.target, up: camera.up)
+            let aspect: Float = 1.0
+            let projectionMatrix = perspective_fov(fov: camera.fov * .pi / 180, aspect: aspect, near: camera.nearPlane, far: camera.farPlane)
+            var uniforms = SceneUniforms(
                 modelMatrix: model.transform,
-                viewMatrix: scene.camera.viewMatrix,
-                projectionMatrix: scene.camera.projectionMatrix,
+                viewMatrix: viewMatrix,
+                projectionMatrix: projectionMatrix,
                 ambientColor: ambientColor,
                 lightDirection: lightDirection,
                 lightColor: lightColor,
@@ -106,7 +110,7 @@ class SceneRenderer {
             )
             
             encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-            encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+            encoder.setVertexBytes(&uniforms, length: MemoryLayout<SceneUniforms>.stride, index: 1)
             encoder.drawIndexedPrimitives(type: .triangle, indexCount: model.indexCount, indexType: .uint16, indexBuffer: indexBuffer, indexBufferOffset: 0)
         }
         

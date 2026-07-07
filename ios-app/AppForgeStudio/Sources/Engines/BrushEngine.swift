@@ -74,42 +74,42 @@ class BrushEngine {
             
             let t = dist / r
             let falloff: Float
-            if t < h { falloff = 1.0 }
-            else { falloff = 1.0 - smoothstep(0.0, 1.0, (t - h) / (1.0 - h)) }
+            if t < h { falloff = 1 }
+            else { falloff = 1 - smoothstep(Float(0), Float(1), (t - h) / (1 - h)) }
             
             switch currentBrush {
             case .round:
-                vertices[i].position += vertices[i].normal * (1.0 - t) * falloff * p * 0.01
+                vertices[i].position += vertices[i].normal * (1 - t) * falloff * p * Float(0.01)
             case .flat:
-                vertices[i].position += vertices[i].normal * falloff * p * 0.01
+                vertices[i].position += vertices[i].normal * falloff * p * Float(0.01)
             case .inflate:
                 let dir = simd_normalize(vertices[i].position)
-                vertices[i].position += dir * (1.0 - t) * falloff * p * 0.01
+                vertices[i].position += dir * (1 - t) * falloff * p * Float(0.01)
             case .pinch:
                 let dir = point.position - vertices[i].position
-                vertices[i].position += dir * (1.0 - t) * falloff * p * 0.005
+                vertices[i].position += dir * (1 - t) * falloff * p * Float(0.005)
             case .smooth:
                 let avg = averagePosition(vertices: vertices, index: i, radius: Int(r * 50))
-                vertices[i].position = simd_mix(vertices[i].position, avg, falloff * 0.3)
+                vertices[i].position = simd_mix(vertices[i].position, avg, SIMD3<Float>(repeating: falloff * Float(0.3)))
             case .crease:
                 let localY = simd_cross(simd_cross(point.normal, SIMD3<Float>(0,1,0)), point.normal)
                 let localPos = dot(vertices[i].position - point.position, localY)
-                let creaseAmount = abs(localPos) * 2.0 / r
-                vertices[i].position -= point.normal * creaseAmount * falloff * p * 0.01
+                let creaseAmount = abs(localPos) * Float(2) / r
+                vertices[i].position -= point.normal * creaseAmount * falloff * p * Float(0.01)
             case .grab:
                 let grabDir = point.position - vertices[i].position
-                if simd_length(grabDir) > 0.001 {
-                    vertices[i].position += simd_normalize(grabDir) * falloff * p * 0.01
+                if simd_length(grabDir) > Float(0.001) {
+                    vertices[i].position += simd_normalize(grabDir) * falloff * p * Float(0.01)
                 }
             case .clay:
-                let h2 = (1.0 - t) * falloff * p * 0.01
-                vertices[i].position += point.normal * min(h2, 0.002)
+                let h2 = (1 - t) * falloff * p * Float(0.01)
+                vertices[i].position += point.normal * min(h2, Float(0.002))
             case .airbrush:
-                let jitter = SIMD3<Float>(Float.random(in: -0.001...0.001), Float.random(in: -0.001...0.001), Float.random(in: -0.001...0.001))
-                vertices[i].position += (vertices[i].normal + jitter) * (1.0 - t) * falloff * p * 0.005
+                let jitter = SIMD3<Float>(Float.random(in: -Float(0.001)...Float(0.001)), Float.random(in: -Float(0.001)...Float(0.001)), Float.random(in: -Float(0.001)...Float(0.001)))
+                vertices[i].position += (vertices[i].normal + jitter) * (1 - t) * falloff * p * Float(0.005)
             case .textured:
-                let noise = sin(vertices[i].position.x * 50) * cos(vertices[i].position.y * 50) * sin(vertices[i].position.z * 50) * 0.5 + 0.5
-                vertices[i].position += vertices[i].normal * (1.0 - t) * noise * falloff * p * 0.01
+                let noise = sin(vertices[i].position.x * 50) * cos(vertices[i].position.y * 50) * sin(vertices[i].position.z * 50) * Float(0.5) + Float(0.5)
+                vertices[i].position += vertices[i].normal * (1 - t) * noise * falloff * p * Float(0.01)
             }
             vertices[i].normal = simd_normalize(simd_cross(
                 vertices[(i+1) % vertices.count].position - vertices[i].position,
@@ -118,6 +118,11 @@ class BrushEngine {
         }
     }
     
+    private func smoothstep(_ edge0: Float, _ edge1: Float, _ x: Float) -> Float {
+        let t = min(max((x - edge0) / (edge1 - edge0), 0), 1)
+        return t * t * (3 - 2 * t)
+    }
+
     private func averagePosition(vertices: [Vertex], index: Int, radius: Int) -> SIMD3<Float> {
         var sum = SIMD3<Float>(0,0,0)
         var count: Int = 0
