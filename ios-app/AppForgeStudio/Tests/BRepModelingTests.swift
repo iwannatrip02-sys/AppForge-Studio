@@ -115,10 +115,12 @@ final class BRepModelingTests: XCTestCase {
     func testShellHollowsTheSolid() throws {
         let model = try makeBoxModel(width: 2, height: 2, depth: 2)
         let before = try volume(of: model)
-        XCTAssertTrue(BRepModeling.shell(model, thickness: 0.1))
+        XCTAssertTrue(BRepModeling.shell(model, thickness: 0.1),
+                      "shell con cara abierta automática debe aplicar")
         let after = try volume(of: model)
         XCTAssertLessThan(after, before * 0.6,
                           "el shell vacía el sólido: queda mucho menos material que el sólido lleno")
+        XCTAssertGreaterThan(after, 0.1, "pero las paredes tienen material")
     }
 
     func testApplyFeatureRefreshesMeshInPlace() throws {

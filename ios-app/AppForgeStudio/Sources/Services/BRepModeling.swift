@@ -72,9 +72,21 @@ enum BRepModeling {
     }
 
     /// Vaciado del sólido con grosor de pared dado (B-rep real vía TKOffset).
+    /// Un shell necesita al menos una cara abierta (igual que en Shapr3D);
+    /// sin `openFaceIndex` explícito se abre la cara de mayor área.
     @discardableResult
-    static func shell(_ model: Model, thickness: Double) -> Bool {
-        applyFeature(to: model) { $0.shelled(thickness: thickness) }
+    static func shell(_ model: Model, thickness: Double, openFaceIndex: Int? = nil) -> Bool {
+        applyFeature(to: model) { shape in
+            let faces = shape.faces()
+            let openFace: Face?
+            if let idx = openFaceIndex, idx >= 0, idx < faces.count {
+                openFace = faces[idx]
+            } else {
+                openFace = faces.max(by: { $0.area() < $1.area() })
+            }
+            guard let face = openFace else { return shape.shelled(thickness: thickness) }
+            return shape.shelled(thickness: thickness, openFaces: [face])
+        }
     }
 
     // MARK: - Push/Pull real (la operación insignia de Shapr3D)
