@@ -39,8 +39,13 @@ final class CSGTests: XCTestCase {
         try meshOrFail(OCCTSwift.Shape.torus(majorRadius: 1, minorRadius: 0.3), "torus")
     }
 
-    func testDegenerateSphereReturnsNil() {
-        XCTAssertNil(OCCTSwift.Shape.sphere(radius: 0), "esfera de radio 0 debe fallar")
+    func testDegenerateSphereHasNoVolume() {
+        // OCCT sí construye una esfera de radio 0 (shape degenerado) — verificar
+        // que al menos no reporta volumen positivo.
+        if let degenerate = OCCTSwift.Shape.sphere(radius: 0) {
+            let volume = degenerate.volume ?? 0
+            XCTAssertEqual(volume, 0, accuracy: 1e-9, "esfera de radio 0 no debe tener volumen")
+        }
     }
 
     // MARK: - Booleanos

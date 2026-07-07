@@ -166,6 +166,11 @@ class ExportService {
                 continue
             }
 
+            // Caras huérfanas ya reportadas en Check 2 — no indexar fuera de rango
+            guard Int(a) < vertexCount, Int(b) < vertexCount, Int(c) < vertexCount else {
+                continue
+            }
+
             let pa = mesh.vertices[Int(a)].position
             let pb = mesh.vertices[Int(b)].position
             let pc = mesh.vertices[Int(c)].position
@@ -588,28 +593,50 @@ class ExportService {
 
     private func buildMDLAsset(from model: Model) -> MDLAsset? {
         let asset = MDLAsset()
-        for mesh in model.meshes {
-            let allocator = MTKMeshBufferAllocator(device: device)
-            let vertexData = mesh.vertices.withUnsafeBytes { Data($0) }
+        let allocator = MTKMeshBufferAllocator(device: device)
+        var meshCount = 0
+
+        for mesh in model.meshes where !mesh.vertices.isEmpty && !mesh.indices.isEmpty {
+            // Buffer empaquetado position(3)+normal(3)+uv(2) = 8 floats/vértice.
+            // No volcar Vertex crudo: contiene UUID y padding que ModelIO no entiende.
+            var packed = [Float]()
+            packed.reserveCapacity(mesh.vertices.count * 8)
+            for v in mesh.vertices {
+                packed.append(contentsOf: [
+                    v.position.x, v.position.y, v.position.z,
+                    v.normal.x, v.normal.y, v.normal.z,
+                    v.uv.x, v.uv.y,
+                ])
+            }
+            let vertexData = packed.withUnsafeBytes { Data($0) }
             let indexData = mesh.indices.withUnsafeBytes { Data($0) }
             let vtxBuffer = allocator.newBuffer(with: vertexData, type: .vertex)
             let idxBuffer = allocator.newBuffer(with: indexData, type: .index)
-            let vertexCount = mesh.vertices.count
-            let indexCount = mesh.indices.count
+
+            let descriptor = MDLVertexDescriptor()
+            descriptor.attributes[0] = MDLVertexAttribute(
+                name: MDLVertexAttributePosition, format: .float3, offset: 0, bufferIndex: 0)
+            descriptor.attributes[1] = MDLVertexAttribute(
+                name: MDLVertexAttributeNormal, format: .float3, offset: 12, bufferIndex: 0)
+            descriptor.attributes[2] = MDLVertexAttribute(
+                name: MDLVertexAttributeTextureCoordinate, format: .float2, offset: 24, bufferIndex: 0)
+            descriptor.layouts[0] = MDLVertexBufferLayout(stride: 32)
+
             let mdlMesh = MDLMesh(
                 vertexBuffer: vtxBuffer,
-                vertexCount: vertexCount,
-                descriptor: MDLVertexDescriptor(),
+                vertexCount: mesh.vertices.count,
+                descriptor: descriptor,
                 submeshes: [MDLSubmesh(
                     indexBuffer: idxBuffer,
-                    indexCount: indexCount,
+                    indexCount: mesh.indices.count,
                     indexType: .uInt32,
                     geometryType: .triangles,
                     material: nil
                 )]
             )
             asset.add(mdlMesh)
+            meshCount += 1
         }
-        return asset
+        return meshCount > 0 ? asset : nil
     }
 }
