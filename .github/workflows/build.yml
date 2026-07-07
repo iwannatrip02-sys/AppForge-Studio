@@ -111,8 +111,10 @@ jobs:
           APP=DerivedData/Build/Products/Debug-iphonesimulator/AppForgeStudio.app
           echo "=== Contenido del .app ==="
           ls -la "$APP" || true
-          echo "=== Info.plist procesado ==="
+          echo "=== Info.plist procesado (app) ==="
           plutil -p "$APP/Info.plist" || echo "SIN Info.plist legible"
+          echo "=== Info.plist del xctest plugin ==="
+          plutil -p "$APP/PlugIns/AppForgeStudioTests.xctest/Info.plist" || echo "SIN plist en xctest"
 
       - name: Run Tests (iOS Simulator)
         working-directory: ios-app/AppForgeStudio
