@@ -20,6 +20,7 @@ GOTCHI.md (reglas de trabajo), BRAIN.md (bugs/riesgos con rutas), TODO.md, DECIS
 - `Mesh.indices` es `[UInt32]` (no UInt16) — soporta >65k vértices.
 - Satin (Hi-Rez/Satin 13.0.0, repo archivado) vía SPM pineado a revisión exacta; espejo en `vendor/Satin/`; CI aplica un patch a Satin antes de compilar.
 
+Estado: CI VERDE desde 2026-07-07 (165 tests). Invariantes de CI/firma/bundle que NO deben tocarse: `mem:ci_infra`.
 API del kernel CAD: `mem:occtswift_api` (firmas reales verificadas de OCCTSwift — leer ANTES de escribir código que use Shape/Face/Exporter).
 
 Ver `mem:tech_stack` (stack y dependencias), `mem:suggested_commands` (CI desde Windows), `mem:task_completion` (definición de done sin Mac), `mem:conventions` (estilo Swift del proyecto).
