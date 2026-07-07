@@ -7,6 +7,7 @@ import simd
 ///
 /// Verifies that `rebuildSceneFrom()` is called only when scene structure changes,
 /// not on every transform update or animation frame.
+@MainActor
 final class RendererRegressionTests: XCTestCase {
 
     var device: MTLDevice!
