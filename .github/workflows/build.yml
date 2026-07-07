@@ -97,6 +97,7 @@ jobs:
               -derivedDataPath DerivedData \
               CODE_SIGN_STYLE=Manual \
               CODE_SIGN_IDENTITY=- \
+              OTHER_CODE_SIGN_FLAGS=--deep \
               OTHER_CPLUSPLUSFLAGS='$(inherited) -Wno-c++11-narrowing' \
               2>&1 | tee build.log
           else
@@ -129,6 +130,7 @@ jobs:
             -derivedDataPath DerivedData \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY=- \
+            OTHER_CODE_SIGN_FLAGS=--deep \
             OTHER_CPLUSPLUSFLAGS='$(inherited) -Wno-c++11-narrowing' \
             2>&1 | tee test.log
 
