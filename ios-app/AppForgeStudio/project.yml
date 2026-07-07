@@ -89,7 +89,11 @@ targets:
       - path: Tests
     settings:
       base:
-        INFOPLIST_FILE: AppForgeStudio/Info.plist
+        # Bundle de tests: plist generado y bundle ID propio.
+        # Compartir INFOPLIST_FILE/bundle ID con la app rompe la instalación en simulador.
+        GENERATE_INFOPLIST_FILE: "YES"
+        PRODUCT_BUNDLE_IDENTIFIER: com.appforgestudio.app.tests
+        INFOPLIST_FILE: ""
     dependencies:
       - target: AppForgeStudio
       - package: OCCTSwift
