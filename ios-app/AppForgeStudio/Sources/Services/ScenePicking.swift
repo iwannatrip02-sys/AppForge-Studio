@@ -47,9 +47,12 @@ struct SurfaceHit {
 enum ScenePicker {
 
     /// Hit más cercano del rayo contra las mallas de todos los modelos.
+    /// Los modelos con nombre `__*` son overlays de UI (highlight de cara, gizmos)
+    /// y NO son geometría tocable.
     static func hitTest(models: [Model], ray: CameraRay) -> SurfaceHit? {
         var best: SurfaceHit?
         for (modelIndex, model) in models.enumerated() {
+            guard !model.name.hasPrefix("__") else { continue }
             for mesh in model.meshes {
                 var j = 0
                 while j + 2 < mesh.indices.count {
@@ -87,6 +90,41 @@ enum ScenePicker {
 /// Puente crítico para la manipulación directa estilo Shapr3D: el dedo toca
 /// triángulos, la ingeniería opera sobre caras.
 enum BRepFacePicker {
+
+    /// Malla de highlight para una cara B-rep: los triángulos de la malla de display
+    /// cuyos vértices yacen sobre la cara, desplazados por su normal para evitar
+    /// z-fighting. Es el feedback visual de selección (prioridad 1 del doc de diseño).
+    static func highlightMesh(shape: CADShape, faceIndex: Int, displayMesh: Mesh,
+                              tolerance: Double = 1e-3, offset: Float = 0.002) -> Mesh? {
+        let faces = shape.faces()
+        guard faceIndex >= 0, faceIndex < faces.count else { return nil }
+        let face = faces[faceIndex]
+
+        func liesOnFace(_ p: SIMD3<Float>) -> Bool {
+            let projected = face.project(point: SIMD3<Double>(Double(p.x), Double(p.y), Double(p.z)))
+            guard let projection = projected else { return false }
+            return projection.distance < tolerance
+        }
+
+        var vertices: [Vertex] = []
+        var indices: [UInt32] = []
+        var j = 0
+        while j + 2 < displayMesh.indices.count {
+            let tri = [Int(displayMesh.indices[j]), Int(displayMesh.indices[j + 1]),
+                       Int(displayMesh.indices[j + 2])]
+            j += 3
+            guard tri.allSatisfy({ $0 < displayMesh.vertices.count }),
+                  tri.allSatisfy({ liesOnFace(displayMesh.vertices[$0].position) }) else { continue }
+            let base = UInt32(vertices.count)
+            for vi in tri {
+                var v = displayMesh.vertices[vi]
+                v.position += v.normal * offset
+                vertices.append(v)
+            }
+            indices.append(contentsOf: [base, base + 1, base + 2])
+        }
+        return vertices.isEmpty ? nil : Mesh(vertices: vertices, indices: indices)
+    }
 
     /// Índice de la cara del shape más cercana al punto (proyección de superficie OCCT).
     /// `maxDistance` en unidades de mundo — descarta toques lejos de toda cara.

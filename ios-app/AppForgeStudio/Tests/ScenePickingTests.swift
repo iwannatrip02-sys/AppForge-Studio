@@ -98,4 +98,50 @@ final class ScenePickingTests: XCTestCase {
         XCTAssertNil(BRepFacePicker.faceIndex(of: shape, nearest: SIMD3<Float>(50, 50, 50)),
                      "un punto lejos de toda cara no debe seleccionar nada")
     }
+
+    // MARK: - Highlight de cara (feedback visual de selección)
+
+    func testHighlightMeshCoversOnlyTheSelectedFace() throws {
+        let model = try makeBoxModel()
+        let shape = try XCTUnwrap(model.cadShape)
+        let displayMesh = try XCTUnwrap(model.meshes.first)
+        let topIdx = try XCTUnwrap(BRepModeling.faceIndex(of: shape,
+                                                          withNormal: SIMD3<Double>(0, 0, 1)))
+
+        let highlight = try XCTUnwrap(BRepFacePicker.highlightMesh(
+            shape: shape, faceIndex: topIdx, displayMesh: displayMesh))
+
+        XCTAssertFalse(highlight.vertices.isEmpty, "la cara superior tiene triángulos")
+        XCTAssertLessThan(highlight.vertices.count, displayMesh.vertices.count,
+                          "el highlight NO es la malla entera")
+        for v in highlight.vertices {
+            XCTAssertEqual(v.position.z, 1.0, accuracy: 0.01,
+                           "todos los vértices del highlight están en el plano de la cara (+offset)")
+        }
+    }
+
+    func testHighlightMeshNilForInvalidFace() throws {
+        let model = try makeBoxModel()
+        let shape = try XCTUnwrap(model.cadShape)
+        let displayMesh = try XCTUnwrap(model.meshes.first)
+        XCTAssertNil(BRepFacePicker.highlightMesh(shape: shape, faceIndex: 999,
+                                                  displayMesh: displayMesh))
+    }
+
+    // MARK: - Overlays no tocables
+
+    func testHitTestIgnoresUIOverlayModels() throws {
+        let model = try makeBoxModel()
+        let overlay = try makeBoxModel()
+        overlay.name = "__faceHighlight"
+        // Overlay MÁS CERCA de la cámara: si no se ignorara, ganaría el hit
+        for i in overlay.meshes[0].vertices.indices {
+            overlay.meshes[0].vertices[i].position.z += 5
+        }
+        let ray = CameraRay.from(screenPoint: CGPoint(x: 200, y: 200),
+                                 viewSize: CGSize(width: 400, height: 400),
+                                 camera: topDownCamera())
+        let hit = try XCTUnwrap(ScenePicker.hitTest(models: [overlay, model], ray: ray))
+        XCTAssertEqual(hit.modelIndex, 1, "los overlays __ no capturan toques")
+    }
 }

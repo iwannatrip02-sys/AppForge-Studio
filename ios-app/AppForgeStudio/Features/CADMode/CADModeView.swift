@@ -18,6 +18,10 @@ struct CADModeView: View {
     @StateObject private var constraintEngine = ConstraintEngine()
     @StateObject private var assemblyEngine = AssemblyEngine()
     @StateObject private var pushPullController = PushPullController()
+    @ObservedObject private var brepHistory = BRepHistory.shared
+
+    /// Nombre reservado del modelo overlay de resaltado de cara.
+    private static let faceHighlightName = "__faceHighlight"
     @EnvironmentObject var themeManager: ThemeManager
 
     private var theme: AppTheme { themeManager.currentTheme }
@@ -85,6 +89,7 @@ struct CADModeView: View {
                 if selectedTab == .model {
                     toolbarSection
                     parameterBar
+                    brepHistoryBar
                     if selectedTool == .pushPull {
                         pushPullBar
                     }
@@ -143,7 +148,19 @@ struct CADModeView: View {
             }
         }
         .onChange(of: selectedTool) { newTool in
+            if newTool != .pushPull { pushPullController.clear() }
             executeCADTool(newTool, canvasVM: canvasVM, toolVM: toolVM)
+        }
+        .onChange(of: pushPullController.highlightMesh) { newMesh in
+            // Sincronizar el overlay de resaltado de cara con la selección actual
+            canvasVM.scene.models.removeAll { $0.name == Self.faceHighlightName }
+            if let mesh = newMesh {
+                let overlay = Model(name: Self.faceHighlightName)
+                overlay.meshes = [mesh]
+                overlay.color = SIMD4<Float>(1.0, 0.85, 0.1, 1.0)  // amarillo selección
+                canvasVM.scene.addModel(overlay)
+            }
+            canvasVM.objectWillChange.send()
         }
         .sheet(isPresented: $showMeasurements) {
             NavigationView {
@@ -179,6 +196,40 @@ struct CADModeView: View {
             Spacer()
         }
         .background(theme.surface)
+    }
+
+    /// Undo/redo de operaciones B-rep (features, push/pull). Visible cuando hay historial.
+    @ViewBuilder
+    private var brepHistoryBar: some View {
+        if brepHistory.canUndo || brepHistory.canRedo {
+            HStack(spacing: 14) {
+                Button {
+                    HapticService.shared.light()
+                    if brepHistory.undo() { canvasVM.objectWillChange.send() }
+                } label: {
+                    Label("Deshacer", systemImage: "arrow.uturn.backward")
+                        .font(.caption2)
+                }
+                .disabled(!brepHistory.canUndo)
+
+                Button {
+                    HapticService.shared.light()
+                    if brepHistory.redo() { canvasVM.objectWillChange.send() }
+                } label: {
+                    Label("Rehacer", systemImage: "arrow.uturn.forward")
+                        .font(.caption2)
+                }
+                .disabled(!brepHistory.canRedo)
+
+                Spacer()
+                Text("\(brepHistory.undoCount) ops")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundColor(theme.textSecondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(theme.surfaceSecondary)
+        }
     }
 
     /// Barra del push/pull interactivo: estado de selección + distancia + aplicar.
@@ -970,12 +1021,17 @@ private func executeCADTool(_ tool: CADTool, canvasVM: CanvasViewModel, toolVM: 
     if firstModel.cadShape != nil {
         let applied: Bool
         switch tool {
-        case .fillet:
-            applied = BRepModeling.fillet(firstModel, radius: Double(toolVM.filletRadius))
-        case .chamfer:
-            applied = BRepModeling.chamfer(firstModel, distance: Double(toolVM.chamferRadius))
-        case .shell:
-            applied = BRepModeling.shell(firstModel, thickness: Double(toolVM.shellThickness))
+        case .fillet, .chamfer, .shell:
+            BRepHistory.shared.recordChange(of: firstModel)
+            switch tool {
+            case .fillet:
+                applied = BRepModeling.fillet(firstModel, radius: Double(toolVM.filletRadius))
+            case .chamfer:
+                applied = BRepModeling.chamfer(firstModel, distance: Double(toolVM.chamferRadius))
+            default:
+                applied = BRepModeling.shell(firstModel, thickness: Double(toolVM.shellThickness))
+            }
+            if !applied { BRepHistory.shared.discardLast() }
         default:
             applied = false
         }
