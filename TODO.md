@@ -3,8 +3,12 @@
 > CI VERDE: build + 165 tests (0 fallos) + IPA. PR #6 mergeado a main (ca2ec00).
 
 ## Foco actual
-- Fase de features sobre base verde: conectar touch→sculpt, explotar OCCTSwift real
-  (push/pull con localPrism, drawings DXF/PDF, SheetMetal, FeatureRecognition)
+- FASE A COMPLETA (2026-07-07, PR #7): núcleo B-rep fuente de verdad — Model.cadShape,
+  booleanos OCCT reales entre modelos, push/pull por cara (BRepFeat boss/pocket),
+  fillet/chamfer/shell B-rep in-place, STEP AP214 real. 179 tests verdes con
+  oráculos de volumen exactos.
+- Siguiente (Fase B): UI de selección de caras para push/pull táctil; touch→sculpt;
+  drawings DXF/PDF, SheetMetal, FeatureRecognition (todo ya en el kernel OCCT)
 - Bajar la IPA sin firmar del CI y sideload para probar en iPad real
 
 ## Pendientes
