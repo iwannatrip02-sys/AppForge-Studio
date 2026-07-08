@@ -54,14 +54,30 @@ class CanvasViewModel: ObservableObject {
     
     init() {
         self.scene = Scene3D()
-        let verts = generateSphereVertices(radius: 0.8, segments: 32)
-        var mesh = Mesh(vertices: verts.vertices, indices: verts.indices)
-        if let device = MTLCreateSystemDefaultDevice() {
-            mesh.uploadToGPU(device: device)
+        // Primer objeto = B-rep REAL: el kernel OCCT trabaja desde el segundo cero.
+        // Push/pull, redondear aristas y booleanas funcionan con el primer toque
+        // (antes era una esfera de malla sin B-rep → "este modelo no tiene B-rep"
+        // como primera impresión de la app).
+        if let shape = OCCTEngine.shared.box(width: 1.6, height: 1.6, depth: 1.6),
+           var mesh = OCCTBridge.toMesh(shape, quality: .medium) {
+            if let device = MTLCreateSystemDefaultDevice() {
+                mesh.uploadToGPU(device: device)
+            }
+            let model = Model(name: "Cubo")
+            model.cadShape = shape
+            model.meshes = [mesh]
+            scene.addModel(model)
+        } else {
+            // Fallback defensivo (OCCT no disponible): esfera de malla
+            let verts = generateSphereVertices(radius: 0.8, segments: 32)
+            var mesh = Mesh(vertices: verts.vertices, indices: verts.indices)
+            if let device = MTLCreateSystemDefaultDevice() {
+                mesh.uploadToGPU(device: device)
+            }
+            let model = Model(name: "Esfera")
+            model.meshes = [mesh]
+            scene.addModel(model)
         }
-        let model = Model(name: "Default")
-        model.meshes = [mesh]
-        scene.addModel(model)
     }
 
     func saveState() {

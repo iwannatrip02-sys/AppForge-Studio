@@ -26,4 +26,15 @@ final class AppStateWiringTests: XCTestCase {
             XCTAssertFalse(d.displayNameES.isEmpty, "Deformer \(d.rawValue) sin etiqueta de UI")
         }
     }
+
+    func testInitialSceneHasLiveBRepModel() {
+        // Primera impresión: el objeto inicial debe tener B-rep vivo para que
+        // push/pull y el fillet contextual funcionen con el PRIMER toque.
+        let vm = CanvasViewModel()
+        XCTAssertEqual(vm.scene.models.count, 1, "la escena inicial tiene un objeto")
+        XCTAssertNotNil(vm.scene.models.first?.cadShape,
+                        "el objeto inicial debe ser B-rep (kernel OCCT desde el segundo cero)")
+        XCTAssertFalse(vm.scene.models.first?.meshes.first?.vertices.isEmpty ?? true,
+                       "y su malla de display debe estar triangulada")
+    }
 }
