@@ -18,6 +18,8 @@ struct CADModeView: View {
     @StateObject private var constraintEngine = ConstraintEngine()
     @StateObject private var assemblyEngine = AssemblyEngine()
     @StateObject private var pushPullController = PushPullController()
+    @StateObject private var drawingExportController = DrawingExportController()
+    @StateObject private var featureReportController = FeatureReportController()
     @ObservedObject private var brepHistory = BRepHistory.shared
 
     /// Nombre reservado del modelo overlay de resaltado de cara.
@@ -42,6 +44,9 @@ struct CADModeView: View {
     @State private var isExtruding: Bool = false
     @State private var showCADTimeline: Bool = false
     @State private var csgStatusMessage: String = ""
+    @State private var showDrawingExportBar: Bool = false
+    @State private var showFeatureReport: Bool = false
+    @State private var showShareSheet: Bool = false
 
     private var isSketchTool: Bool {
         selectedTool.isSketchTool
@@ -64,6 +69,12 @@ struct CADModeView: View {
     }
 
     @State private var primitiveSize: Float = 1.0
+
+    /// Primer modelo de la escena que conserva su B-rep vivo (nil si ninguno).
+    /// Usado por la barra de planos y el botón de features para habilitar/deshabilitar.
+    private var firstBRepModel: Model? {
+        canvasVM.scene.models.first(where: { $0.cadShape != nil })
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -92,6 +103,9 @@ struct CADModeView: View {
                     brepHistoryBar
                     if selectedTool == .pushPull {
                         pushPullBar
+                    }
+                    if showDrawingExportBar {
+                        drawingExportBar
                     }
                     ZStack {
                         ContentView(canvasVM: canvasVM, renderer: renderer, onSurfaceHit: { hit in
@@ -180,6 +194,15 @@ struct CADModeView: View {
             CADTimelineView(historyTree: sketchEngine.historyTree)
                 .environmentObject(themeManager)
         }
+        .sheet(isPresented: $showFeatureReport) {
+            FeatureReportView(controller: featureReportController)
+                .environmentObject(themeManager)
+        }
+        .sheet(isPresented: $showShareSheet) {
+            if let url = drawingExportController.exportURL {
+                ShareSheet(items: [url])
+            }
+        }
     }
 
     private var tabSelector: some View {
@@ -258,6 +281,64 @@ struct CADModeView: View {
             }
             .font(.caption.bold())
             .disabled(!pushPullController.hasSelection)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(theme.surfaceSecondary)
+    }
+
+    /// Barra contextual de exportación de planos (DXF/PDF): selector de vista + botones de formato.
+    /// Aparece cuando el usuario activa el botón de plano en el animationRow.
+    /// El share sheet se presenta automáticamente tras un export exitoso.
+    private var drawingExportBar: some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 8) {
+                Image(systemName: drawingExportController.exportURL != nil
+                      ? "checkmark.circle.fill" : "doc.viewfinder")
+                    .foregroundColor(drawingExportController.exportURL != nil
+                                     ? theme.success : theme.accent)
+                Text(drawingExportController.statusMessage)
+                    .font(.caption2)
+                    .foregroundColor(theme.textSecondary)
+                    .lineLimit(1)
+                Spacer()
+                if drawingExportController.isBusy {
+                    ProgressView().controlSize(.mini)
+                }
+            }
+            HStack(spacing: 8) {
+                Text("Vista:").font(.caption2).foregroundColor(theme.textSecondary)
+                Picker("Vista", selection: $drawingExportController.selectedView) {
+                    ForEach(DrawingExportService.StandardView.allCases, id: \.self) { v in
+                        Text(v.displayName).tag(v)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: drawingExportController.selectedView) { _ in
+                    // Limpiar URL anterior cuando el usuario cambia la vista proyectada
+                    drawingExportController.reset()
+                }
+                Spacer()
+                Button("DXF") {
+                    HapticService.shared.medium()
+                    if let model = firstBRepModel {
+                        let ok = drawingExportController.exportDXF(model: model)
+                        if ok { showShareSheet = true }
+                    }
+                }
+                .font(.caption.bold())
+                .disabled(drawingExportController.isBusy || firstBRepModel == nil)
+
+                Button("PDF") {
+                    HapticService.shared.medium()
+                    if let model = firstBRepModel {
+                        let ok = drawingExportController.exportPDF(model: model)
+                        if ok { showShareSheet = true }
+                    }
+                }
+                .font(.caption.bold())
+                .disabled(drawingExportController.isBusy || firstBRepModel == nil)
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -578,6 +659,33 @@ struct CADModeView: View {
                     .foregroundColor(theme.accent)
             }
             .disabled(canvasVM.scene.models.isEmpty)
+
+            Button(action: {
+                HapticService.shared.light()
+                if showDrawingExportBar { drawingExportController.reset() }
+                showDrawingExportBar.toggle()
+            }) {
+                Image(systemName: "doc.viewfinder")
+                    .font(.system(size: 11))
+                    .foregroundColor(showDrawingExportBar ? theme.accent
+                                     : (firstBRepModel != nil ? theme.textPrimary : theme.textSecondary))
+            }
+            .disabled(firstBRepModel == nil)
+            .help("Exportar plano DXF / PDF")
+
+            Button(action: {
+                HapticService.shared.light()
+                if let model = firstBRepModel {
+                    featureReportController.analyze(model: model)
+                    showFeatureReport = true
+                }
+            }) {
+                Image(systemName: "wand.and.rays")
+                    .font(.system(size: 11))
+                    .foregroundColor(firstBRepModel != nil ? theme.accent : theme.textSecondary)
+            }
+            .disabled(firstBRepModel == nil)
+            .help("Reconocer features de fabricación")
         }.padding(.horizontal, 6).padding(.vertical, 2)
     }
 
@@ -1007,6 +1115,20 @@ class PencilForceView: UIView {
             }
         }
     }
+}
+
+// MARK: - Share Sheet (UIActivityViewController wrapper)
+
+/// Envuelve UIActivityViewController para presentarlo como sheet de SwiftUI.
+/// Usado por la barra de exportación de planos para compartir el archivo generado.
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 // MARK: - CAD Tool Execution

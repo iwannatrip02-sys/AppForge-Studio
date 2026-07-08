@@ -1,6 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import QuickLook
+import Metal
+import MetalKit
 import OSLog
 
 private let logger = Logger(subsystem: "com.appforgestudio", category: "ExportView")
@@ -57,6 +59,9 @@ struct CircularProgressView: View {
 struct ExportView: View {
     @EnvironmentObject var themeManager: ThemeManager
     @ObservedObject var exportVM: ExportViewModel
+    /// CanvasViewModel al que se añaden los modelos importados.
+    /// Nil-safe: el botón funciona aunque no haya escena activa (informa al usuario).
+    var canvasVM: CanvasViewModel? = nil
 
     private var theme: AppTheme { themeManager.currentTheme }
     @State private var showFileExporter = false
@@ -71,6 +76,10 @@ struct ExportView: View {
     @State private var validationReport: String = ""
     @State private var showValidationWarning = false
     @State private var isExporting = false
+    // Import
+    @State private var showFileImporter = false
+    @State private var importStatusMessage: String? = nil
+    @State private var importHadError = false
 
     var body: some View {
         ZStack {
@@ -78,6 +87,9 @@ struct ExportView: View {
                 VStack(spacing: 24) {
                     // Header with tap-to-rotate icon
                     headerSection
+
+                    // Import de modelos externos
+                    importSection
 
                     // Model preview
                     modelPreviewSection
@@ -140,6 +152,13 @@ struct ExportView: View {
                     .edgesIgnoringSafeArea(.all)
             }
         }
+        .fileImporter(
+            isPresented: $showFileImporter,
+            allowedContentTypes: importFileTypes,
+            allowsMultipleSelection: false
+        ) { result in
+            handleImportResult(result)
+        }
         .onChange(of: exportVM.isExporting) { newValue in
             if !newValue && isExporting {
                 // Export finished
@@ -160,6 +179,19 @@ struct ExportView: View {
         }
     }
 
+    // MARK: - Tipos de archivo permitidos para importar
+
+    /// Tipos UTType que ModelLoadService puede cargar vía MDLAsset.
+    private var importFileTypes: [UTType] {
+        [
+            UTType(filenameExtension: "obj") ?? .data,
+            UTType(filenameExtension: "stl") ?? .data,
+            UTType(filenameExtension: "gltf") ?? .data,
+            UTType(filenameExtension: "fbx") ?? .data,
+            UTType(filenameExtension: "usdz") ?? .data,
+        ]
+    }
+
     // MARK: - Header
 
     private var headerSection: some View {
@@ -174,6 +206,102 @@ struct ExportView: View {
             Text("Exporta tu modelo 3D para impresión 3D o CAD").font(.caption).foregroundColor(theme.textSecondary)
         }
         .padding(.top, 32)
+    }
+
+    // MARK: - Sección Importar
+
+    /// Botón para importar un modelo externo (OBJ, STL, GLTF, FBX, USDZ).
+    /// Usa fileImporter que maneja el security-scoped resource obligatorio en iOS.
+    private var importSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Importar").font(.caption).foregroundColor(theme.textSecondary).padding(.leading, 4)
+
+            Button(action: {
+                HapticService.shared.light()
+                importStatusMessage = nil
+                importHadError = false
+                showFileImporter = true
+            }) {
+                Label("Importar modelo 3D", systemImage: "square.and.arrow.down")
+                    .font(.subheadline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(theme.surfaceSecondary)
+                    .foregroundColor(theme.textPrimary)
+                    .cornerRadius(theme.cornerRadiusSmall)
+            }
+            .buttonStyle(.plain)
+
+            if let msg = importStatusMessage {
+                Text(msg)
+                    .font(.caption2)
+                    .foregroundColor(importHadError ? theme.destructive : theme.success)
+                    .padding(.horizontal, 4)
+                    .transition(.opacity)
+            }
+        }
+        .padding(.horizontal)
+        .animation(AppTheme.animSmooth, value: importStatusMessage)
+    }
+
+    // MARK: - Manejador de importación
+
+    /// Procesa el resultado de fileImporter: accede al recurso con security scope,
+    /// carga la malla vía ModelLoadService y añade el Model a la escena activa.
+    private func handleImportResult(_ result: Result<[URL], Error>) {
+        switch result {
+        case .failure(let error):
+            importHadError = true
+            importStatusMessage = "Error al seleccionar archivo: \(error.localizedDescription)"
+            HapticService.shared.medium()
+
+        case .success(let urls):
+            guard let url = urls.first else { return }
+
+            // fileImporter en iOS exige acceder al recurso con security scope
+            let accessGranted = url.startAccessingSecurityScopedResource()
+            defer {
+                if accessGranted { url.stopAccessingSecurityScopedResource() }
+            }
+
+            guard let device = MTLCreateSystemDefaultDevice() else {
+                importHadError = true
+                importStatusMessage = "Error: Metal no disponible en este dispositivo"
+                return
+            }
+
+            let loader = ModelLoadService(device: device)
+            let loadResult = loader.loadModel(url: url)
+
+            switch loadResult {
+            case .success(let model):
+                if let cv = canvasVM {
+                    cv.scene.addModel(model)
+                    cv.objectWillChange.send()
+                    exportVM.selectedModel = model
+                    importHadError = false
+                    importStatusMessage = "Modelo '\(url.lastPathComponent)' importado y añadido a la escena"
+                } else {
+                    // Sin canvasVM disponible: informar pero no fallar
+                    exportVM.selectedModel = model
+                    importHadError = false
+                    importStatusMessage = "Modelo '\(url.lastPathComponent)' cargado (sin escena activa para añadirlo)"
+                }
+                HapticService.shared.medium()
+
+            case .failure(let loadError):
+                importHadError = true
+                switch loadError {
+                case .fileNotFound(let name):
+                    importStatusMessage = "Archivo no encontrado: \(name)"
+                case .invalidFormat(let msg):
+                    importStatusMessage = "Formato no soportado: \(msg)"
+                case .meshCreationFailed(let msg):
+                    importStatusMessage = "Error al crear la malla: \(msg)"
+                }
+                HapticService.shared.medium()
+            }
+        }
     }
 
     // MARK: - Model Preview
