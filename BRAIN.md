@@ -81,13 +81,18 @@ ios-app/AppForgeStudio/
 
 ## BUGS CONOCIDOS PENDIENTES
 
-| Bug | Archivo | Severidad |
-|-----|---------|-----------|
-| BUG1: Layout GPU PBR (float3 padding) | SatinRenderer.swift | CRITICO |
-| BUG2: updateAnimation doble por frame | SatinRenderer.swift | CRITICO |
-| BUG5: Normal matrix escala no-uniforme | Shaders.metal | ALTO |
-| BUG7: Grab deformer direccion contraria | SculptEngine.swift | CORREGIDO F0 — usa dragDelta con fallback |
-| BUG9: rebuildSceneFrom cada frame | SatinRenderer.swift | CORREGIDO F0 — transforms in-place, rebuild solo con structureChanged |
+(vacío 2026-07-08 — auditoría de la tabla: TODAS las entradas eran fantasma)
+
+| Bug | Veredicto auditoría 2026-07-08 |
+|-----|-------------------------------|
+| BUG1: Layout GPU PBR (float3 padding) | YA RESUELTO — GPUPBRMaterial con _pad explícitos (stride 52 = Metal); GPUStructLayoutTests blinda 11 invariantes |
+| BUG2: updateAnimation doble por frame | YA RESUELTO — un solo call site (update() L871); render(in:) no lo llama |
+| BUG5: Normal matrix escala no-uniforme | YA RESUELTO — .inverse.transpose en ambos pipelines (L976-980, L1049-1054); NormalMatrixTests.swift (4 tests) lo blinda ahora |
+| BUG7: Grab deformer direccion contraria | CORREGIDO F0 — usa dragDelta con fallback |
+| BUG9: rebuildSceneFrom cada frame | CORREGIDO F0 — transforms in-place, rebuild solo con structureChanged |
+| "GLTF no escribe .bin" (TODO.md) | FANTASMA — el path escribe el .bin desde hace tiempo; lo débil era el test (reforzado en ExportServiceTests) |
+
+Lección: BRAIN/TODO acumulan entradas obsoletas — VERIFICAR contra el código antes de "corregir" un bug listado.
 
 ## RIESGOS (F2 wave)
 

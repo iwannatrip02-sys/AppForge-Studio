@@ -33,17 +33,13 @@
 - [x] Tests pasan en iOS Simulator via CI *(done 2026-07-07 — 165/165)*
 - [ ] Obtener cuenta Apple Developer ($99/año) para firmar y deployar
 - [ ] O conseguir Mac/Mac mini para compilar + sideloading gratuito (AltStore, 7 días)
-- [ ] Conectar sculpt al touch — los 10 deformers existen pero MetalView nunca los llama. rayTriangleIntersect() existe pero no se usa
+- [x] Agregar botón "Import" con fileImporter → ModelLoadService *(done 2026-07-08, ola 1C beta: ExportView, security-scoped, OBJ/STL/GLTF/FBX/USDZ)*
+- [x] Arreglar export GLTF *(FANTASMA — el .bin sí se escribía; test fuerte añadido 2026-07-08)*
+- [x] BUG1/BUG2/BUG5 render *(auditoría 2026-07-08: los 3 YA estaban resueltos en código; NormalMatrixTests añadido como blindaje — ver BRAIN.md)*
+- [x] BUG3 UInt16→UInt32, BUG7 grab, BUG9 rebuild *(corregidos pre-F0/F0)*
+- [ ] Conectar sculpt al touch — VERIFICAR (MetalView.handlePan tiene path de sculpt con raycast; auditar si los 10 deformers reciben strokes de verdad)
 - [ ] Activar botones de HybridMode — Remesh, Color, Tamaño, Opacidad, Loop Cut, Bisel (engines implementados, closures vacíos)
-- [ ] Agregar botón "Import" con fileImporter → ModelLoadService (el engine existe, falta UI)
-- [ ] Arreglar export GLTF (escribe JSON pero nunca escribe el buffer .bin)
-- [ ] Implementar filleted/chamfered/shelled/extruded/revolved/swept reales en Shape (actualmente son stubs identidad)
-- [ ] Corregir BUG1: layout GPU PBR (float3 padding a 16 bytes)
-- [ ] Corregir BUG2: updateAnimation() doble por frame
-- [ ] Corregir BUG3: UInt16 → UInt32 para mallas >65k vértices
-- [ ] Corregir BUG5: normal matrix bajo escala no-uniforme
-- [ ] Corregir BUG7: grab deformer dirección contraria
-- [ ] Corregir BUG9: rebuildSceneFrom llamado cada frame (60 allocs/seg)
+- [ ] Implementar filleted/chamfered/shelled/extruded/revolved/swept reales en Shape BSP legacy (stubs identidad) — o retirar el path legacy (el real es B-rep vía BRepModeling)
 - Actualizar GOTCHI.md: Stack local dice Satin 0.3.0 pero Package.swift usa 13.0.0
 - Resolver Hi-Rez-Satin/ untracked: es symlink roto, submodule, o archivo corrupto?
 
