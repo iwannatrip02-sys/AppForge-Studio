@@ -57,6 +57,8 @@ struct CADModeView: View {
     @State private var showDrawingExportBar: Bool = false
     @State private var showFeatureReport: Bool = false
     @State private var showShareSheet: Bool = false
+    /// Dispara el flash "templado" (IDENTIDAD_FORGE §6) al confirmar push/pull.
+    @State private var temperTick: Int = 0
 
     private var isSketchTool: Bool {
         selectedTool.isSketchTool
@@ -124,6 +126,24 @@ struct CADModeView: View {
                             if selectedTool == .pushPull {
                                 pushPullController.selectFace(from: hit, in: canvasVM.scene.models)
                             }
+                        },
+                        // Tap 2 dedos = deshacer: primero el historial B-rep (features),
+                        // si no hay, el de escena. Tap 3 dedos = rehacer.
+                        onUndoGesture: {
+                            HapticService.shared.light()
+                            if BRepHistory.shared.canUndo {
+                                if BRepHistory.shared.undo() { canvasVM.objectWillChange.send() }
+                            } else {
+                                canvasVM.undo()
+                            }
+                        },
+                        onRedoGesture: {
+                            HapticService.shared.light()
+                            if BRepHistory.shared.canRedo {
+                                if BRepHistory.shared.redo() { canvasVM.objectWillChange.send() }
+                            } else {
+                                canvasVM.redo()
+                            }
                         })
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                         SnapGuideOverlay(
@@ -162,11 +182,7 @@ struct CADModeView: View {
                                 showSnapOverlay = false
                             }
                     )
-                    .onTapGesture(count: 2) {
-                        HapticService.shared.medium()
-                        canvasVM.resetView()
-                        canvasVM.objectWillChange.send()
-                    }
+                    // (El doble tap = encuadrar vive en MetalView — gesto universal.)
                     bottomBar
                 } else {
                     parametricView
@@ -289,14 +305,17 @@ struct CADModeView: View {
                 HapticService.shared.medium()
                 if pushPullController.apply() {
                     canvasVM.objectWillChange.send()
+                    temperTick += 1  // el metal se templó: operación sólida
                 }
             }
             .font(.caption.bold())
+            .foregroundColor(pushPullController.distance >= 0 ? theme.accent : AppTheme.accentMuted)
             .disabled(!pushPullController.hasSelection)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(theme.surfaceSecondary)
+        .tempered(trigger: temperTick)
     }
 
     /// Barra contextual de exportación de planos (DXF/PDF): selector de vista + botones de formato.

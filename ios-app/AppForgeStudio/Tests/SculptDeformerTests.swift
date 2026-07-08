@@ -285,4 +285,30 @@ final class SculptDeformerTests: XCTestCase {
                 "Vertex \(i) beyond radius should be untouched")
         }
     }
+
+    // MARK: - Pincel inverso (Ola 2, BLUEPRINT N2)
+
+    /// Fuerza negativa = pincel invertido: inflate debe DESINFLAR (mover contra
+    /// la normal). Blindaje del botón +/- de SculptModeView (signedStrength).
+    func testNegativeStrengthInvertsInflate() {
+        var vertices = makeQuadVertices()
+        let engine = makeEngine(deformer: .inflate)
+        engine.strength = -1.0
+
+        // Punto ligeramente sobre el quad: todos los vértices quedan dentro del
+        // radio (2.0) y a dist > 0 (applyDeformer excluye dist == 0).
+        let point = SculptPoint(
+            position: SIMD3<Float>(0.5, 0.5, 0.1),
+            normal: SIMD3<Float>(0, 0, 1),
+            pressure: 1.0,
+            dragDelta: .zero
+        )
+        engine.apply(at: point, to: &vertices)
+
+        // Normales +Z y fuerza negativa → los vértices bajan en Z (desinflar).
+        for (i, v) in vertices.enumerated() {
+            XCTAssertLessThan(v.position.z, 1e-6,
+                "Vertex \(i): con strength negativa, inflate debe mover en -Z (desinflar)")
+        }
+    }
 }

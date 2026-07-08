@@ -16,6 +16,10 @@ struct ContentView: View {
     var onSurfaceHit: ((SurfaceHit) -> Void)? = nil
     /// Activa el router drag-sobre-geometría = esculpir (solo modos Sculpt/Hybrid).
     var sculptEnabled: Bool = false
+    /// Undo/redo por gesto (tap 2/3 dedos). nil = undo de escena (canvasVM).
+    /// CADModeView enchufa BRepHistory; SculptModeView enchufa el stack del SculptEngine.
+    var onUndoGesture: (() -> Void)? = nil
+    var onRedoGesture: (() -> Void)? = nil
     @EnvironmentObject var themeManager: ThemeManager
 
     @State private var currentStroke: BrushStroke?
@@ -26,7 +30,10 @@ struct ContentView: View {
                 var s = canvasVM.scene
                 s.strokes = newVal
                 canvasVM.scene = s
-            }), renderer: renderer, animationEngine: canvasVM.animationEngine, onTouch3D: handleTouch, onSurfaceHit: onSurfaceHit, metalBackground: themeManager.currentTheme.metalBackground, sculptEnabled: sculptEnabled)
+            }), renderer: renderer, animationEngine: canvasVM.animationEngine, onTouch3D: handleTouch, onSurfaceHit: onSurfaceHit, metalBackground: themeManager.currentTheme.metalBackground, sculptEnabled: sculptEnabled,
+                onUndoGesture: onUndoGesture ?? { HapticService.shared.light(); canvasVM.undo() },
+                onRedoGesture: onRedoGesture ?? { HapticService.shared.light(); canvasVM.redo() },
+                onFrameGesture: { HapticService.shared.medium(); canvasVM.resetView() })
                 .edgesIgnoringSafeArea(.all)
 
             VStack {

@@ -56,6 +56,11 @@ struct MetalView: UIViewRepresentable {
     /// drag sobre vacío = orbitar. Solo el modo dueño del sculpt lo activa;
     /// en CAD/Animation/Render el drag de 1 dedo siempre orbita.
     var sculptEnabled: Bool = false
+    /// Gestos globales (BLUEPRINT S9/N7): tap 2 dedos = deshacer, 3 = rehacer,
+    /// doble tap = encuadrar. Cada modo enchufa su undo (B-rep, sculpt o escena).
+    var onUndoGesture: (() -> Void)?
+    var onRedoGesture: (() -> Void)?
+    var onFrameGesture: (() -> Void)?
 
     func makeCoordinator() -> Coordinator {
         let c = Coordinator(
@@ -67,6 +72,9 @@ struct MetalView: UIViewRepresentable {
         )
         c.onSurfaceHit = onSurfaceHit
         c.sculptEnabled = sculptEnabled
+        c.onUndoGesture = onUndoGesture
+        c.onRedoGesture = onRedoGesture
+        c.onFrameGesture = onFrameGesture
         return c
     }
     
@@ -94,6 +102,9 @@ struct MetalView: UIViewRepresentable {
         renderer.animationEngine = animationEngine
         renderer.playbackController = playbackController
         context.coordinator.sculptEnabled = sculptEnabled
+        context.coordinator.onUndoGesture = onUndoGesture
+        context.coordinator.onRedoGesture = onRedoGesture
+        context.coordinator.onFrameGesture = onFrameGesture
         uiView.backgroundColor = metalBackground
         uiView.setNeedsDisplay()
     }
@@ -111,6 +122,14 @@ struct MetalView: UIViewRepresentable {
         var onSurfaceHit: ((SurfaceHit) -> Void)?
         var onPinchExtrude: ((Float, Float) -> Void)?  // (distance, taper)
         var sculptEnabled: Bool = false
+        var onUndoGesture: (() -> Void)?
+        var onRedoGesture: (() -> Void)?
+        var onFrameGesture: (() -> Void)?
+        /// Pencil = SIEMPRE herramienta, nunca orbita (BLUEPRINT S1).
+        /// Se captura en shouldReceive porque los recognizers no exponen el touch.
+        private var lastTouchWasPencil = false
+        /// Presión del trazo (pencil: force real; dedo: 1.0) → SculptPoint.pressure.
+        private var strokePressure: Float = 1.0
         
         private var lastPanLocation: CGPoint = .zero
         private var orbitSpherical: (theta: Float, phi: Float, radius: Float) = (0, .pi / 4, 5.0)
@@ -151,10 +170,40 @@ struct MetalView: UIViewRepresentable {
             let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
             tap.delegate = self
             view.addGestureRecognizer(tap)
+
+            // Gestos globales (BLUEPRINT S9/N7). El tap simple NO espera al doble
+            // (require(toFail:) metería ~300ms de latencia en cada selección — Shapr3D
+            // selecciona instantáneo); doble tap = seleccionar y encuadrar, inofensivo.
+            let undoTap = UITapGestureRecognizer(target: self, action: #selector(handleUndoTap(_:)))
+            undoTap.numberOfTouchesRequired = 2
+            undoTap.delegate = self
+            view.addGestureRecognizer(undoTap)
+
+            let redoTap = UITapGestureRecognizer(target: self, action: #selector(handleRedoTap(_:)))
+            redoTap.numberOfTouchesRequired = 3
+            redoTap.delegate = self
+            view.addGestureRecognizer(redoTap)
+
+            let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
+            doubleTap.numberOfTapsRequired = 2
+            doubleTap.delegate = self
+            view.addGestureRecognizer(doubleTap)
         }
-        
+
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
             true
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            lastTouchWasPencil = (touch.type == .pencil)
+            if lastTouchWasPencil, touch.maximumPossibleForce > 0 {
+                // force llega a 0 al inicio del toque: clamp para no matar el trazo.
+                strokePressure = max(0.2, Float(touch.force / touch.maximumPossibleForce))
+                if touch.force == 0 { strokePressure = 1.0 }
+            } else {
+                strokePressure = 1.0
+            }
+            return true
         }
         
         // MARK: - Gesture Handlers
@@ -178,18 +227,19 @@ struct MetalView: UIViewRepresentable {
                         let point = SculptPoint(
                             position: hit.position,
                             normal: hit.normal,
-                            pressure: 1.0,
+                            pressure: strokePressure,
                             dragDelta: .zero
                         )
                         renderer.sculptEngine?.pendingStrokes.append(point)
                         renderer.brushCursorPosition = hit.position
                         renderer.brushCursorRadius = renderer.sculptEngine?.radius ?? 0.05
                         onSculptStroke?(point)
-                    } else {
+                    } else if !lastTouchWasPencil {
+                        // Pencil nunca orbita (S1): dedo en vacío = cámara, pencil = nada.
                         isOrbiting = true
                     }
                 } else if singleFinger {
-                    isOrbiting = true
+                    if !lastTouchWasPencil { isOrbiting = true }
                 } else {
                     isPanning = true
                 }
@@ -206,7 +256,7 @@ struct MetalView: UIViewRepresentable {
                         let point = SculptPoint(
                             position: hit.position,
                             normal: hit.normal,
-                            pressure: 1.0,
+                            pressure: strokePressure,
                             dragDelta: dragDelta
                         )
                         renderer.sculptEngine?.pendingStrokes.append(point)
@@ -271,6 +321,18 @@ struct MetalView: UIViewRepresentable {
                 isExtruding = false
             default: break
             }
+        }
+
+        @objc private func handleUndoTap(_ gesture: UITapGestureRecognizer) {
+            onUndoGesture?()
+        }
+
+        @objc private func handleRedoTap(_ gesture: UITapGestureRecognizer) {
+            onRedoGesture?()
+        }
+
+        @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+            onFrameGesture?()
         }
 
         @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
