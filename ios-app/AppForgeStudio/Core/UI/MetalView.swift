@@ -76,7 +76,9 @@ struct MetalView: UIViewRepresentable {
         v.delegate = context.coordinator
         v.backgroundColor = metalBackground
         v.depthStencilPixelFormat = .depth32Float
-        v.clearColor = MTLClearColor(red: 0.09, green: 0.10, blue: 0.12, alpha: 1.0)
+        // bgCanvas #0A0B10 (IDENTIDAD_FORGE §3): el viewport es el punto más oscuro
+        // de la app — el modelo iluminado por PBR/IBL es el héroe.
+        v.clearColor = MTLClearColor(red: 0.039, green: 0.043, blue: 0.063, alpha: 1.0)
         v.enableSetNeedsDisplay = true
         v.isPaused = false
         v.isMultipleTouchEnabled = true

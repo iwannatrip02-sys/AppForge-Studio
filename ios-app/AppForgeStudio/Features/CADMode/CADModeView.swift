@@ -183,7 +183,7 @@ struct CADModeView: View {
             if let mesh = newMesh {
                 let overlay = Model(name: Self.faceHighlightName)
                 overlay.meshes = [mesh]
-                overlay.color = SIMD4<Float>(1.0, 0.85, 0.1, 1.0)  // amarillo selección
+                overlay.color = SIMD4<Float>(1.0, 0.48, 0.27, 1.0)  // brasa: selección activa (IDENTIDAD_FORGE §2)
                 canvasVM.scene.addModel(overlay)
             }
             canvasVM.objectWillChange.send()
