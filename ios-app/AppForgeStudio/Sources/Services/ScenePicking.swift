@@ -143,3 +143,77 @@ enum BRepFacePicker {
         return bestDistance <= maxDistance ? bestIndex : nil
     }
 }
+
+// MARK: - Picker de aristas B-rep
+
+/// Del punto de impacto a la ARISTA B-rep más cercana. Fundamento del menú
+/// adaptativo (BLUEPRINT S2): tocar cerca de una arista ofrece fillet/chamfer;
+/// lejos de toda arista, la selección es de cara. API Edge verificada @v1.8.8:
+/// `Shape.edges() -> [Edge]`, `Edge.project(point:) -> CurveProjection?`.
+enum BRepEdgePicker {
+
+    /// Índice de la arista más cercana al punto (proyección de curva OCCT).
+    /// `maxDistance` más apretado que el de cara: una arista es un objetivo fino
+    /// y solo debe ganar cuando el toque es claramente sobre ella.
+    static func edgeIndex(of shape: CADShape, nearest point: SIMD3<Float>,
+                          maxDistance: Double = 0.03) -> Int? {
+        let p = SIMD3<Double>(Double(point.x), Double(point.y), Double(point.z))
+        var bestIndex: Int?
+        var bestDistance = Double.greatestFiniteMagnitude
+        for (i, edge) in shape.edges().enumerated() {
+            guard let projection = edge.project(point: p) else { continue }
+            if projection.distance < bestDistance {
+                bestDistance = projection.distance
+                bestIndex = i
+            }
+        }
+        return bestDistance <= maxDistance ? bestIndex : nil
+    }
+
+    /// Polilínea muestreada de la arista (para el overlay de highlight en el render).
+    static func polyline(of shape: CADShape, edgeIndex: Int,
+                         samples: Int = 32) -> [SIMD3<Float>]? {
+        let edges = shape.edges()
+        guard edgeIndex >= 0, edgeIndex < edges.count else { return nil }
+        let pts = edges[edgeIndex].points(count: samples)
+        guard !pts.isEmpty else { return nil }
+        return pts.map { SIMD3<Float>(Float($0.x), Float($0.y), Float($0.z)) }
+    }
+
+    /// Malla de highlight para una arista: tubo cuadrado delgado a lo largo de la
+    /// curva (el render dibuja mallas, no líneas). Feedback visual de selección.
+    static func highlightTube(shape: CADShape, edgeIndex: Int,
+                              radius: Float = 0.012) -> Mesh? {
+        guard let pts = polyline(of: shape, edgeIndex: edgeIndex), pts.count >= 2 else {
+            return nil
+        }
+        var vertices: [Vertex] = []
+        var indices: [UInt32] = []
+
+        for i in 0..<(pts.count - 1) {
+            let p0 = pts[i], p1 = pts[i + 1]
+            let dir = simd_normalize(p1 - p0)
+            // Perpendiculares estables: elegir el eje mundial menos alineado con dir
+            let ref: SIMD3<Float> = abs(dir.x) < 0.9 ? SIMD3<Float>(1, 0, 0) : SIMD3<Float>(0, 1, 0)
+            let u = simd_normalize(simd_cross(dir, ref)) * radius
+            let v = simd_normalize(simd_cross(dir, u)) * radius
+
+            let base = UInt32(vertices.count)
+            for p in [p0, p1] {
+                for offset in [u, v, -u, -v] {
+                    vertices.append(Vertex(position: p + offset,
+                                           normal: simd_normalize(offset), uv: .zero))
+                }
+            }
+            // 4 caras laterales del prisma (anillo p0: base+0..3, anillo p1: base+4..7)
+            for k in 0..<4 {
+                let a = base + UInt32(k)
+                let b = base + UInt32((k + 1) % 4)
+                let c = a + 4
+                let d = b + 4
+                indices.append(contentsOf: [a, b, c, b, d, c])
+            }
+        }
+        return Mesh(vertices: vertices, indices: indices)
+    }
+}

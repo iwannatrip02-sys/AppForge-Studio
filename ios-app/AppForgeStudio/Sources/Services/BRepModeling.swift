@@ -71,6 +71,17 @@ enum BRepModeling {
         applyFeature(to: model) { $0.chamfered(distance: distance) }
     }
 
+    /// Fillet selectivo de UNA arista (menú adaptativo: tocar arista → redondear).
+    /// API verificada @v1.8.8: `Shape.filleted(edges: [Edge], radius:) -> Shape?`.
+    @discardableResult
+    static func filletEdge(_ model: Model, edgeIndex: Int, radius: Double) -> Bool {
+        applyFeature(to: model) { shape in
+            let edges = shape.edges()
+            guard edgeIndex >= 0, edgeIndex < edges.count else { return nil }
+            return shape.filleted(edges: [edges[edgeIndex]], radius: radius)
+        }
+    }
+
     /// Vaciado del sólido con grosor de pared dado (B-rep real vía TKOffset).
     /// Un shell necesita al menos una cara abierta (igual que en Shapr3D);
     /// sin `openFaceIndex` explícito se abre la cara de mayor área.

@@ -18,12 +18,15 @@ struct CADModeView: View {
     @StateObject private var constraintEngine = ConstraintEngine()
     @StateObject private var assemblyEngine = AssemblyEngine()
     @StateObject private var pushPullController = PushPullController()
+    @StateObject private var edgeFilletController = EdgeFilletController()
     @StateObject private var drawingExportController = DrawingExportController()
     @StateObject private var featureReportController = FeatureReportController()
     @ObservedObject private var brepHistory = BRepHistory.shared
 
     /// Nombre reservado del modelo overlay de resaltado de cara.
     private static let faceHighlightName = "__faceHighlight"
+    /// Nombre reservado del overlay de resaltado de arista.
+    private static let edgeHighlightName = "__edgeHighlight"
     @EnvironmentObject var themeManager: ThemeManager
 
     /// Init explícito: los @State/@StateObject privados hacen privado el init
@@ -118,6 +121,9 @@ struct CADModeView: View {
                     if selectedTool == .pushPull {
                         pushPullBar
                     }
+                    if edgeFilletController.hasSelection {
+                        edgeFilletBar
+                    }
                     if showDrawingExportBar {
                         drawingExportBar
                     }
@@ -125,6 +131,12 @@ struct CADModeView: View {
                         ContentView(canvasVM: canvasVM, renderer: renderer, onSurfaceHit: { hit in
                             if selectedTool == .pushPull {
                                 pushPullController.selectFace(from: hit, in: canvasVM.scene.models)
+                            } else if selectedTool == .select {
+                                // Menú adaptativo (BLUEPRINT S2): tocar cerca de una
+                                // arista la selecciona y ofrece redondear; lejos, limpia.
+                                if edgeFilletController.selectEdge(from: hit, in: canvasVM.scene.models) {
+                                    HapticService.shared.light()
+                                }
                             }
                         },
                         // Tap 2 dedos = deshacer: primero el historial B-rep (features),
@@ -191,6 +203,7 @@ struct CADModeView: View {
         }
         .onChange(of: selectedTool) { newTool in
             if newTool != .pushPull { pushPullController.clear() }
+            if newTool != .select { edgeFilletController.clear() }
             executeCADTool(newTool, canvasVM: canvasVM, toolVM: toolVM)
         }
         .onChange(of: pushPullController.highlightMesh) { newMesh in
@@ -200,6 +213,17 @@ struct CADModeView: View {
                 let overlay = Model(name: Self.faceHighlightName)
                 overlay.meshes = [mesh]
                 overlay.color = SIMD4<Float>(1.0, 0.48, 0.27, 1.0)  // brasa: selección activa (IDENTIDAD_FORGE §2)
+                canvasVM.scene.addModel(overlay)
+            }
+            canvasVM.objectWillChange.send()
+        }
+        .onChange(of: edgeFilletController.highlightMesh) { newMesh in
+            // Overlay del tubo de arista seleccionada (brasa, no tocable por "__")
+            canvasVM.scene.models.removeAll { $0.name == Self.edgeHighlightName }
+            if let mesh = newMesh {
+                let overlay = Model(name: Self.edgeHighlightName)
+                overlay.meshes = [mesh]
+                overlay.color = SIMD4<Float>(1.0, 0.48, 0.27, 1.0)
                 canvasVM.scene.addModel(overlay)
             }
             canvasVM.objectWillChange.send()
@@ -311,6 +335,43 @@ struct CADModeView: View {
             .font(.caption.bold())
             .foregroundColor(pushPullController.distance >= 0 ? theme.accent : AppTheme.accentMuted)
             .disabled(!pushPullController.hasSelection)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(theme.surfaceSecondary)
+        .tempered(trigger: temperTick)
+    }
+
+    /// Barra contextual de arista (menú adaptativo, BLUEPRINT S2): aparece al tocar
+    /// una arista con Select; radio en vivo + Redondear (fillet B-rep selectivo).
+    private var edgeFilletBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "angle")
+                .foregroundColor(theme.accent)
+            Text(edgeFilletController.statusMessage)
+                .font(.caption2)
+                .foregroundColor(theme.textSecondary)
+                .lineLimit(1)
+            Spacer()
+            Slider(value: $edgeFilletController.radius, in: 0.01...0.5)
+                .frame(width: 130)
+            Text(String(format: "%.2f", edgeFilletController.radius))
+                .font(.caption2.monospacedDigit())
+                .frame(width: 40)
+                .foregroundColor(theme.accent)
+            Button("Redondear") {
+                HapticService.shared.medium()
+                if edgeFilletController.applyFillet() {
+                    canvasVM.objectWillChange.send()
+                    temperTick += 1
+                }
+            }
+            .font(.caption.bold())
+            Button(action: { edgeFilletController.clear() }) {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundColor(theme.textSecondary)
+            }
+            .accessibilityLabel("Cancelar selección de arista")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
