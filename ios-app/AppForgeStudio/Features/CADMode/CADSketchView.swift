@@ -75,39 +75,41 @@ struct CADSketchView: View {
                 .padding(.horizontal, 2)
 
             ForEach(SketchTool.allCases, id: \.self) { tool in
-                Button(action: { selectedTool = tool }) {
-                    Text(tool.rawValue)
-                        .font(.system(size: 11))
+                Button(action: { HapticService.shared.light(); selectedTool = tool }) {
+                    Text(tool.displayName)
+                        .font(.system(size: 11, weight: selectedTool == tool ? .semibold : .regular))
                         .padding(.horizontal, 6).padding(.vertical, 3)
-                        .background(selectedTool == tool ? Color.blue : themeManager.currentTheme.surfaceSecondary)
-                        .foregroundColor(themeManager.currentTheme.textPrimary).cornerRadius(5)
+                        .background(selectedTool == tool ? themeManager.currentTheme.accent.opacity(0.15) : Color.clear)
+                        .foregroundColor(selectedTool == tool ? themeManager.currentTheme.accent : themeManager.currentTheme.textSecondary)
+                        .cornerRadius(AppTheme.radiusSM)
                 }
             }
             Spacer()
 
             Button(action: {
                 sketchEngine.pencilMode.toggle()
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                HapticService.shared.light()
             }) {
                 Image(systemName: sketchEngine.pencilMode ? "pencil.tip" : "pencil")
                     .font(.system(size: 13))
-                    .foregroundColor(sketchEngine.pencilMode ? .blue : themeManager.currentTheme.textPrimary)
+                    .foregroundColor(sketchEngine.pencilMode ? themeManager.currentTheme.accent : themeManager.currentTheme.textPrimary)
             }
 
             Button(action: {
                 sketchEngine.resolvePendingConstraints()
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                HapticService.shared.medium()
             }) {
-                Text("Resolve")
+                Text("Resolver")
                     .font(.system(size: 10))
                     .padding(.horizontal, 6).padding(.vertical, 3)
-                    .background(Color.green.opacity(0.2))
-                    .foregroundColor(.green)
-                    .cornerRadius(5)
+                    .background(themeManager.currentTheme.success.opacity(0.15))
+                    .foregroundColor(themeManager.currentTheme.success)
+                    .cornerRadius(AppTheme.radiusSM)
             }
-            Button(action: { sketchEngine.clearAll() }) {
-                Image(systemName: "trash").foregroundColor(.red)
+            Button(action: { HapticService.shared.heavy(); sketchEngine.clearAll() }) {
+                Image(systemName: "trash").foregroundColor(themeManager.currentTheme.error)
             }
+            .accessibilityLabel("Borrar boceto")
         }
         .padding(.horizontal, 6).padding(.vertical, 3)
         .background(themeManager.currentTheme.surface)
@@ -176,15 +178,15 @@ struct CADSketchView: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 1) {
-                Text("Constraints: \(sketchEngine.constraintManager.activeConstraintCount)/\(sketchEngine.constraintManager.constraintCount)")
+                Text("Restricciones: \(sketchEngine.constraintManager.activeConstraintCount)/\(sketchEngine.constraintManager.constraintCount)")
                     .font(.system(size: 9))
                     .foregroundColor(themeManager.currentTheme.textSecondary)
                 if sketchEngine.constraintManager.constraintCount > 0 {
                     HStack(spacing: 2) {
                         Circle()
-                            .fill(sketchEngine.solverConverged ? Color.green : Color.orange)
+                            .fill(sketchEngine.solverConverged ? themeManager.currentTheme.success : themeManager.currentTheme.warning)
                             .frame(width: 5, height: 5)
-                        Text(sketchEngine.solverConverged ? "Converged" : "Not resolved")
+                        Text(sketchEngine.solverConverged ? "Resuelto" : "Sin resolver")
                             .font(.system(size: 8))
                             .foregroundColor(themeManager.currentTheme.textSecondary)
                     }

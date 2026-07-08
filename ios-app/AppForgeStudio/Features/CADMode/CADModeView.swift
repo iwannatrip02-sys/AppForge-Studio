@@ -7,6 +7,13 @@ private let logger = Logger(subsystem: "com.appforgestudio", category: "CADModeV
 enum CADModeTab: String, CaseIterable {
     case model = "Model"
     case parametric = "Parametric"
+
+    var displayName: String {
+        switch self {
+        case .model: return "Modelar"
+        case .parametric: return "Historial"
+        }
+    }
 }
 
 struct CADModeView: View {
@@ -74,15 +81,20 @@ struct CADModeView: View {
     private var cadTools: [CADTool] {
         // .loft excluido: LoftEngine espera [Wire] y el puente Vertex→Wire no existe
         // aún (F3) — no se muestran herramientas sin efecto real.
-        [.extrude, .loopCut, .bevel, .booleanUnion, .booleanSubtract, .booleanIntersect, .fillet, .chamfer, .shell, .sweep, .measure]
+        // .pushPull PRIMERO: es el flujo estrella (tap cara → boss/pocket) y estuvo
+        // INALCANZABLE hasta 2026-07-08 (no aparecía en ninguna lista del toolbar).
+        [.pushPull, .extrude, .loopCut, .bevel, .booleanUnion, .booleanSubtract, .booleanIntersect, .fillet, .chamfer, .shell, .sweep, .measure]
     }
 
     private var sketchTools: [CADTool] {
         [.line, .circle, .rectangle, .arc, .dimension, .constraint]
     }
 
-    private var primitiveTools: [(label: String, icon: String)] {
-        [("Box", "cube"), ("Sphere", "globe"), ("Cylinder", "cylinder"), ("Cone", "cone"), ("Torus", "torus")]
+    /// `id` alimenta la lógica (performAddPrimitive); `label` es lo visible.
+    private var primitiveTools: [(id: String, label: String, icon: String)] {
+        [("Box", "Caja", "cube"), ("Sphere", "Esfera", "globe"),
+         ("Cylinder", "Cilindro", "cylinder"), ("Cone", "Cono", "cone"),
+         ("Torus", "Toro", "torus")]
     }
 
     @State private var primitiveSize: Float = 1.0
@@ -260,12 +272,13 @@ struct CADModeView: View {
     private var tabSelector: some View {
         HStack(spacing: 0) {
             ForEach(CADModeTab.allCases, id: \.self) { tab in
-                Button(action: { selectedTab = tab }) {
-                    Text(tab.rawValue)
-                        .font(.system(size: 10))
+                Button(action: { HapticService.shared.light(); selectedTab = tab }) {
+                    Text(tab.displayName)
+                        .font(.system(size: 10, weight: selectedTab == tab ? .semibold : .regular))
                         .padding(.horizontal, 12).padding(.vertical, 4)
-                        .background(selectedTab == tab ? theme.accent : theme.surfaceSecondary)
-                        .foregroundColor(theme.textPrimary)
+                        .background(selectedTab == tab ? theme.accent.opacity(0.15) : Color.clear)
+                        .foregroundColor(selectedTab == tab ? theme.accent : theme.textSecondary)
+                        .cornerRadius(theme.cornerRadiusSmall)
                 }
             }
             Spacer()
@@ -440,7 +453,7 @@ struct CADModeView: View {
     private var parametricView: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Operation Timeline")
+                Text("Historial de operaciones")
                     .font(.caption)
                     .foregroundColor(theme.textPrimary)
                 Spacer()
@@ -510,33 +523,27 @@ struct CADModeView: View {
                         toolButton(tool)
                     }
                     theme.border.frame(width: 1, height: 20).padding(.horizontal, 4)
-                    // --- Primitive creation buttons (F3.T2) ---
+                    // --- Primitivas B-rep (nacen exactas; se escalan con la herramienta) ---
                     ForEach(primitiveTools.indices, id: \.self) { idx in
                         let prim = primitiveTools[idx]
                         Button(action: {
                             HapticService.shared.light()
-                            performAddPrimitive(prim.label)
+                            performAddPrimitive(prim.id)
                         }) {
-                            HStack(spacing: 2) {
+                            VStack(spacing: 2) {
                                 Image(systemName: prim.icon)
-                                    .font(.system(size: 8))
+                                    .font(.system(size: 15))
                                 Text(prim.label)
-                                    .font(.system(size: 9))
+                                    .font(.system(size: 8, weight: .medium))
+                                    .lineLimit(1)
                             }
-                            .padding(.horizontal, 5).padding(.vertical, 3)
-                            .background(theme.surfaceSecondary)
-                            .foregroundColor(theme.textPrimary).cornerRadius(theme.cornerRadiusSmall)
+                            .frame(width: 56, height: 40)
+                            .foregroundColor(theme.textSecondary)
+                            .toolbarGlow(active: false)
                         }
                         .accessibilityLabel("Agregar \(prim.label)")
                         .dynamicTypeSize(...DynamicTypeSize.xLarge)
                     }
-                    // --- Size slider for primitives ---
-                    Slider(value: $primitiveSize, in: 0.2...3.0)
-                        .frame(width: 80)
-                    Text(String(format: "%.1f", primitiveSize))
-                        .font(.system(size: 8))
-                        .foregroundColor(theme.textSecondary)
-                        .frame(width: 22)
                     theme.border.frame(width: 1, height: 20).padding(.horizontal, 4)
                     ForEach(sketchTools, id: \.self) { tool in
                         toolButton(tool)
@@ -555,17 +562,24 @@ struct CADModeView: View {
             toolVM.selectedTool = tool
             if tool == .booleanUnion || tool == .booleanSubtract || tool == .booleanIntersect {
                 startCSGOperation(tool)
-            } else if tool != .select && tool != .move && tool != .rotate && tool != .scale {
+            } else if tool != .select && tool != .move && tool != .rotate && tool != .scale && tool != .pushPull {
+                // Select/transform/pushPull son MODOS (esperan un toque en geometría);
+                // el resto ejecuta al instante.
                 executeSelectedTool()
             }
         }) {
-            Text(tool.rawValue)
-                .font(.system(size: 9))
-                .padding(.horizontal, 5).padding(.vertical, 3)
-                .background(selectedTool == tool ? theme.accent : theme.surfaceSecondary)
-                .foregroundColor(theme.textPrimary).cornerRadius(theme.cornerRadiusSmall)
+            VStack(spacing: 2) {
+                Image(systemName: tool.icon)
+                    .font(.system(size: 15, weight: selectedTool == tool ? .medium : .regular))
+                Text(tool.displayName)
+                    .font(.system(size: 8, weight: .medium))
+                    .lineLimit(1)
+            }
+            .frame(width: 56, height: 40)
+            .foregroundColor(selectedTool == tool ? theme.accent : theme.textSecondary)
+            .toolbarGlow(active: selectedTool == tool)
         }
-        .accessibilityLabel("Herramienta \(tool.rawValue)")
+        .accessibilityLabel("Herramienta \(tool.displayName)")
         .dynamicTypeSize(...DynamicTypeSize.xLarge)
     }
 
@@ -689,52 +703,19 @@ struct CADModeView: View {
         }
     }
 
+    /// Fila de utilidades: agrupar, historial, exports, features. Los booleanos
+    /// viven SOLO en el toolbar de herramientas (antes había una segunda copia aquí
+    /// con comportamiento distinto — dos caminos para la misma acción es un bug de UX).
     private var animationRow: some View {
         HStack {
-            Button(action: {
-                let clip = AnimationClip(name: "CAD_" + UUID().uuidString.prefix(8), duration: 2.0)
-                animationVM.registerClip(clip)
-                animationVM.selectedClipName = clip.name
-            }) {
-                Image(systemName: "play.rectangle")
-                    .foregroundColor(canvasVM.scene.models.isEmpty ? theme.textSecondary : theme.accent)
-            }
-            .disabled(canvasVM.scene.models.isEmpty)
-            Text(animationVM.isPlaying ? "Playing" : "Anim").font(.system(size: 9))
-
-            theme.border.frame(width: 1, height: 16).padding(.horizontal, 3)
-
-            Button(action: { performBooleanUnion() }) {
-                Image(systemName: "square.on.square")
-                    .font(.system(size: 11))
-                    .foregroundColor(canvasVM.scene.models.count >= 2 ? .cyan : theme.textSecondary)
-            }
-            .disabled(canvasVM.scene.models.count < 2)
-            .help("Boolean Union")
-
-            Button(action: { performBooleanSubtract() }) {
-                Image(systemName: "square.slash")
-                    .font(.system(size: 11))
-                    .foregroundColor(canvasVM.scene.models.count >= 2 ? .orange : theme.textSecondary)
-            }
-            .disabled(canvasVM.scene.models.count < 2)
-            .help("Boolean Subtract")
-
-            Button(action: { performBooleanIntersect() }) {
-                Image(systemName: "square.on.circle")
-                    .font(.system(size: 11))
-                    .foregroundColor(canvasVM.scene.models.count >= 2 ? .purple : theme.textSecondary)
-            }
-            .disabled(canvasVM.scene.models.count < 2)
-            .help("Boolean Intersect")
-
             Button(action: { performGroupAssembly() }) {
                 Image(systemName: "rectangle.3.group")
                     .font(.system(size: 11))
-                    .foregroundColor(canvasVM.scene.models.count >= 2 ? .green : theme.textSecondary)
+                    .foregroundColor(canvasVM.scene.models.count >= 2 ? theme.accent : theme.textSecondary)
             }
             .disabled(canvasVM.scene.models.count < 2)
-            .help("Agrupar Assembly")
+            .help("Agrupar ensamblaje")
+            .accessibilityLabel("Agrupar ensamblaje")
 
             Spacer()
 
@@ -884,53 +865,10 @@ struct CADModeView: View {
         HapticService.shared.selection()
     }
 
-    @MainActor
-    private func performBooleanUnion() {
-        performBoolean(.booleanUnion, description: "Union de 2 modelos", namePrefix: "Union")
-    }
-
-    @MainActor
-    private func performBooleanSubtract() {
-        performBoolean(.booleanSubtract, description: "Diferencia de 2 modelos", namePrefix: "Subtract")
-    }
-
-    @MainActor
-    private func performBooleanIntersect() {
-        performBoolean(.booleanIntersect, description: "Interseccion de 2 modelos", namePrefix: "Intersect")
-    }
-
-    /// Booleano entre los dos primeros modelos: B-rep real (OCCT) si ambos lo tienen,
-    /// fallback al motor de mallas si no.
-    @MainActor
-    private func performBoolean(_ op: CADOperationType, description: String, namePrefix: String) {
-        guard canvasVM.scene.models.count >= 2 else { return }
-        let modelA = canvasVM.scene.models[0]
-        let modelB = canvasVM.scene.models[1]
-
-        sketchEngine.logOperation(type: op, description: description)
-
-        if let brepResult = BRepModeling.boolean(op, modelA, modelB) {
-            canvasVM.scene.addModel(brepResult)
-            canvasVM.objectWillChange.send()
-            return
-        }
-
-        // Fallback malla (modelos importados/esculpidos sin B-rep)
-        let meshA = modelA.meshes.first ?? Mesh()
-        let meshB = modelB.meshes.first ?? Mesh()
-        guard !meshA.vertices.isEmpty, !meshB.vertices.isEmpty else { return }
-        let engine = BooleanEngine()
-        let result: Mesh
-        switch op {
-        case .booleanSubtract: result = engine.booleanDifference(a: meshA, b: meshB)
-        case .booleanIntersect: result = engine.booleanIntersection(a: meshA, b: meshB)
-        default: result = engine.booleanUnion(a: meshA, b: meshB)
-        }
-        let model = Model(name: "\(namePrefix)_\(UUID().uuidString.prefix(8))")
-        model.meshes = [result]
-        canvasVM.scene.addModel(model)
-        canvasVM.objectWillChange.send()
-    }
+    // (performBoolean y sus 3 wrappers eliminados 2026-07-08: eran el segundo camino
+    // de booleanos — actuaban sobre "los dos primeros modelos" sin selección, con
+    // comportamiento distinto al toolbar. Dos caminos para la misma acción es un bug
+    // de UX. El flujo canónico es startCSGOperation → performCSGWithSelectedShapes.)
 
     private func performGroupAssembly() {
         guard canvasVM.scene.models.count >= 2 else { return }
@@ -970,7 +908,7 @@ struct CADModeView: View {
 
         guard let validShape = shape,
               let mesh = OCCTBridge.toMesh(validShape, quality: .medium) else {
-            csgStatusMessage = "Failed to create \(type)"
+            csgStatusMessage = "No se pudo crear la primitiva"
             return
         }
 
@@ -992,7 +930,7 @@ struct CADModeView: View {
         toolVM.csgActiveOperation = tool
         toolVM.csgShapeAIndex = nil
         toolVM.csgShapeBIndex = nil
-        csgStatusMessage = "Select Shape A"
+        csgStatusMessage = "Selecciona la pieza A"
     }
 
     private func resetCSGSelection() {
@@ -1012,13 +950,13 @@ struct CADModeView: View {
             var next = (current + 1) % count
             if next == toolVM.csgShapeBIndex { next = (next + 1) % count }
             toolVM.csgShapeAIndex = next
-            csgStatusMessage = toolVM.csgShapeBIndex != nil ? "Ready to execute" : "Select Shape B"
+            csgStatusMessage = toolVM.csgShapeBIndex != nil ? "Listo para aplicar" : "Selecciona la pieza B"
         } else {
             let current = toolVM.csgShapeBIndex ?? -1
             var next = (current + 1) % count
             if next == toolVM.csgShapeAIndex { next = (next + 1) % count }
             toolVM.csgShapeBIndex = next
-            csgStatusMessage = toolVM.csgShapeAIndex != nil ? "Ready to execute" : "Select Shape A"
+            csgStatusMessage = toolVM.csgShapeAIndex != nil ? "Listo para aplicar" : "Selecciona la pieza A"
         }
     }
 
@@ -1033,7 +971,7 @@ struct CADModeView: View {
               let meshB = canvasVM.scene.models[idxB].meshes.first
         else { return }
 
-        csgStatusMessage = "Applying..."
+        csgStatusMessage = "Aplicando…"
         let operation = selectedTool
 
         let opType: CADOperationType
@@ -1085,17 +1023,17 @@ struct CADModeView: View {
 
         let csgLabel: String = {
             switch selectedTool {
-            case .booleanUnion: return "Union"
-            case .booleanSubtract: return "Subtract"
-            case .booleanIntersect: return "Intersect"
-            default: return "CSG"
+            case .booleanUnion: return "Unión"
+            case .booleanSubtract: return "Resta"
+            case .booleanIntersect: return "Intersección"
+            default: return "Booleana"
             }
         }()
         let bgColor: Color = theme.surfaceSecondary
 
         VStack(spacing: 2) {
             HStack {
-                Text("CSG \(csgLabel)")
+                Text("Booleana · \(csgLabel)")
                     .font(.caption).bold().foregroundColor(theme.textPrimary)
                 Spacer()
                 Text(csgStatusMessage)
@@ -1148,7 +1086,7 @@ struct CADModeView: View {
         .background(bgColor)
         .onAppear {
             if csgStatusMessage.isEmpty {
-                csgStatusMessage = "Select Shape A"
+                csgStatusMessage = "Selecciona la pieza A"
             }
         }
     }

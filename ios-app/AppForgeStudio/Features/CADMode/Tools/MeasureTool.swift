@@ -50,7 +50,8 @@ struct MeasureTool: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 2)
-                .background(Color.orange.opacity(0.08))
+                // Acero: una medida es dato exacto, no acción (IDENTIDAD_FORGE §2)
+                .background(AppTheme.steel.opacity(0.10))
             }
 
             GeometryReader { geometry in

@@ -29,6 +29,37 @@ enum CADTool: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// Nombre visible en la UI (convención: español; rawValue queda como id estable).
+    var displayName: String {
+        switch self {
+        case .select: return "Seleccionar"
+        case .move: return "Mover"
+        case .rotate: return "Rotar"
+        case .scale: return "Escalar"
+        case .extrude: return "Extruir"
+        case .revolve: return "Revolución"
+        case .loopCut: return "Corte"
+        case .bevel: return "Bisel"
+        case .booleanUnion: return "Unir"
+        case .booleanSubtract: return "Restar"
+        case .booleanIntersect: return "Intersecar"
+        case .pushPull: return "Push/Pull"
+        case .fillet: return "Redondear"
+        case .chamfer: return "Chaflán"
+        case .shell: return "Vaciar"
+        case .loft: return "Loft"
+        case .sweep: return "Barrer"
+        case .measure: return "Medir"
+        case .sketch: return "Boceto"
+        case .line: return "Línea"
+        case .circle: return "Círculo"
+        case .rectangle: return "Rectángulo"
+        case .arc: return "Arco"
+        case .dimension: return "Cota"
+        case .constraint: return "Restricción"
+        }
+    }
+
     var isSketchTool: Bool {
         switch self {
         case .line, .circle, .rectangle, .arc, .dimension, .constraint:

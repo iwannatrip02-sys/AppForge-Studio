@@ -26,8 +26,8 @@ struct ConstraintOverlayView: View {
     }
 
     private var overlayColor: Color {
-        if activeConstraints.isEmpty { return Color.green }
-        return constraintManager.lastSolve.converged ? Color.green : Color.red
+        if activeConstraints.isEmpty { return AppTheme.successColor }
+        return constraintManager.lastSolve.converged ? AppTheme.successColor : AppTheme.errorColor
     }
 
     var body: some View {

@@ -131,14 +131,14 @@ struct CADNodeRow: View {
 
                 if isCurrent {
                     Circle()
-                        .fill(Color.blue)
+                        .fill(AppTheme.accentColor)
                         .frame(width: 6, height: 6)
                 }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
             .padding(.leading, CGFloat(depth) * 20)
-            .background(isCurrent ? Color.blue.opacity(0.08) : Color.clear)
+            .background(isCurrent ? AppTheme.accentColor.opacity(0.08) : Color.clear)
             .contentShape(Rectangle())
             .onTapGesture {
                 historyTree.selectedNodeID = node.id

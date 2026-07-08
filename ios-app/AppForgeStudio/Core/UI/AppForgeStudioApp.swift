@@ -11,10 +11,14 @@ struct AppForgeStudioApp: App {
             if showOnboarding {
                 OnboardingFlow(showOnboarding: $showOnboarding)
                     .environmentObject(appState.themeManager)
+                    .tint(AppTheme.accentColor)
             } else {
                 WorkspaceView(appState: appState)
                     .environmentObject(appState.themeManager)
                     .preferredColorScheme(.dark)
+                    // Tint global: TODOS los controles del sistema (sliders, toggles,
+                    // borderedProminent) hablan brasa, no el azul de iOS.
+                    .tint(AppTheme.accentColor)
             }
         }
     }
@@ -28,7 +32,7 @@ struct OnboardingFlow: View {
     let pages = [
         ("cube.transparent.fill", "CAD Profesional", "Open CASCADE 8.0 kernel.\nBooleanas exactas. STEP/IGES.\nPrecisión industrial."),
         ("scribble.variable", "Escultura Libre", "10 deformers. Dynamic topology.\nVoxel remesh. Subdivisión.\nComo Nomad, pero con CAD."),
-        ("paintbrush.pointed.fill", "Pintura PBR", "IBL pipeline. Metal compute.\nMateriales físicos en tiempo real.\nTu modelo, terminado."),
+        ("paintbrush.pointed.fill", "Materiales PBR", "Render IBL en tiempo real.\nPresets físicos de material.\nTu modelo, listo para enseñar."),
         ("gearshape.2.fill", "Listo", "Todo en una app. Gratis. Open-source.\nPara iPad. Sin suscripciones.")
     ]
     var body: some View {
@@ -160,8 +164,8 @@ struct BottomModeBar: View {
 
     let modes: [(AppState.AppMode, String, String)] = [
         (.cad, "cube.transparent", "CAD"),
-        (.sculpt, "scribble.variable", "Sculpt"),
-        (.paint, "paintbrush.pointed", "Paint"),
+        (.sculpt, "scribble.variable", "Esculpir"),
+        (.paint, "paintbrush.pointed", "Pintar"),
         (.hybrid, "square.3.layers.3d", "Híbrido"),
         (.animation, "film", "Animar"),
         (.render, "camera.aperture", "Render"),
