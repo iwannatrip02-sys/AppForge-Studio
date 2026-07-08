@@ -235,6 +235,8 @@ class SatinRenderer: NSObject, ObservableObject {
         mtkView.framebufferOnly = false
         mtkView.enableSetNeedsDisplay = true
         mtkView.isPaused = false
+        mtkView.depthStencilPixelFormat = .depth32Float
+        mtkView.clearColor = MTLClearColor(red: 0.09, green: 0.10, blue: 0.12, alpha: 1.0)
         setup()
     }
 
@@ -953,6 +955,14 @@ class SatinRenderer: NSObject, ObservableObject {
             cursorObject?.visible = false
         }
 
+        // Los pipelines declaran depthAttachmentPixelFormat = .depth32Float: si la vista
+        // no aporta depth buffer, el pass es incompatible y la GPU descarta TODOS los draws
+        // (viewport negro en device; invisible en tests porque sin drawable no hay pass).
+        if view.depthStencilPixelFormat != .depth32Float {
+            view.depthStencilPixelFormat = .depth32Float
+            logger.warning("[Render] vista sin depth buffer — corregido a depth32Float")
+        }
+
         guard let drawable = view.currentDrawable,
               let descriptor = view.currentRenderPassDescriptor,
               let commandBuffer = commandQueue.makeCommandBuffer(),
@@ -1082,6 +1092,11 @@ class SatinRenderer: NSObject, ObservableObject {
 
         encoder.endEncoding()
         commandBuffer.present(drawable)
+        commandBuffer.addCompletedHandler { cb in
+            if let error = cb.error {
+                logger.error("[Render] command buffer falló en GPU: \(error.localizedDescription)")
+            }
+        }
         commandBuffer.commit()
     }
 

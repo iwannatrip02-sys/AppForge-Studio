@@ -70,6 +70,8 @@ struct MetalView: UIViewRepresentable {
         v.device = MTLCreateSystemDefaultDevice()
         v.delegate = context.coordinator
         v.backgroundColor = metalBackground
+        v.depthStencilPixelFormat = .depth32Float
+        v.clearColor = MTLClearColor(red: 0.09, green: 0.10, blue: 0.12, alpha: 1.0)
         v.enableSetNeedsDisplay = true
         v.isPaused = false
         v.isMultipleTouchEnabled = true
