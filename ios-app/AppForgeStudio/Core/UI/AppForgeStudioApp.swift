@@ -74,7 +74,7 @@ struct WorkspaceView: View {
             modeContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .overlay(alignment: .bottomTrailing) {
-                    ViewCube(canvasVM: appState.canvasVM)
+                    ViewCubeControl(canvasVM: appState.canvasVM)
                         .padding(.trailing, AppTheme.space3)
                         .padding(.bottom, 64)
                 }
@@ -119,8 +119,9 @@ struct WorkspaceView: View {
 // MARK: - VIEW CUBE (control de cámara real)
 
 /// Antes decorativo (chevrons sin acción). Ahora: chevrons orbitan ~45°,
-/// el cubo central re-encuadra la escena.
-struct ViewCube: View {
+/// el cubo central re-encuadra la escena. (ViewCubeControl y no ViewCube:
+/// ese nombre ya lo usa el modelo de ViewportFeatures.swift.)
+struct ViewCubeControl: View {
     let canvasVM: CanvasViewModel
     /// ≈45° con la sensibilidad de orbitCamera (0.005 rad/pt).
     private let step: CGFloat = 157

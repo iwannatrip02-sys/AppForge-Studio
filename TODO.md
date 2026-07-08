@@ -3,6 +3,22 @@
 > CI VERDE: build + 205 tests (0 fallos) + IPA. Rama feature/fase-c (PR #9), adelantada a main.
 
 ## Foco actual
+- FASE D EN CURSO (2026-07-08, ola 1 commit 06e4133): UI real, cero fachada.
+  - [x] DESCUBRIMIENTO CLAVE: el chrome (WorkspaceView) era una MAQUETA — ignoraba
+    selectedMode y ninguna vista de Features/ se instanciaba jamás. Reconectado:
+    cada modo monta su vista real (CAD/Sculpt/Paint/Híbrido/Animar/Render).
+  - [x] BUG raíz sculpt: renderer.setSculptEngine() no se llamaba desde ningún
+    sitio — esculpir con el dedo estuvo muerto SIEMPRE. AppState posee e inyecta
+    el engine (test AppStateWiringTests).
+  - [x] Router de gestos v1 (contrato DISENO_INTERFAZ §3) + picking unificado en
+    ScenePicker (raycast duplicado de MetalView eliminado; ya no esculpía overlays).
+  - [x] Doble manejo de cámara eliminado (DragGesture SwiftUI vs pan UIKit competían).
+  - [x] 10 deformers cableados (selector Sculpt + menú Hybrid); Remesh voxel real;
+    sliders radio/fuerza/simetría sincronizados al engine.
+  - [x] Purga: maqueta (LeftToolbar/FloatingParams/RightProperties/pills falsas) +
+    7 archivos de chrome huérfano; Loft oculto hasta F3; ViewCube funcional.
+  - [ ] Siguiente ola: rediseño chrome CADModeView (rail izquierdo, barras efímeras),
+    drag-en-cara push/pull en vivo (device), pintura real (F3).
 - FASE A COMPLETA (2026-07-07, PR #7): núcleo B-rep fuente de verdad — Model.cadShape,
   booleanos OCCT reales entre modelos, push/pull por cara (BRepFeat boss/pocket),
   fillet/chamfer/shell B-rep in-place, STEP AP214 real. 179 tests verdes con
@@ -37,8 +53,8 @@
 - [x] Arreglar export GLTF *(FANTASMA — el .bin sí se escribía; test fuerte añadido 2026-07-08)*
 - [x] BUG1/BUG2/BUG5 render *(auditoría 2026-07-08: los 3 YA estaban resueltos en código; NormalMatrixTests añadido como blindaje — ver BRAIN.md)*
 - [x] BUG3 UInt16→UInt32, BUG7 grab, BUG9 rebuild *(corregidos pre-F0/F0)*
-- [ ] Conectar sculpt al touch — VERIFICAR (MetalView.handlePan tiene path de sculpt con raycast; auditar si los 10 deformers reciben strokes de verdad)
-- [ ] Activar botones de HybridMode — Remesh, Color, Tamaño, Opacidad, Loop Cut, Bisel (engines implementados, closures vacíos)
+- [x] Conectar sculpt al touch *(RESUELTO 2026-07-08 Fase D: la causa era que setSculptEngine nunca se llamaba — el path de MetalView estaba bien pero el engine era nil)*
+- [x] Activar botones de HybridMode *(2026-07-08 Fase D: deformers y Remesh cableados; Loop Cut/Bisel ya llamaban executeCADTool; Color/Rellenar eliminados hasta pintura real F3)*
 - [ ] Implementar filleted/chamfered/shelled/extruded/revolved/swept reales en Shape BSP legacy (stubs identidad) — o retirar el path legacy (el real es B-rep vía BRepModeling)
 - Actualizar GOTCHI.md: Stack local dice Satin 0.3.0 pero Package.swift usa 13.0.0
 - Resolver Hi-Rez-Satin/ untracked: es symlink roto, submodule, o archivo corrupto?

@@ -67,7 +67,9 @@ struct CADModeView: View {
     }
 
     private var cadTools: [CADTool] {
-        [.extrude, .loopCut, .bevel, .booleanUnion, .booleanSubtract, .booleanIntersect, .fillet, .chamfer, .shell, .loft, .sweep, .measure]
+        // .loft excluido: LoftEngine espera [Wire] y el puente Vertex→Wire no existe
+        // aún (F3) — no se muestran herramientas sin efecto real.
+        [.extrude, .loopCut, .bevel, .booleanUnion, .booleanSubtract, .booleanIntersect, .fillet, .chamfer, .shell, .sweep, .measure]
     }
 
     private var sketchTools: [CADTool] {

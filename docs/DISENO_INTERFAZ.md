@@ -64,18 +64,30 @@ por defecto, herramienta si la tool activa lo reclama sobre geometría.
 - Push/pull interactivo v1: tap-cara → barra con distancia → Añadir/Excavar.
   (v1 usa slider; v2 será drag-sobre-la-cara cuando haya device para calibrar feel.)
 
+**Hecho en Fase D ola 1 (2026-07-08) — la reconexión:**
+- El chrome dejó de ser maqueta: `WorkspaceView` ahora monta la vista REAL de cada
+  modo (CAD/Sculpt/Paint/Híbrido/Animar/Render). Antes NINGUNA vista de Features/
+  se instanciaba: la app mostraba paneles con valores hardcodeados.
+- `renderer.setSculptEngine()` por fin se llama (AppState) — el pipeline táctil de
+  escultura estuvo muerto desde el origen. 10 deformers seleccionables y sincronizados.
+- Router de gestos v1 implementado (deuda #3): drag sobre geometría = herramienta,
+  sobre vacío = orbitar, con gate `sculptEnabled` por modo. Deuda #4 cerrada:
+  un solo camino de picking (`ScenePicker`); el raycast duplicado de MetalView murió.
+- Doble manejo de cámara eliminado (SwiftUI DragGesture vs UIKit pan competían).
+- Purga: todo actuador visible tiene efecto real o no se muestra (Loft oculto
+  hasta F3; ViewCube ahora orbita/re-encuadra de verdad).
+
 **Deuda de diseño conocida (orden de ataque):**
-1. **Highlight de la cara seleccionada** en el render (overlay del triángulo-grupo de la
-   cara; requiere pasar face→triángulos del bridge OCCT). Sin feedback visual, la
-   selección es a ciegas — es la próxima pieza de UI, no negociable.
-2. Drag-en-cara para push/pull en vivo (necesita device; el controller ya separa
+1. Drag-en-cara para push/pull en vivo (necesita device; el controller ya separa
    selección de aplicación para enchufarle preview).
-3. El drag de 1 dedo hoy siempre orbita; falta el router "¿empezó sobre geometría?"
-   (un hitTest al inicio del gesto decide orbit vs tool — la infraestructura ya existe).
-4. Sculpt: `raycastForSculpt` vive en MetalView y funciona; migrarlo a `ScenePicker`
-   para un solo camino de picking.
-5. Timeline paramétrico (cadHistory) como tira horizontal inferior colapsable,
+2. El router de drag aplica a sculpt; extenderlo a CAD (drag-en-cara = push/pull
+   cuando haya herramienta activa) tras calibrar en device.
+3. Timeline paramétrico (cadHistory) como tira horizontal inferior colapsable,
    estilo Fusion360 pero táctil: cada op es un chip; tap = inspeccionar, drag = reordenar.
+4. Rediseño del chrome de CADModeView según §2 (hoy son barras horizontales
+   apiladas arriba, estilo escritorio; objetivo: rail izquierdo + barras efímeras).
+5. Pintura real (F3): BrushEngine fue eliminado; strokes existen pero no proyectan
+   color sobre la malla. Los controles de pintura visibles son mínimos a propósito.
 
 ## 5. Reglas para agentes que toquen UI
 

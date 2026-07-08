@@ -1,7 +1,29 @@
 # AppForge Studio — BRAIN.md
 > Updated: 2026-07-08
 
-## ESTADO ACTUAL — CI VERDE 🟢 (Fase C en curso, 206 tests)
+## ESTADO ACTUAL — Fase D ola 1: la app deja de ser fachada (commit 06e4133)
+
+2026-07-08 (tarde) — **Auditoría UX tras feedback del iPad ("botones que no funcionan, todo desorganizado")** — 3 hallazgos estructurales:
+1. **El chrome era una maqueta.** `WorkspaceView` (AppForgeStudioApp.swift) nunca instanciaba
+   las vistas de Features/: LeftToolbar solo cambiaba un string, FloatingParams mostraba
+   "25.0mm" hardcodeado, RightProperties bindeaba a @State local sin efecto, el pill "60 FPS"
+   era texto fijo. TODA la funcionalidad real (CADModeView con push/pull, drawings, features)
+   era código muerto desde la perspectiva del usuario. FIX: switch selectedMode → vistas reales.
+2. **`renderer.setSculptEngine()` no se llamaba desde ningún sitio** — el pipeline táctil
+   (MetalView.handlePan → pendingStrokes → applySculpt en SatinRenderer:921) estuvo muerto
+   desde el origen del repo. FIX: AppState posee el SculptEngine y lo inyecta en setRenderer.
+   Test de blindaje: AppStateWiringTests. LECCIÓN: un pipeline puede estar completo y
+   correcto en cada pieza y aun así muerto porque nadie conecta la primera pieza.
+3. **Doble manejo de cámara**: ContentView tenía DragGesture/MagnificationGesture SwiftUI
+   orbitando la MISMA cámara que los UIGestureRecognizer de MetalView → navegación errática.
+   FIX: cámara solo en MetalView; SwiftUI solo construye strokes de pintura.
+- Además: picking unificado (raycastForSculpt duplicado eliminado; esculpía sobre overlays
+  `__faceHighlight` porque no filtraba `__`), 10 deformers cableados con displayNameES,
+  Remesh voxel real en Hybrid, init explícitos en vistas de modo (los @State privados hacen
+  privado el init memberwise — patrón que RenderModeView ya usaba), Loft oculto (no-op hasta F3),
+  7 archivos de chrome huérfano eliminados. Neto: −856 líneas.
+
+## ESTADO ANTERIOR — CI VERDE 🟢 (Fase C, 206 tests)
 
 2026-07-08 — **Fase C: capacidades CAD-pro verificadas** (rama `feature/fase-c`, PR #9, 206 tests 0 fallos):
 - Highlight de cara + undo/redo B-rep (BRepHistory) + overlays no-tocables.
