@@ -15,7 +15,8 @@ private let logger = Logger(subsystem: "com.appforgestudio", category: "DrawingE
 ///
 /// API del kernel usada (verificada contra OCCTSwift v1.8.8 — `mem:occtswift_api`):
 /// `Drawing.topView/frontView/sideView/isometricView(of:) -> Drawing?` y
-/// `DXFExporter.writeDXF(drawing:to:deflection:) throws`.
+/// `Exporter.writeDXF(drawing:to:deflection:) throws` (writeDXF vive en `extension Exporter`
+/// en OCCTSwift 1.8.8 — el enum `DXFExporter` es refactor posterior de HEAD, NO usar).
 enum DrawingExportService {
 
     /// Vista ortográfica estándar de ingeniería (primer ángulo).
@@ -61,7 +62,7 @@ enum DrawingExportService {
             return false
         }
         do {
-            try DXFExporter.writeDXF(drawing: draw, to: url, deflection: deflection)
+            try Exporter.writeDXF(drawing: draw, to: url, deflection: deflection)
             logger.info("[DrawingExport] DXF \(view.rawValue) escrito para '\(model.name)'")
             return true
         } catch {
