@@ -42,6 +42,21 @@ final class DrawingExportTests: XCTestCase {
         XCTAssertGreaterThan(dxf.count, 100, "un DXF con geometría no es trivialmente pequeño")
     }
 
+    func testFrontViewPDFIsValidPrintablePlano() throws {
+        let model = try makeBoxModel()
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pdf_\(UUID().uuidString)").appendingPathExtension("pdf")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        XCTAssertTrue(DrawingExportService.exportPDF(model, view: .front, page: .a4Landscape, to: url),
+                      "el export PDF de la vista frontal debe tener éxito")
+        let data = try Data(contentsOf: url)
+        XCTAssertGreaterThan(data.count, 100, "un PDF con geometría no es trivialmente pequeño")
+        // Magic bytes de PDF: "%PDF"
+        let magic = data.prefix(4)
+        XCTAssertEqual(magic, Data("%PDF".utf8), "el archivo debe ser un PDF válido")
+    }
+
     func testAllStandardViewsProjectTheBox() throws {
         let model = try makeBoxModel()
         let shape = try XCTUnwrap(model.cadShape)

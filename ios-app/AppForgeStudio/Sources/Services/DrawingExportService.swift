@@ -70,4 +70,41 @@ enum DrawingExportService {
             return false
         }
     }
+
+    /// Tamaño de página del PDF (puntos a 72 dpi; constantes del kernel).
+    enum PageSize: Sendable {
+        case a4Landscape
+        case a3Landscape
+        var points: SIMD2<Double> {
+            switch self {
+            case .a4Landscape: return Exporter.pdfA4Landscape
+            case .a3Landscape: return Exporter.pdfA3Landscape
+            }
+        }
+    }
+
+    /// Exporta una vista del modelo como PDF (plano imprimible A4/A3 apaisado).
+    /// Mismo pipeline que DXF (proyección ortográfica del B-rep) pero salida vectorial
+    /// paginada lista para imprimir/compartir. `Exporter.writePDF` (∈ `extension Exporter`).
+    @discardableResult
+    static func exportPDF(_ model: Model, view: StandardView = .front,
+                          page: PageSize = .a4Landscape, to url: URL,
+                          deflection: Double = 0.1) -> Bool {
+        guard let shape = model.cadShape else {
+            logger.error("[DrawingExport] modelo '\(model.name)' sin B-rep — sin PDF")
+            return false
+        }
+        guard let draw = drawing(of: shape, view: view) else {
+            logger.error("[DrawingExport] proyección \(view.rawValue) falló para PDF de '\(model.name)'")
+            return false
+        }
+        do {
+            try Exporter.writePDF(drawing: draw, to: url, pageSize: page.points, deflection: deflection)
+            logger.info("[DrawingExport] PDF \(view.rawValue) escrito para '\(model.name)'")
+            return true
+        } catch {
+            logger.error("[DrawingExport] escritura PDF falló: \(error.localizedDescription)")
+            return false
+        }
+    }
 }
