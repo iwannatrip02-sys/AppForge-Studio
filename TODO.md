@@ -1,6 +1,6 @@
 # AppForge Studio — TODO.md
-> Updated: 2026-07-07
-> CI VERDE: build + 165 tests (0 fallos) + IPA. PR #6 mergeado a main (ca2ec00).
+> Updated: 2026-07-08
+> CI VERDE: build + 205 tests (0 fallos) + IPA. Rama feature/fase-c (PR #9), adelantada a main.
 
 ## Foco actual
 - FASE A COMPLETA (2026-07-07, PR #7): núcleo B-rep fuente de verdad — Model.cadShape,
@@ -11,10 +11,20 @@
   pantalla→rayo→malla→cara B-rep (ScenePicking, testeable), bug onTouch3D
   (pasaba model.position), PushPullController + herramienta Push/Pull con barra
   contextual, docs/DISENO_INTERFAZ.md canónico. 190 tests verdes.
-- Siguiente (Fase C, por orden del doc de diseño): highlight visual de cara
-  seleccionada (no negociable antes de más tools); router de gesto
-  geometría-vs-vacío; drag-en-cara para push/pull en vivo (necesita device);
-  drawings DXF/PDF, SheetMetal, FeatureRecognition (kernel listo)
+- FASE C EN CURSO (rama feature/fase-c, PR #9, 205 tests verdes 2026-07-08):
+  - [x] Highlight visual de cara seleccionada (overlay __faceHighlight amarillo,
+    BRepFacePicker.highlightMesh) + undo/redo B-rep (BRepHistory) + overlays no-tocables.
+    BUG corregido: Fatal access conflict en BRepHistory.swapTop (syncCounts en defer
+    leía los arrays inout prestados) — solo verificable por CI, crasheaba 4 tests.
+  - [x] Drawings 2D DXF (DrawingExportService): proyecta el B-rep a vistas ortográficas
+    (planta/alzado/lateral/iso) → DXF R12 vía Exporter.writeDXF. Shapr3D cobra esto.
+  - [x] Feature Recognition (FeatureRecognitionService): agujeros + cajeras desde el
+    B-rep vía AAG (shape.buildAAG → detectPockets/detectHoles). Base para selección
+    inteligente y árbol de features.
+  - [ ] Siguiente: UI para Drawings/Features (barra export DXF + resaltar features);
+    drag-en-cara para push/pull en vivo (necesita device); router de gesto CAD
+    geometría-vs-vacío (la lógica ya existe para sculpt en MetalView.handlePan);
+    PDF export (OCCTSwift trae PDFExporter), SheetMetal (kernel listo).
 - Bajar la IPA sin firmar del CI y sideload para probar en iPad real
 
 ## Pendientes
