@@ -1,5 +1,7 @@
 # AppForge Studio — Diseño de Interfaz (canónico)
 > 2026-07-07 | Gobierna la Fase B y siguientes. Actualizar aquí ANTES de cambiar UI.
+> Catálogo completo de mecánicas (Shapr3D/Nomad desglosados + síntesis y olas):
+> **BLUEPRINT_UX_SUPREMACIA.md** — las olas de UI citan secciones de ese doc.
 
 ## 1. La tesis
 
