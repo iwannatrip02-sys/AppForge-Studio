@@ -11,13 +11,14 @@
   pantalla→rayo→malla→cara B-rep (ScenePicking, testeable), bug onTouch3D
   (pasaba model.position), PushPullController + herramienta Push/Pull con barra
   contextual, docs/DISENO_INTERFAZ.md canónico. 190 tests verdes.
-- FASE C EN CURSO (rama feature/fase-c, PR #9, 205 tests verdes 2026-07-08):
+- FASE C EN CURSO (rama feature/fase-c, PR #9, 206 tests verdes 2026-07-08):
   - [x] Highlight visual de cara seleccionada (overlay __faceHighlight amarillo,
     BRepFacePicker.highlightMesh) + undo/redo B-rep (BRepHistory) + overlays no-tocables.
     BUG corregido: Fatal access conflict en BRepHistory.swapTop (syncCounts en defer
     leía los arrays inout prestados) — solo verificable por CI, crasheaba 4 tests.
-  - [x] Drawings 2D DXF (DrawingExportService): proyecta el B-rep a vistas ortográficas
-    (planta/alzado/lateral/iso) → DXF R12 vía Exporter.writeDXF. Shapr3D cobra esto.
+  - [x] Drawings 2D DXF+PDF (DrawingExportService): proyecta el B-rep a vistas ortográficas
+    (planta/alzado/lateral/iso) → DXF R12 (Exporter.writeDXF) y PDF imprimible A4/A3
+    (Exporter.writePDF). Shapr3D cobra esto.
   - [x] Feature Recognition (FeatureRecognitionService): agujeros + cajeras desde el
     B-rep vía AAG (shape.buildAAG → detectPockets/detectHoles). Base para selección
     inteligente y árbol de features.

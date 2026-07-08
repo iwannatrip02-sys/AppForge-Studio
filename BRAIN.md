@@ -1,11 +1,11 @@
 # AppForge Studio — BRAIN.md
 > Updated: 2026-07-08
 
-## ESTADO ACTUAL — CI VERDE 🟢 (Fase C en curso, 205 tests)
+## ESTADO ACTUAL — CI VERDE 🟢 (Fase C en curso, 206 tests)
 
-2026-07-08 — **Fase C: capacidades CAD-pro verificadas** (rama `feature/fase-c`, PR #9, run 28908052457, 205 tests 0 fallos):
+2026-07-08 — **Fase C: capacidades CAD-pro verificadas** (rama `feature/fase-c`, PR #9, 206 tests 0 fallos):
 - Highlight de cara + undo/redo B-rep (BRepHistory) + overlays no-tocables.
-- **Drawings 2D DXF** (`DrawingExportService`): B-rep → vistas ortográficas → DXF R12 (`Exporter.writeDXF`). Shapr3D lo cobra.
+- **Drawings 2D DXF+PDF** (`DrawingExportService`): B-rep → vistas ortográficas → DXF R12 (`Exporter.writeDXF`) y PDF imprimible A4/A3 (`Exporter.writePDF`). Shapr3D lo cobra.
 - **Feature Recognition** (`FeatureRecognitionService`): agujeros/cajeras desde el B-rep vía AAG (`shape.buildAAG` → `detectPockets`/`detectHoles`).
 - BUG corregido (solo detectable por CI): `BRepHistory.swapTop` llamaba `syncCounts()` en un `defer` que leía los arrays `inout` prestados → "Fatal access conflict" crasheaba 4 tests. Fix: `syncCounts()` desde `undo()`/`redo()` tras liberar el borrow.
 - LECCIÓN DE PROCESO: verificar firmas de OCCTSwift contra el **TAG pineado que CI resuelve** (v1.8.8 con `from:"1.0.0"`), NO contra HEAD del clon. HEAD tenía un enum `DXFExporter` que NO existe en 1.8.8 (ahí `writeDXF` está en `extension Exporter`) → build rojo "cannot find DXFExporter in scope". Ver `mem:occtswift_api`.
