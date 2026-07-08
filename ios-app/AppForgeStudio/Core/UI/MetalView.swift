@@ -52,6 +52,10 @@ struct MetalView: UIViewRepresentable {
     /// base de la manipulación directa (push/pull, selección de caras).
     var onSurfaceHit: ((SurfaceHit) -> Void)?
     var metalBackground: UIColor = .darkGray
+    /// Contrato de gestos (DISENO_INTERFAZ §3): drag sobre geometría = herramienta,
+    /// drag sobre vacío = orbitar. Solo el modo dueño del sculpt lo activa;
+    /// en CAD/Animation/Render el drag de 1 dedo siempre orbita.
+    var sculptEnabled: Bool = false
 
     func makeCoordinator() -> Coordinator {
         let c = Coordinator(
@@ -62,6 +66,7 @@ struct MetalView: UIViewRepresentable {
             animationEngine: animationEngine
         )
         c.onSurfaceHit = onSurfaceHit
+        c.sculptEnabled = sculptEnabled
         return c
     }
     
@@ -86,6 +91,7 @@ struct MetalView: UIViewRepresentable {
         renderer.updateScene(scene)
         renderer.animationEngine = animationEngine
         renderer.playbackController = playbackController
+        context.coordinator.sculptEnabled = sculptEnabled
         uiView.backgroundColor = metalBackground
         uiView.setNeedsDisplay()
     }
@@ -102,6 +108,7 @@ struct MetalView: UIViewRepresentable {
         var onSculptStroke: ((SculptPoint) -> Void)?
         var onSurfaceHit: ((SurfaceHit) -> Void)?
         var onPinchExtrude: ((Float, Float) -> Void)?  // (distance, taper)
+        var sculptEnabled: Bool = false
         
         private var lastPanLocation: CGPoint = .zero
         private var orbitSpherical: (theta: Float, phi: Float, radius: Float) = (0, .pi / 4, 5.0)
@@ -158,10 +165,11 @@ struct MetalView: UIViewRepresentable {
             case .began:
                 lastPanLocation = location
                 let singleFinger = (gesture.numberOfTouches == 1)
-                // Sculpt mode: single finger on mesh → sculpt; otherwise orbit
-                if singleFinger && renderer.sculptEngine != nil {
-                    // Attempt raycast; if we hit a mesh, enter sculpt mode
-                    if let hit = raycastForSculpt(at: location, in: gesture.view) {
+                // Router del contrato de gestos: 1 dedo sobre geometría = herramienta
+                // (sculpt), sobre vacío = orbitar. El hitTest usa ScenePicker (único
+                // camino de picking; ignora overlays "__" como el highlight de cara).
+                if singleFinger && sculptEnabled && renderer.sculptEngine != nil {
+                    if let hit = sculptHit(at: location, in: gesture.view) {
                         isSculpting = true
                         lastSculptHit = hit.position
                         // Seed first SculptPoint (no drag on first touch)
@@ -189,7 +197,7 @@ struct MetalView: UIViewRepresentable {
                 let dy = Float(translation.y) * 0.005
 
                 if isSculpting {
-                    if let hit = raycastForSculpt(at: location, in: gesture.view) {
+                    if let hit = sculptHit(at: location, in: gesture.view) {
                         let prev = lastSculptHit ?? hit.position
                         let dragDelta = hit.position - prev
                         lastSculptHit = hit.position
@@ -281,67 +289,14 @@ struct MetalView: UIViewRepresentable {
         
         // MARK: - Sculpt Raycast
 
-        /// Raycasts from the camera through the given screen point against all scene models.
-        /// Returns the closest hit position and surface normal, or nil if no mesh is intersected.
-        private func raycastForSculpt(at screenPoint: CGPoint, in view: UIView?) -> (position: SIMD3<Float>, normal: SIMD3<Float>)? {
+        /// Hit de superficie para sculpt vía el picking unificado (ScenePicker).
+        /// A diferencia del raycast antiguo, ignora overlays "__" (highlight de cara).
+        private func sculptHit(at screenPoint: CGPoint, in view: UIView?) -> (position: SIMD3<Float>, normal: SIMD3<Float>)? {
             guard let view = view else { return nil }
-            let size = view.bounds.size
-
-            let rayOrigin = scene.camera.position
-            let aspect = Float(size.width / max(size.height, 1))
-            let ndc = SIMD2<Float>(
-                (2.0 * Float(screenPoint.x) / Float(size.width) - 1.0) * aspect,
-                1.0 - 2.0 * Float(screenPoint.y) / Float(size.height)
-            )
-            let fovRad = scene.camera.fov * .pi / 180
-            let halfH = tan(fovRad * 0.5)
-            let halfW = halfH * aspect
-
-            let forward = simd_normalize(scene.camera.target - scene.camera.position)
-            let right = simd_normalize(simd_cross(forward, scene.camera.up))
-            let up = simd_cross(right, forward)
-            let rayDir = simd_normalize(forward + right * ndc.x * halfW + up * ndc.y * halfH)
-
-            var closestDist: Float = .greatestFiniteMagnitude
-            var bestHit: (position: SIMD3<Float>, normal: SIMD3<Float>)?
-
-            for model in scene.models {
-                for mesh in model.meshes {
-                    for j in stride(from: 0, to: mesh.indices.count, by: 3) {
-                        guard j + 2 < mesh.indices.count else { break }
-                        let i0 = Int(mesh.indices[j])
-                        let i1 = Int(mesh.indices[j+1])
-                        let i2 = Int(mesh.indices[j+2])
-                        guard i0 < mesh.vertices.count, i1 < mesh.vertices.count, i2 < mesh.vertices.count else { continue }
-                        let v0 = mesh.vertices[i0].position
-                        let v1 = mesh.vertices[i1].position
-                        let v2 = mesh.vertices[i2].position
-                        if let hit = rayTriangleIntersect(
-                            rayOrigin: rayOrigin, rayDir: rayDir,
-                            v0: v0, v1: v1, v2: v2
-                        ) {
-                            let dist = simd_distance(rayOrigin, hit)
-                            if dist < closestDist {
-                                closestDist = dist
-                                // Compute face normal at hit point
-                                let edge1 = v1 - v0
-                                let edge2 = v2 - v0
-                                let faceNormal = simd_normalize(simd_cross(edge1, edge2))
-                                // Use vertex normal interpolation for smoother results
-                                let n0 = mesh.vertices[i0].normal
-                                let n1 = mesh.vertices[i1].normal
-                                let n2 = mesh.vertices[i2].normal
-                                let interpolatedNormal = simd_normalize(n0 + n1 + n2)
-                                let hitNormal = simd_length(interpolatedNormal) > 0.001
-                                    ? interpolatedNormal
-                                    : faceNormal
-                                bestHit = (hit, hitNormal)
-                            }
-                        }
-                    }
-                }
-            }
-            return bestHit
+            let ray = CameraRay.from(screenPoint: screenPoint, viewSize: view.bounds.size,
+                                     camera: scene.camera)
+            guard let hit = ScenePicker.hitTest(models: scene.models, ray: ray) else { return nil }
+            return (hit.position, hit.normal)
         }
 
         // MARK: - Camera

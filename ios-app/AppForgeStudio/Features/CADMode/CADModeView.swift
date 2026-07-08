@@ -26,6 +26,16 @@ struct CADModeView: View {
     private static let faceHighlightName = "__faceHighlight"
     @EnvironmentObject var themeManager: ThemeManager
 
+    /// Init explícito: los @State/@StateObject privados hacen privado el init
+    /// memberwise, y el chrome (WorkspaceView) instancia esta vista desde otro archivo.
+    init(canvasVM: CanvasViewModel, renderer: SatinRenderer,
+         toolVM: ToolViewModel, animationVM: AnimationEngine) {
+        self.canvasVM = canvasVM
+        self.renderer = renderer
+        self.toolVM = toolVM
+        self.animationVM = animationVM
+    }
+
     private var theme: AppTheme { themeManager.currentTheme }
 
     @State private var selectedTool: CADTool = .select

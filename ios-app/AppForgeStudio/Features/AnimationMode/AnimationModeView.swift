@@ -10,6 +10,17 @@ struct AnimationModeView: View {
 
     @State private var showTimeline = true
 
+    /// Init explícito: los @State privados hacen privado el init memberwise,
+    /// y el chrome (WorkspaceView) instancia esta vista desde otro archivo.
+    init(canvasVM: CanvasViewModel, renderer: SatinRenderer, toolVM: ToolViewModel,
+         animationVM: AnimationEngine, subdivisionVM: SubdivisionEngine) {
+        self.canvasVM = canvasVM
+        self.renderer = renderer
+        self.toolVM = toolVM
+        self.animationVM = animationVM
+        self.subdivisionVM = subdivisionVM
+    }
+
     private var theme: AppTheme { themeManager.currentTheme }
 
     private var strokesBinding: Binding<[BrushStroke]> {

@@ -14,10 +14,10 @@ struct ContentView: View {
     var isPaintMode: Bool = false
     /// Propagado a MetalView: hit real al tocar geometría (push/pull, selección de caras)
     var onSurfaceHit: ((SurfaceHit) -> Void)? = nil
+    /// Activa el router drag-sobre-geometría = esculpir (solo modos Sculpt/Hybrid).
+    var sculptEnabled: Bool = false
     @EnvironmentObject var themeManager: ThemeManager
 
-    @State private var lastDrag: CGSize = .zero
-    @State private var lastMagnification: CGFloat = 1.0
     @State private var currentStroke: BrushStroke?
 
     var body: some View {
@@ -26,7 +26,7 @@ struct ContentView: View {
                 var s = canvasVM.scene
                 s.strokes = newVal
                 canvasVM.scene = s
-            }), renderer: renderer, animationEngine: canvasVM.animationEngine, onTouch3D: handleTouch, onSurfaceHit: onSurfaceHit, metalBackground: themeManager.currentTheme.metalBackground)
+            }), renderer: renderer, animationEngine: canvasVM.animationEngine, onTouch3D: handleTouch, onSurfaceHit: onSurfaceHit, metalBackground: themeManager.currentTheme.metalBackground, sculptEnabled: sculptEnabled)
                 .edgesIgnoringSafeArea(.all)
 
             VStack {
@@ -45,12 +45,6 @@ struct ContentView: View {
                     .dynamicTypeSize(...DynamicTypeSize.xLarge)
 
                     Spacer()
-                    Text("Mode: \(canvasVM.currentMode.rawValue)")
-                        .font(.caption)
-                        .padding(4)
-                        .background(.ultraThinMaterial)
-                        .cornerRadius(4)
-                    Spacer()
                     Button(action: { HapticService.shared.medium(); canvasVM.resetView() }) {
                         Image(systemName: "arrow.counterclockwise")
                     }
@@ -61,44 +55,25 @@ struct ContentView: View {
                 .background(.ultraThinMaterial)
             }
         }
+        // Órbita/zoom viven SOLO en MetalView (UIKit) — la duplicación SwiftUI
+        // competía por la cámara y hacía errática la navegación. Aquí queda
+        // únicamente la construcción de strokes de pintura.
         .gesture(
-            DragGesture(minimumDistance: isPaintMode ? 2 : 20)
-                .onChanged { value in
-                    if !isPaintMode {
-                        let delta = CGSize(
-                            width: value.translation.width - lastDrag.width,
-                            height: value.translation.height - lastDrag.height
-                        )
-                        canvasVM.orbitCamera(delta: delta)
-                        lastDrag = value.translation
-                    } else {
-                        if currentStroke == nil {
-                            currentStroke = BrushStroke(brushType: .round,
-                                                       color: SIMD4<Float>(0, 0.5, 1, 1),
-                                                       mode: .paint)
-                        }
+            DragGesture(minimumDistance: 2)
+                .onChanged { _ in
+                    if currentStroke == nil {
+                        currentStroke = BrushStroke(brushType: .round,
+                                                   color: SIMD4<Float>(0, 0.5, 1, 1),
+                                                   mode: .paint)
                     }
                 }
                 .onEnded { _ in
-                    lastDrag = .zero
-                    if isPaintMode, let s = currentStroke {
+                    if let s = currentStroke {
                         canvasVM.addStroke(s)
                         currentStroke = nil
                     }
-                }
-        )
-        .gesture(
-            MagnificationGesture()
-                .onChanged { value in
-                    if !isPaintMode {
-                        let delta = value / lastMagnification
-                        canvasVM.zoomCamera(delta: CGFloat(delta))
-                        lastMagnification = value
-                    }
-                }
-                .onEnded { _ in
-                    lastMagnification = 1.0
-                }
+                },
+            including: isPaintMode ? .all : .subviews
         )
     }
 

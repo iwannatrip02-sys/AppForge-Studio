@@ -14,6 +14,24 @@ enum DeformerType: String, Codable, CaseIterable {
     case inflate, pinch, smooth, crease, grab, flatten, twist, move, bend, shear
 }
 
+extension DeformerType {
+    /// Nombre visible en la UI (convención del proyecto: textos de UI en español).
+    var displayNameES: String {
+        switch self {
+        case .inflate: return "Inflar"
+        case .pinch: return "Pellizcar"
+        case .smooth: return "Suavizar"
+        case .crease: return "Pliegue"
+        case .grab: return "Agarrar"
+        case .flatten: return "Aplanar"
+        case .twist: return "Torcer"
+        case .move: return "Mover"
+        case .bend: return "Doblar"
+        case .shear: return "Cizallar"
+        }
+    }
+}
+
 class SculptEngine {
     private var deformer: DeformerType = .inflate
     var radius: Float = 0.05

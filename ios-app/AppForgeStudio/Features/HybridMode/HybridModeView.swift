@@ -182,6 +182,20 @@ struct HybridModeView: View {
     @State private var showTimeline = false
     @State private var brushSize: Float = 0.05
     @State private var brushOpacity: Float = 0.8
+    @State private var activeDeformer: DeformerType = .grab
+
+    /// Init explícito: los @State privados hacen privado el init memberwise,
+    /// y el chrome (WorkspaceView) instancia esta vista desde otro archivo.
+    init(canvasVM: CanvasViewModel, renderer: SatinRenderer, toolVM: ToolViewModel,
+         animationVM: AnimationEngine, subdivisionVM: SubdivisionEngine,
+         layerManager: LayerManager) {
+        self.canvasVM = canvasVM
+        self.renderer = renderer
+        self.toolVM = toolVM
+        self.animationVM = animationVM
+        self.subdivisionVM = subdivisionVM
+        self.layerManager = layerManager
+    }
 
     var body: some View {
         ZStack {
@@ -192,11 +206,12 @@ struct HybridModeView: View {
                     .padding(.vertical, 6)
                     .background(themeManager.currentTheme.surface)
 
-                // 3D Canvas
+                // 3D Canvas — el router de gestos solo esculpe cuando la capa activa es Sculpt
                 ContentView(
                     canvasVM: canvasVM,
                     renderer: renderer,
-                    isPaintMode: activeMode == .paint
+                    isPaintMode: activeMode == .paint,
+                    sculptEnabled: activeMode == .sculpt
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -376,23 +391,36 @@ struct HybridModeView: View {
             }
             Spacer()
 
-            // Brush size slider
+            // Brush size slider — sincronizado con el radio del SculptEngine
             Slider(value: $brushSize, in: 0.005...0.3)
                 .frame(width: 60)
+                .onChange(of: brushSize) { r in renderer.sculptEngine?.radius = r }
             Text(String(format: "%.0f%%", brushSize * 100))
                 .font(.caption2)
                 .foregroundColor(themeManager.currentTheme.textSecondary)
 
-            // Deformer presets — sculpt runs via SculptEngine touch pipeline, not ToolViewModel
+            // Los 10 deformers reales del SculptEngine (pipeline táctil)
             Menu {
-                Button("Grab") { }
-                Button("Inflate") { }
-                Button("Smooth") { }
-                Button("Flatten") { }
-                Button("Pinch") { }
+                ForEach(DeformerType.allCases, id: \.self) { d in
+                    Button(action: {
+                        HapticService.shared.light()
+                        activeDeformer = d
+                        renderer.sculptEngine?.setDeformer(d)
+                    }) {
+                        if d == activeDeformer {
+                            Label(d.displayNameES, systemImage: "checkmark")
+                        } else {
+                            Text(d.displayNameES)
+                        }
+                    }
+                }
             } label: {
-                Image(systemName: "scribble.variable")
-                    .font(.caption)
+                HStack(spacing: 3) {
+                    Image(systemName: "scribble.variable")
+                        .font(.caption)
+                    Text(activeDeformer.displayNameES)
+                        .font(.caption2)
+                }
             }
 
             Button("Subdividir") {
@@ -414,9 +442,15 @@ struct HybridModeView: View {
             .cornerRadius(6)
 
             Button("Remesh") {
+                // Remesh voxel real (estilo Nomad): topología uniforme lista para esculpir
                 guard let model = canvasVM.scene.models.first, let mesh = model.meshes.first else { return }
-                _ = SDFEngine()
+                canvasVM.saveState()
+                let engine = VoxelRemeshEngine()
+                model.meshes = [engine.remesh(mesh)]
                 canvasVM.objectWillChange.send()
+                if let layerId = activeLayer?.id {
+                    layerManager.addOperation(.remesh(resolution: engine.resolution), to: layerId)
+                }
             }
             .font(.caption)
             .padding(.horizontal, 8)
@@ -445,26 +479,12 @@ struct HybridModeView: View {
             }
             Spacer()
 
-            ColorPicker("", selection: Binding(
-                get: { Color(red: 0, green: 0.5, blue: 1) },
-                set: { _ in }
-            ))
-            .labelsHidden()
-            .scaleEffect(0.8)
-
+            // Controles honestos: el pipeline de pintura (F3) está pendiente de
+            // reimplementación — no se muestran actuadores sin efecto real.
             Slider(value: $brushSize, in: 0.005...0.2)
                 .frame(width: 50)
             Slider(value: $brushOpacity, in: 0...1)
                 .frame(width: 40)
-
-            Button("Rellenar") {
-                // Paint fill runs via BrushEngine touch pipeline
-            }
-            .font(.caption)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(themeManager.currentTheme.surface)
-            .cornerRadius(6)
         }
     }
 

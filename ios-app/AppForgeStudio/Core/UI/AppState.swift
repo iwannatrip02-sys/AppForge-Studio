@@ -26,6 +26,11 @@ class AppState: ObservableObject {
         AnimationEngine()
     }()
     let subdivisionVM: SubdivisionEngine
+    /// Motor de escultura compartido — inyectado al renderer para que el
+    /// pipeline táctil (MetalView → pendingStrokes → applySculpt) esté vivo.
+    let sculptEngine = SculptEngine()
+    /// Capas del modo híbrido (CAD/Sculpt/Paint sobre el mismo modelo).
+    let layerManager = LayerManager()
     lazy var materialEditorVM: MaterialEditorViewModel = {
         MaterialEditorViewModel(canvasVM: canvasVM)
     }()
@@ -33,6 +38,7 @@ class AppState: ObservableObject {
 
     func setRenderer(_ renderer: SatinRenderer) {
         self.satinRenderer = renderer
+        renderer.setSculptEngine(sculptEngine)
         renderer.animationEngine = animationVM
         self.canvasVM.animationEngine = animationVM
         renderer.onTransformsApplied = { [weak self] transforms in
@@ -61,6 +67,7 @@ class AppState: ObservableObject {
         case cad = "CAD"
         case sculpt = "Sculpt"
         case paint = "Paint"
+        case hybrid = "Hybrid"
         case animation = "Animation"
         case render = "Render"
     }
