@@ -17,8 +17,22 @@
     sliders radio/fuerza/simetría sincronizados al engine.
   - [x] Purga: maqueta (LeftToolbar/FloatingParams/RightProperties/pills falsas) +
     7 archivos de chrome huérfano; Loft oculto hasta F3; ViewCube funcional.
-  - [ ] Siguiente ola: rediseño chrome CADModeView (rail izquierdo, barras efímeras),
-    drag-en-cara push/pull en vivo (device), pintura real (F3).
+  - [x] IDENTIDAD "Acero & Brasa" (docs/IDENTIDAD_FORGE.md): accent propio ember
+    (mata el azul heredado de Shapr3D), tokens steel/clay, highlight de selección
+    brasa en viewport, clearColor=bgCanvas. Checklist de aplicación en el doc.
+  - [x] OLA 2 "Las manos" (BLUEPRINT §3.6): undo/redo por tap 2/3 dedos (router
+    dual B-rep/sculpt/escena), doble tap encuadre universal, sliders laterales
+    de pulgar radio/fuerza (N1, VerticalParamSlider), pincel inverso (N2, test),
+    Pencil=herramienta con presión real (S1), efecto "templado" (tempered()).
+  - [x] OLA 3.1 "La selección es el menú" (S2, primer paso): BRepEdgePicker
+    (proyección de curva OCCT + tubo de highlight), BRepModeling.filletEdge
+    (fillet SELECTIVO por arista), EdgeFilletController + barra contextual.
+    7 tests nuevos con oráculos exactos.
+  - [ ] Ola 3.2: número vivo editable + NumericPad (S3); clasificar cara-vs-arista
+    en un solo tap (hoy arista solo con Select); chamfer por arista.
+  - [ ] Ola 4: Forge Flow (hornear B-rep→malla, badges de material ⬡/〰).
+  - [ ] Siguiente también: rediseño chrome CADModeView (rail izquierdo),
+    drag-en-cara push/pull en vivo (necesita device), pintura real (F3).
 - FASE A COMPLETA (2026-07-07, PR #7): núcleo B-rep fuente de verdad — Model.cadShape,
   booleanos OCCT reales entre modelos, push/pull por cara (BRepFeat boss/pocket),
   fillet/chamfer/shell B-rep in-place, STEP AP214 real. 179 tests verdes con

@@ -1,7 +1,25 @@
 # AppForge Studio — BRAIN.md
 > Updated: 2026-07-08
 
-## ESTADO ACTUAL — Fase D ola 1: la app deja de ser fachada (commit 06e4133)
+## ESTADO ACTUAL — Fase D olas 1-3.1 + identidad (2026-07-08, todo CI verde)
+
+Sesión larga con 3 capas: (1) reconexión estructural (ola 1, abajo), (2) docs canónicos
+nuevos — `docs/BLUEPRINT_UX_SUPREMACIA.md` (22 mecánicas de Shapr3D/Nomad catalogadas +
+síntesis + olas 2-8) y `docs/IDENTIDAD_FORGE.md` (sistema Acero & Brasa) — y (3) olas
+2 y 3.1 implementadas:
+- OLA 2 "Las manos": undo/redo por tap 2/3 dedos con router dual (BRepHistory en CAD,
+  stack SculptEngine en sculpt, escena como fallback), doble tap encuadre universal,
+  sliders laterales de pulgar (VerticalParamSlider en Components), pincel inverso
+  (strength firmada + test), Pencil nunca-orbita con presión real, modifier tempered().
+- OLA 3.1 "La selección es el menú": BRepEdgePicker + filletEdge SELECTIVO
+  (Shape.filleted(edges:radius:) @v1.8.8 verificado) + EdgeFilletController + barra
+  contextual con tubo de highlight brasa. GOTCHA aprendida: el nombre ViewCube ya
+  existía en ViewportFeatures.swift (build rojo por redeclaración → ViewCubeControl).
+- PENDIENTE PROBAR EN DEVICE: todo lo táctil de las olas 2-3 está construido sin
+  iPad real — calibrar feel (sensibilidad sliders, radio de tolerancia de arista
+  0.03, presión pencil) con la próxima prueba del usuario.
+
+## ESTADO ANTERIOR — Fase D ola 1: la app deja de ser fachada (commit 06e4133)
 
 2026-07-08 (tarde) — **Auditoría UX tras feedback del iPad ("botones que no funcionan, todo desorganizado")** — 3 hallazgos estructurales:
 1. **El chrome era una maqueta.** `WorkspaceView` (AppForgeStudioApp.swift) nunca instanciaba
