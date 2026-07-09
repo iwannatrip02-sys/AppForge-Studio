@@ -75,6 +75,8 @@ struct CADModeView: View {
     @State private var measurePointB: SIMD3<Float>? = nil
     /// Radio del fillet contextual de arista (barra de selección).
     @State private var edgeFilletRadius: Double = 0.1
+    /// Espejo del estado de rayos X del renderer (para el tinte del botón).
+    @State private var xrayOn = false
     /// Transformación directa en curso: índice del cuerpo arrastrado y acumulado
     /// del gesto en puntos de pantalla (se hornea al B-rep al soltar).
     @State private var dragModelIndex: Int? = nil
@@ -130,7 +132,14 @@ struct CADModeView: View {
             ]
             for (axis, color, name) in axes {
                 let m = Model(name: name)
-                m.meshes = [GizmoBuilder.arrowMesh(center: center, axis: axis, length: len)]
+                // Rotar = ANILLOS alrededor de cada eje (como Shapr3D);
+                // Mover/Escalar = flechas.
+                if selectedTool == .rotate {
+                    m.meshes = [GizmoBuilder.ringMesh(center: center, axis: axis,
+                                                      radius: len * 0.75)]
+                } else {
+                    m.meshes = [GizmoBuilder.arrowMesh(center: center, axis: axis, length: len)]
+                }
                 m.color = color
                 canvasVM.scene.addModel(m)
             }
@@ -269,6 +278,7 @@ struct CADModeView: View {
                         },
                         gizmoCenter: activeGizmoCenter,
                         gizmoAxisLength: gizmoLength,
+                        gizmoStyle: selectedTool == .rotate ? 1 : 0,
                         onGizmoDragBegan: { axis in
                             HapticService.shared.light()
                             gizmoAxis = axis
@@ -964,6 +974,21 @@ struct CADModeView: View {
                 .foregroundColor(showSnapOverlay ? theme.accent : theme.textSecondary)
             }
             .accessibilityLabel("Mostrar guías de snap")
+            // Rayos X: cuerpos translúcidos, aristas visibles (look Shapr3D)
+            Button(action: {
+                HapticService.shared.light()
+                renderer.xrayEnabled.toggle()
+                xrayOn = renderer.xrayEnabled
+                canvasVM.objectWillChange.send()
+            }) {
+                HStack(spacing: 3) {
+                    Image(systemName: "cube.transparent")
+                        .font(.system(size: 11))
+                    Text("Rayos X").font(.caption2)
+                }
+                .foregroundColor(xrayOn ? theme.accent : theme.textSecondary)
+            }
+            .accessibilityLabel("Modo rayos X")
             Spacer()
             Button("Mediciones") { showMeasurements.toggle() }.font(.caption)
         }.padding(.horizontal).padding(.vertical, 4).background(theme.surface)
@@ -1085,7 +1110,24 @@ struct CADModeView: View {
             delta = right * dragAccum.x * k - up * dragAccum.y * k
             rotAxis = SIMD3<Float>(0, 1, 0)
         }
-        let angle = dragAccum.x * 0.008
+        // Rotación: el drag PERPENDICULAR a la proyección del eje gira alrededor
+        // de él (tangente del anillo). Sin gizmo: horizontal = eje Y (natural).
+        let angle: Float
+        if let axis = gizmoAxis {
+            var axisScreen = SIMD2<Float>(simd_dot(axis, right), -simd_dot(axis, up))
+            let l = simd_length(axisScreen)
+            if l > 0.15 {
+                axisScreen /= l
+                let perp = SIMD2<Float>(-axisScreen.y, axisScreen.x)
+                angle = simd_dot(dragAccum, perp) * 0.008
+            } else {
+                // Eje mirando a cámara: el anillo es un círculo en pantalla —
+                // drag horizontal gira (convención estándar).
+                angle = dragAccum.x * 0.008
+            }
+        } else {
+            angle = dragAccum.x * 0.008
+        }
         let factor = max(0.05, min(20, 1 + dragAccum.y * -0.004))
         return (delta, angle, rotAxis, factor, bboxCenter(of: model))
     }
@@ -1238,6 +1280,7 @@ struct CADModeView: View {
         let model = Model(name: name)
         model.meshes = [mesh]
         model.cadShape = placedShape  // retener B-rep: fuente de verdad para ops de ingeniería
+        model.edgesMesh = OCCTBridge.edgesMesh(placedShape)  // aristas visibles
 
         canvasVM.scene.addModel(model)
         canvasVM.scene.cadHistory.pushOperation(

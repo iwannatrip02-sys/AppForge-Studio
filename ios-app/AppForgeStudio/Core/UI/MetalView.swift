@@ -73,6 +73,8 @@ struct MetalView: UIViewRepresentable {
     /// flecha. El drag que empieza sobre una manija restringe al eje tocado.
     var gizmoCenter: SIMD3<Float>?
     var gizmoAxisLength: Float = 1.0
+    /// 0 = flechas (mover/escalar), 1 = anillos (rotar).
+    var gizmoStyle: Int = 0
     var onGizmoDragBegan: ((SIMD3<Float>) -> Void)?
 
     func makeCoordinator() -> Coordinator {
@@ -95,6 +97,7 @@ struct MetalView: UIViewRepresentable {
         c.onEmptyTap = onEmptyTap
         c.gizmoCenter = gizmoCenter
         c.gizmoAxisLength = gizmoAxisLength
+        c.gizmoStyle = gizmoStyle
         c.onGizmoDragBegan = onGizmoDragBegan
         return c
     }
@@ -133,6 +136,7 @@ struct MetalView: UIViewRepresentable {
         context.coordinator.onEmptyTap = onEmptyTap
         context.coordinator.gizmoCenter = gizmoCenter
         context.coordinator.gizmoAxisLength = gizmoAxisLength
+        context.coordinator.gizmoStyle = gizmoStyle
         context.coordinator.onGizmoDragBegan = onGizmoDragBegan
         uiView.backgroundColor = metalBackground
         uiView.setNeedsDisplay()
@@ -161,6 +165,7 @@ struct MetalView: UIViewRepresentable {
         var onEmptyTap: (() -> Void)?
         var gizmoCenter: SIMD3<Float>?
         var gizmoAxisLength: Float = 1.0
+        var gizmoStyle: Int = 0
         var onGizmoDragBegan: ((SIMD3<Float>) -> Void)?
         private var isTransforming = false
         /// Pencil = SIEMPRE herramienta, nunca orbita (BLUEPRINT S1).
@@ -483,17 +488,43 @@ struct MetalView: UIViewRepresentable {
                            y: CGFloat((1 - ndc.y) * 0.5) * size.height)
         }
 
-        /// Eje del gizmo bajo el toque (distancia 2D al segmento centro→punta < 34pt).
+        /// Eje del gizmo bajo el toque. Flechas: distancia al segmento centro→punta.
+        /// Anillos: distancia a la circunferencia proyectada (24 muestras).
         private func gizmoAxisHit(at location: CGPoint, in view: UIView) -> SIMD3<Float>? {
-            guard let center = gizmoCenter,
-                  let c2 = projectToScreen(center, in: view) else { return nil }
+            guard let center = gizmoCenter else { return nil }
             let axes: [SIMD3<Float>] = [SIMD3<Float>(1, 0, 0), SIMD3<Float>(0, 1, 0), SIMD3<Float>(0, 0, 1)]
             var best: (axis: SIMD3<Float>, dist: CGFloat)?
-            for axis in axes {
-                guard let t2 = projectToScreen(center + axis * gizmoAxisLength, in: view) else { continue }
-                let d = distanceToSegment(location, a: c2, b: t2)
-                if d < 34, d < (best?.dist ?? .greatestFiniteMagnitude) {
-                    best = (axis, d)
+
+            if gizmoStyle == 1 {
+                // Anillos de rotación: círculo ⊥ eje de radio 0.75·L
+                let r = gizmoAxisLength * 0.75
+                for axis in axes {
+                    let dir = simd_normalize(axis)
+                    let ref: SIMD3<Float> = abs(dir.x) < 0.9 ? SIMD3<Float>(1, 0, 0) : SIMD3<Float>(0, 1, 0)
+                    let u = simd_normalize(simd_cross(dir, ref))
+                    let v = simd_normalize(simd_cross(dir, u))
+                    var prev: CGPoint?
+                    for k in 0...24 {
+                        let t = Float(k) / 24 * 2 * .pi
+                        let world = center + u * cos(t) * r + v * sin(t) * r
+                        guard let p2 = projectToScreen(world, in: view) else { prev = nil; continue }
+                        if let a = prev {
+                            let d = distanceToSegment(location, a: a, b: p2)
+                            if d < 30, d < (best?.dist ?? .greatestFiniteMagnitude) {
+                                best = (axis, d)
+                            }
+                        }
+                        prev = p2
+                    }
+                }
+            } else {
+                guard let c2 = projectToScreen(center, in: view) else { return nil }
+                for axis in axes {
+                    guard let t2 = projectToScreen(center + axis * gizmoAxisLength, in: view) else { continue }
+                    let d = distanceToSegment(location, a: c2, b: t2)
+                    if d < 34, d < (best?.dist ?? .greatestFiniteMagnitude) {
+                        best = (axis, d)
+                    }
                 }
             }
             return best?.axis

@@ -22,6 +22,10 @@ class Model: ObservableObject {
     /// reconstruía al cambiar el NÚMERO de modelos y las operaciones se veían
     /// con retraso o nunca.
     var geometryVersion: Int = 0
+    /// Aristas del B-rep como malla (tubos finos, look Shapr3D). La rellena
+    /// OCCTBridge.edgesMesh en cada applyFeature/creación; el renderer la dibuja
+    /// oscura y opaca (también en rayos X).
+    var edgesMesh: Mesh?
     @Published var color: SIMD4<Float>
     @Published var cadHistoryID: UUID?
     @Published var originOp: String?

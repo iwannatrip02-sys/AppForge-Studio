@@ -30,6 +30,8 @@ struct ContentView: View {
     /// Gizmo de transformación (centro mundo + longitud + drag por eje).
     var gizmoCenter: SIMD3<Float>? = nil
     var gizmoAxisLength: Float = 1.0
+    /// 0 = flechas, 1 = anillos de rotación.
+    var gizmoStyle: Int = 0
     var onGizmoDragBegan: ((SIMD3<Float>) -> Void)? = nil
     @EnvironmentObject var themeManager: ThemeManager
 
@@ -52,6 +54,7 @@ struct ContentView: View {
                 onEmptyTap: onEmptyTap,
                 gizmoCenter: gizmoCenter,
                 gizmoAxisLength: gizmoAxisLength,
+                gizmoStyle: gizmoStyle,
                 onGizmoDragBegan: onGizmoDragBegan)
                 .edgesIgnoringSafeArea(.all)
 

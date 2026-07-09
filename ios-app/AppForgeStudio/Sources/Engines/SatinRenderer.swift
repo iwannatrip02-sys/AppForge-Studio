@@ -83,6 +83,8 @@ private struct BasicRenderable {
     var modelId: String  // for lookup during sculpt refresh & transform updates
     /// Centro del bounding box (espacio del modelo) — pivote del outline de selección.
     var center: SIMD3<Float> = .zero
+    /// Los overlays de UI (gizmo, highlights "__") no se vuelven translúcidos en rayos X.
+    var opaqueInXray: Bool = false
 }
 
 /// @MainActor: AnimationEngine is @MainActor (ios-app/AppForgeStudio/Sources/Engines/AnimationEngine.swift:184).
@@ -278,6 +280,13 @@ class SatinRenderer: NSObject, ObservableObject {
     var gridVisible = true
     /// id del modelo con outline de selección (silueta brasa). nil = ninguno.
     var outlinedModelId: String?
+    /// Rayos X: los cuerpos se dibujan translúcidos; las ARISTAS siguen opacas
+    /// (el look del screenshot de Shapr3D del usuario).
+    var xrayEnabled = false
+    private var basicXrayPipelineState: MTLRenderPipelineState?
+    private var xrayDepthState: MTLDepthStencilState?
+    /// Aristas de sólidos (tubos oscuros por modelo con B-rep).
+    private var edgeRenderables: [BasicRenderable] = []
 
     func diagnostics() -> RenderDiagnostics {
         RenderDiagnostics(
@@ -477,6 +486,18 @@ class SatinRenderer: NSObject, ObservableObject {
         } catch {
             logger.info("Failed to create basic pipeline state: \(error)")
         }
+
+        // Variante RAYOS X: mismos shaders + blending (alpha del modelColor).
+        pipelineDescriptor.colorAttachments[0].isBlendingEnabled = true
+        pipelineDescriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+        pipelineDescriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        pipelineDescriptor.colorAttachments[0].sourceAlphaBlendFactor = .one
+        pipelineDescriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        basicXrayPipelineState = try? device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+        let xd = MTLDepthStencilDescriptor()
+        xd.depthCompareFunction = .less
+        xd.isDepthWriteEnabled = false   // translúcido: no ocluye lo de atrás
+        xrayDepthState = device.makeDepthStencilState(descriptor: xd)
     }
 
     private func setupPBRPipeline(library: MTLLibrary) {
@@ -805,6 +826,7 @@ class SatinRenderer: NSObject, ObservableObject {
         sceneObjectCount = scene3D.models.count
         pbrRenderables.removeAll()
         basicRenderables.removeAll()
+        edgeRenderables.removeAll()
         modelIdToObject.removeAll()
 
         for model in scene3D.models {
@@ -938,8 +960,24 @@ class SatinRenderer: NSObject, ObservableObject {
             modelMatrix: modelMatrix,
             color: materialColor,
             modelId: model.id.uuidString,
-            center: bboxCenter
+            center: bboxCenter,
+            opaqueInXray: model.name.hasPrefix("__")
         ))
+
+        // Aristas del B-rep (tubos oscuros, look Shapr3D) — renderable propio,
+        // siempre opaco (también en rayos X, como el screenshot del usuario).
+        if let em = model.edgesMesh {
+            let (evb, eib, eic) = createBuffersFromMeshes([em])
+            if let evb, let eib, eic > 0 {
+                edgeRenderables.append(BasicRenderable(
+                    vertexBuffer: evb, indexBuffer: eib, indexCount: eic,
+                    modelMatrix: modelMatrix,
+                    color: SIMD4<Float>(0.07, 0.08, 0.11, 1.0),
+                    modelId: model.id.uuidString + "#edges",
+                    center: bboxCenter, opaqueInXray: true
+                ))
+            }
+        }
 
         // Build Satin Mesh for scene-graph operations (modelIdToObject, applyTransformsToScene, refreshNonPBRObjectGeometry)
         // Evidence: vendor/Satin/Sources/Satin/Core/Geometry.swift:185 — addAttribute(_:for:)
@@ -1162,6 +1200,12 @@ class SatinRenderer: NSObject, ObservableObject {
                     basicRenderables[i].modelMatrix = m.transform
                 }
             }
+            for i in edgeRenderables.indices {
+                let baseId = edgeRenderables[i].modelId.replacingOccurrences(of: "#edges", with: "")
+                if let m = models.first(where: { $0.id.uuidString == baseId }) {
+                    edgeRenderables[i].modelMatrix = m.transform
+                }
+            }
         }
 
         // ---- Cámara real de la escena ----
@@ -1178,7 +1222,11 @@ class SatinRenderer: NSObject, ObservableObject {
         // Evidence: Satin 13 Object has no draw(encoder:) method.
         // We draw non-PBR objects directly via MTLRenderCommandEncoder from basicRenderables.
         if let basicPS = basicPipelineState, !basicRenderables.isEmpty {
-            encoder.setRenderPipelineState(basicPS)
+            // Rayos X: cuerpos translúcidos (blending, sin escritura de depth);
+            // overlays y aristas siguen opacos.
+            let bodyPS = (xrayEnabled ? basicXrayPipelineState : nil) ?? basicPS
+            encoder.setRenderPipelineState(bodyPS)
+            if xrayEnabled, let xd = xrayDepthState { encoder.setDepthStencilState(xd) }
 
             // ---- Outline de selección (silueta brasa): la malla agrandada ~3.5%
             // alrededor de su centro, con culling FRONTAL, dibujada ANTES del
@@ -1221,7 +1269,7 @@ class SatinRenderer: NSObject, ObservableObject {
             let lightColor = scene3D?.lighting.directionalLight.color ?? SIMD3<Float>(1.0, 1.0, 1.0)
             let lightIntensity = scene3D?.lighting.directionalLight.intensity ?? 0.8
 
-            for renderable in basicRenderables {
+            func drawBasic(_ renderable: BasicRenderable, alpha: Float) {
                 let m = renderable.modelMatrix
                 let normalMatrix3x3 = simd_float3x3(
                     SIMD3<Float>(m.columns.0.x, m.columns.0.y, m.columns.0.z),
@@ -1229,6 +1277,8 @@ class SatinRenderer: NSObject, ObservableObject {
                     SIMD3<Float>(m.columns.2.x, m.columns.2.y, m.columns.2.z)
                 ).inverse.transpose
 
+                var color = renderable.color
+                color.w *= alpha
                 var basicUniforms = BasicUniforms(
                     modelMatrix: m,
                     viewMatrix: sceneViewMatrix,
@@ -1238,14 +1288,12 @@ class SatinRenderer: NSObject, ObservableObject {
                     lightColor: lightColor,
                     lightIntensity: lightIntensity,
                     normalMatrix: normalMatrix3x3,
-                    modelColor: renderable.color
+                    modelColor: color
                 )
 
                 encoder.setVertexBytes(&basicUniforms, length: MemoryLayout<BasicUniforms>.stride, index: 1)
                 encoder.setFragmentBytes(&basicUniforms, length: MemoryLayout<BasicUniforms>.stride, index: 1)
-
                 encoder.setVertexBuffer(renderable.vertexBuffer, offset: 0, index: 0)
-
                 encoder.drawIndexedPrimitives(
                     type: .triangle,
                     indexCount: renderable.indexCount,
@@ -1253,6 +1301,21 @@ class SatinRenderer: NSObject, ObservableObject {
                     indexBuffer: renderable.indexBuffer,
                     indexBufferOffset: 0
                 )
+            }
+
+            for renderable in basicRenderables {
+                let translucent = xrayEnabled && !renderable.opaqueInXray
+                drawBasic(renderable, alpha: translucent ? 0.30 : 1.0)
+            }
+
+            // ---- Aristas de sólidos (look Shapr3D): opacas SIEMPRE, dibujadas
+            // tras los cuerpos (en rayos X las de atrás se ven — el look correcto).
+            if !edgeRenderables.isEmpty {
+                encoder.setRenderPipelineState(basicPS)
+                encoder.setDepthStencilState(depthState)
+                for e in edgeRenderables { drawBasic(e, alpha: 1.0) }
+            } else if xrayEnabled {
+                encoder.setDepthStencilState(depthState)
             }
         }
 

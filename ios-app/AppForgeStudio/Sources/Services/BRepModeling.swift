@@ -38,6 +38,7 @@ enum BRepModeling {
         let model = Model(name: "\(prefix)_\(UUID().uuidString.prefix(6))")
         model.cadShape = shape
         model.meshes = [mesh]
+        model.edgesMesh = OCCTBridge.edgesMesh(shape)
         return model
     }
 
@@ -56,6 +57,7 @@ enum BRepModeling {
         }
         model.cadShape = newShape
         model.meshes = [mesh]
+        model.edgesMesh = OCCTBridge.edgesMesh(newShape)  // aristas visibles (look Shapr3D)
         model.geometryVersion += 1  // el renderer reconstruye los buffers GPU
         return true
     }

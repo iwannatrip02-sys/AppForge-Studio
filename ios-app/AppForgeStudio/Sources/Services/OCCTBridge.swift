@@ -73,6 +73,21 @@ enum OCCTBridge {
     static func toMeshRequired(_ shape: OCCTSwift.Shape, quality: MeshQuality = .medium) -> Mesh {
         toMesh(shape, quality: quality) ?? Mesh(vertices: [], indices: [])
     }
+
+    /// Malla de ARISTAS del B-rep (tubos finos por cada edge): el look Shapr3D —
+    /// todo sólido exacto muestra sus bordes. El renderer la dibuja oscura y
+    /// opaca (también en rayos X). nil si el shape no tiene aristas (esfera).
+    static func edgesMesh(_ shape: OCCTSwift.Shape, radius: Float = 0.008) -> Mesh? {
+        var vertices: [Vertex] = []
+        var indices: [UInt32] = []
+        for edge in shape.edges() {
+            let pts = edge.points(count: edge.isLine ? 2 : 24)
+                .map { SIMD3<Float>(Float($0.x), Float($0.y), Float($0.z)) }
+            GizmoBuilder.appendTube(polyline: pts, radius: radius,
+                                    to: &vertices, indices: &indices)
+        }
+        return vertices.isEmpty ? nil : Mesh(vertices: vertices, indices: indices)
+    }
 }
 
 enum MeshQuality: String, CaseIterable {

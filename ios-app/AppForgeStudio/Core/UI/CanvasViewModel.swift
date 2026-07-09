@@ -67,6 +67,7 @@ class CanvasViewModel: ObservableObject {
             let model = Model(name: "Cubo")
             model.cadShape = shape
             model.meshes = [mesh]
+            model.edgesMesh = OCCTBridge.edgesMesh(shape)
             scene.addModel(model)
             // Cámara inicial en ángulo isométrico: ver 3 caras con sombreado
             // distinto = percepción 3D inmediata (de frente el cubo parece un

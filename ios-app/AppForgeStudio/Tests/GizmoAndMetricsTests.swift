@@ -27,6 +27,33 @@ final class GizmoAndMetricsTests: XCTestCase {
         XCTAssertEqual(maxX, 1.0, accuracy: 1e-4, "la punta de la flecha está en length")
     }
 
+    func testRingMeshIsRenderable() {
+        let ring = GizmoBuilder.ringMesh(center: .zero, axis: SIMD3<Float>(0, 1, 0), radius: 1.0)
+        XCTAssertGreaterThan(ring.vertices.count, 100, "anillo de 40 segmentos con tubo")
+        XCTAssertEqual(ring.indices.count % 3, 0)
+        // Todos los puntos del anillo ⊥Y viven cerca del plano y=0 (± tubo)
+        for v in ring.vertices {
+            XCTAssertLessThan(abs(v.position.y), 0.05, "anillo ⊥ eje Y vive en el plano y≈0")
+        }
+    }
+
+    func testEdgesMeshForBoxIsSubstantial() throws {
+        let shape = try XCTUnwrap(OCCTSwift.Shape.box(width: 2, height: 2, depth: 2))
+        let edges = try XCTUnwrap(OCCTBridge.edgesMesh(shape),
+                                  "una caja tiene 12 aristas → malla de aristas")
+        // 12 aristas × 1 segmento × 8 vértices = 96 mínimo
+        XCTAssertGreaterThanOrEqual(edges.vertices.count, 96)
+        XCTAssertEqual(edges.indices.count % 3, 0)
+        // Las aristas viven en el contorno: toda posición tiene al menos 2
+        // coordenadas en ±1 (los bordes del cubo), con holgura del radio del tubo
+        for v in edges.vertices.prefix(50) {
+            let onBoundary = [abs(v.position.x), abs(v.position.y), abs(v.position.z)]
+                .filter { abs($0 - 1.0) < 0.05 }.count
+            XCTAssertGreaterThanOrEqual(onBoundary, 2,
+                "los tubos de arista viven en los bordes del cubo")
+        }
+    }
+
     func testRotateAroundArbitraryAxisPreservesVolume() throws {
         let model = try makeBoxModel()
         XCTAssertTrue(BRepModeling.rotate(model, axis: SIMD3<Double>(1, 0, 0),
