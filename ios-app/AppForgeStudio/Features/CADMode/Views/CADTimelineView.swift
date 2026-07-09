@@ -6,6 +6,7 @@ private let logger = Logger(subsystem: "com.appforgestudio", category: "CADTimel
 struct CADTimelineView: View {
     @ObservedObject var historyTree: CADHistoryTree
     @EnvironmentObject var themeManager: ThemeManager
+    @State private var showClearConfirm = false
 
     private var theme: AppTheme { themeManager.currentTheme }
 
@@ -57,13 +58,23 @@ struct CADTimelineView: View {
                 .font(.caption2)
                 .foregroundColor(theme.textSecondary)
 
-            Button(action: {
-                historyTree.clear()
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            }) {
+            Button(action: { showClearConfirm = true }) {
                 Image(systemName: "trash")
-                    .font(.system(size: 12))
-                    .foregroundColor(.red)
+                    .font(.system(size: 13))
+                    .foregroundColor(theme.error)
+            }
+            .accessibilityLabel("Borrar todo el historial")
+            // Borrar TODO el historial es destructivo: confirmación obligatoria
+            // (feedback de device: 'le di borrar y se borró todo' sin aviso).
+            .confirmationDialog("¿Borrar todo el historial?",
+                                isPresented: $showClearConfirm, titleVisibility: .visible) {
+                Button("Borrar \(historyTree.operationCount) operaciones", role: .destructive) {
+                    historyTree.clear()
+                    HapticService.shared.heavy()
+                }
+                Button("Cancelar", role: .cancel) {}
+            } message: {
+                Text("Esta acción no se puede deshacer.")
             }
         }
         .padding(.horizontal, 12)
@@ -112,18 +123,19 @@ struct CADNodeRow: View {
                 }
 
                 Image(systemName: iconFor(node.operation.type))
-                    .font(.system(size: 11))
+                    .font(.system(size: 13))
                     .foregroundColor(colorFor(node.operation.type))
-                    .frame(width: 16)
+                    .frame(width: 18)
 
+                // Tamaños legibles en iPad (feedback de device: "muy pequeño")
                 VStack(alignment: .leading, spacing: 1) {
                     Text(node.operation.description)
-                        .font(.system(size: 11))
+                        .font(.system(size: 13))
                         .foregroundColor(isCurrent ? theme.textPrimary : theme.textSecondary)
                         .lineLimit(1)
 
                     Text(relativeTimestamp(from: node.operation.timestamp))
-                        .font(.system(size: 8))
+                        .font(.system(size: 10))
                         .foregroundColor(theme.textSecondary.opacity(0.6))
                 }
 
