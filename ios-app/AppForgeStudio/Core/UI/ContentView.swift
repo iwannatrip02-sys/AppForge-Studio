@@ -36,6 +36,18 @@ struct ContentView: View {
                 onFrameGesture: { HapticService.shared.medium(); canvasVM.resetView() })
                 .edgesIgnoringSafeArea(.all)
 
+            // HUD de diagnóstico (build de diagnóstico): convierte el device del
+            // usuario en debugger — sin Mac no hay otra forma de ver el runtime.
+            if renderer.diagnosticsEnabled {
+                TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+                    diagnosticsHUD
+                }
+                .allowsHitTesting(false)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(.top, 8)
+                .padding(.leading, 8)
+            }
+
             VStack {
                 Spacer()
                 HStack {
@@ -82,6 +94,27 @@ struct ContentView: View {
                 },
             including: isPaintMode ? .all : .subviews
         )
+    }
+
+    /// Líneas del HUD de diagnóstico. Lo que el usuario lee aquí ES el bug report.
+    private var diagnosticsHUD: some View {
+        let d = renderer.diagnostics()
+        return VStack(alignment: .leading, spacing: 1) {
+            Text("render \(d.renderCalls) · encoded \(d.encodedFrames) · rebuilds \(d.rebuilds)")
+            Text("lib \(d.libraryOK ? "OK" : "FALLO") · basicPS \(d.basicPipelineOK ? "OK" : "NIL") · pbrPS \(d.pbrPipelineOK ? "OK" : "NIL") · sanity \(d.sanityPipelineOK ? "OK" : "NIL")")
+            Text("drawable \(Int(d.drawableSize.width))×\(Int(d.drawableSize.height)) · obj b\(d.basicCount)/p\(d.pbrCount) · idx \(d.totalIndices)")
+            Text(String(format: "cam (%.1f, %.1f, %.1f) → (%.1f, %.1f, %.1f)",
+                        d.cameraPos.x, d.cameraPos.y, d.cameraPos.z,
+                        d.cameraTarget.x, d.cameraTarget.y, d.cameraTarget.z))
+            if let err = d.lastGPUError {
+                Text("GPU: \(err)").foregroundColor(AppTheme.errorColor)
+            }
+        }
+        .font(.system(size: 9, weight: .medium, design: .monospaced))
+        .foregroundColor(AppTheme.textSecondaryColor)
+        .padding(6)
+        .background(Color.black.opacity(0.55))
+        .cornerRadius(AppTheme.radiusSM)
     }
 
     private func handleTouch(origin: SIMD3<Float>, direction: SIMD3<Float>) {

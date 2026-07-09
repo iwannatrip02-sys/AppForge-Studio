@@ -240,8 +240,94 @@ class SatinRenderer: NSObject, ObservableObject {
         setup()
     }
 
+    // MARK: - Diagnóstico de render (bisección del viewport negro en device)
+
+    /// Fotografía del estado del render para el HUD de diagnóstico en pantalla.
+    struct RenderDiagnostics {
+        var renderCalls: Int
+        var encodedFrames: Int
+        var rebuilds: Int
+        var libraryOK: Bool
+        var basicPipelineOK: Bool
+        var pbrPipelineOK: Bool
+        var sanityPipelineOK: Bool
+        var basicCount: Int
+        var pbrCount: Int
+        var totalIndices: Int
+        var drawableSize: CGSize
+        var cameraPos: SIMD3<Float>
+        var cameraTarget: SIMD3<Float>
+        var lastGPUError: String?
+    }
+
+    /// HUD y triángulo de sanidad activos (build de diagnóstico).
+    var diagnosticsEnabled = true
+    private(set) var renderCalls = 0
+    private(set) var encodedFrames = 0
+    private(set) var libraryLoaded = false
+    private(set) var lastDrawableSize: CGSize = .zero
+    private(set) var lastGPUError: String?
+    private var sanityPipeline: MTLRenderPipelineState?
+    private var sanityDepthState: MTLDepthStencilState?
+
+    func diagnostics() -> RenderDiagnostics {
+        RenderDiagnostics(
+            renderCalls: renderCalls,
+            encodedFrames: encodedFrames,
+            rebuilds: rebuildCount,
+            libraryOK: libraryLoaded,
+            basicPipelineOK: basicPipelineState != nil,
+            pbrPipelineOK: pbrPipelineState != nil,
+            sanityPipelineOK: sanityPipeline != nil,
+            basicCount: basicRenderables.count,
+            pbrCount: pbrRenderables.count,
+            totalIndices: basicRenderables.reduce(0) { $0 + $1.indexCount }
+                + pbrRenderables.reduce(0) { $0 + $1.indexCount },
+            drawableSize: lastDrawableSize,
+            cameraPos: scene3D?.camera.position ?? .zero,
+            cameraTarget: scene3D?.camera.target ?? .zero,
+            lastGPUError: lastGPUError
+        )
+    }
+
+    /// Triángulo naranja compilado DESDE FUENTE en runtime: cero dependencia del
+    /// metallib del bundle. Si se ve el triángulo pero no la escena → pipelines/
+    /// buffers/uniforms; si no se ve NI el triángulo → drawable/pass/commandQueue.
+    private func setupSanityPipeline() {
+        let src = """
+        #include <metal_stdlib>
+        using namespace metal;
+        vertex float4 sanity_vertex(uint vid [[vertex_id]]) {
+            float2 p[3] = { float2(-0.95,-0.95), float2(-0.55,-0.95), float2(-0.75,-0.55) };
+            return float4(p[vid], 0.0, 1.0);
+        }
+        fragment float4 sanity_fragment() { return float4(1.0, 0.48, 0.27, 1.0); }
+        """
+        guard let lib = try? device.makeLibrary(source: src, options: nil),
+              let v = lib.makeFunction(name: "sanity_vertex"),
+              let f = lib.makeFunction(name: "sanity_fragment") else {
+            logger.error("[Diag] no se pudo compilar el pipeline de sanidad")
+            return
+        }
+        let d = MTLRenderPipelineDescriptor()
+        d.vertexFunction = v
+        d.fragmentFunction = f
+        d.colorAttachments[0].pixelFormat = mtkView?.colorPixelFormat ?? .bgra8Unorm
+        d.depthAttachmentPixelFormat = .depth32Float
+        sanityPipeline = try? device.makeRenderPipelineState(descriptor: d)
+        let dd = MTLDepthStencilDescriptor()
+        dd.depthCompareFunction = .always
+        dd.isDepthWriteEnabled = false
+        sanityDepthState = device.makeDepthStencilState(descriptor: dd)
+    }
+
     func setup() {
-        guard let library = device.makeDefaultLibrary() else { return }
+        setupSanityPipeline()
+        guard let library = device.makeDefaultLibrary() else {
+            logger.error("[Render] makeDefaultLibrary FALLÓ — sin shaders, nada se dibuja")
+            return
+        }
+        libraryLoaded = true
 
         setupBasicPipeline(library: library)
         setupPBRPipeline(library: library)
@@ -945,6 +1031,8 @@ class SatinRenderer: NSObject, ObservableObject {
     }
 
     func render(in view: MTKView) {
+        renderCalls += 1
+        lastDrawableSize = view.drawableSize
         if let se = sculptEngine, var scene = self.scene3D {
             var modifiedModelIndices = Set<Int>()
             for i in 0..<scene.models.count {
@@ -999,6 +1087,7 @@ class SatinRenderer: NSObject, ObservableObject {
               let commandBuffer = commandQueue.makeCommandBuffer(),
               let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else { return }
 
+        encodedFrames += 1
         encoder.setDepthStencilState(depthState)
 
         // ---- Cámara real de la escena ----
@@ -1131,11 +1220,21 @@ class SatinRenderer: NSObject, ObservableObject {
             }
         }
 
+        // ---- Triángulo de sanidad (diagnóstico): se dibuja AL FINAL, encima de
+        // todo (depth .always), abajo-izquierda, en brasa. Independiente del
+        // metallib. Ver setupSanityPipeline para la lógica de bisección.
+        if diagnosticsEnabled, let sp = sanityPipeline {
+            encoder.setRenderPipelineState(sp)
+            if let sd = sanityDepthState { encoder.setDepthStencilState(sd) }
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        }
+
         encoder.endEncoding()
         commandBuffer.present(drawable)
-        commandBuffer.addCompletedHandler { cb in
+        commandBuffer.addCompletedHandler { [weak self] cb in
             if let error = cb.error {
                 logger.error("[Render] command buffer falló en GPU: \(error.localizedDescription)")
+                self?.lastGPUError = error.localizedDescription
             }
         }
         commandBuffer.commit()

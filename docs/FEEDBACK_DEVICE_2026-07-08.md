@@ -35,3 +35,30 @@
 ## Positivo confirmado
 - La estética general mejoró mucho ("mucho más bonita").
 - Sensibilidad del Pencil: buena, natural.
+- Chrome/botones/deslizables responden ("casi todo accedo y funciona").
+
+## Segunda prueba (misma fecha, beta-2026-07-08b) — fix de cámara NO fue suficiente
+- [ ] **El visor 3D sigue negro** (solo el visor; el chrome funciona). → Diagnóstico
+  definitivo desplegado: triángulo de sanidad compilado desde fuente en runtime +
+  HUD en pantalla (renderCalls/encodedFrames/pipelines/renderables/cámara/error GPU).
+  La próxima prueba del usuario ES el bug report.
+
+## Backlog de producto ampliado (visión del usuario, priorizar tras el visor)
+- Sketch de grado profesional CAD: trazo en tiempo real, radios, círculo/rect/arco
+  reales, regiones cerradas seleccionables/extruibles, constraints visibles.
+- Selección plena: puntos/líneas/caras/objetos; proyectar curvas sobre superficies;
+  extraer líneas/puntos/caras; duplicar/rotar/deformar.
+- Transformaciones con gizmo pro: gizmos GLOBALES y LOCALES (mundo vs objeto).
+- Sculpt nivel Nomad: pinceles con MINIATURA de su efecto, velocidad, pestañas
+  bien orientadas; esfera inicial en modo sculpt.
+- Pintura: pinceles/brochas reales (hoy no hay nada) — F3.
+- Capas y sistema de archivos/jerarquía de escena bien organizados.
+- Undo/redo confiable en TODO (usuario: "no funciona en nada").
+- Export detallado por formato + **AR Quick Look clave**: materiales realistas que
+  respondan a la iluminación REAL de la escena (USDZ con PBR bien mapeado).
+- Materiales e iluminación (pensar desde ya para render).
+- **FUTURE (v1.5+): slicer de impresión 3D integrado o export perfecto a slicers
+  de iPad — "la app todo-en-uno del 3D".**
+- Unión CAD↔Sculpt: la respuesta de diseño es Forge Flow (BLUEPRINT §3.2, hornear
+  B-rep→malla con badge de material y regla de oro del router). Plan B aceptado por
+  el usuario: flujos separados que convergen en export. V1: Forge Flow simple.
