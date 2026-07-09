@@ -79,6 +79,64 @@ struct CADModeView: View {
     /// del gesto en puntos de pantalla (se hornea al B-rep al soltar).
     @State private var dragModelIndex: Int? = nil
     @State private var dragAccum: SIMD2<Float> = .zero
+    /// Eje restringido del gizmo durante el drag (nil = drag libre sobre el cuerpo).
+    @State private var gizmoAxis: SIMD3<Float>? = nil
+
+    private static let gizmoNames = ["__gizmoX", "__gizmoY", "__gizmoZ"]
+
+    /// Centro del gizmo: cuerpo seleccionado + herramienta de transformación activa.
+    private var activeGizmoCenter: SIMD3<Float>? {
+        guard [.move, .rotate, .scale].contains(selectedTool),
+              case .body(let idx)? = selectionController.selection,
+              idx < canvasVM.scene.models.count else { return nil }
+        return bboxCenter(of: canvasVM.scene.models[idx])
+    }
+
+    private var gizmoLength: Float {
+        guard case .body(let idx)? = selectionController.selection,
+              idx < canvasVM.scene.models.count else { return 1.0 }
+        return bboxHalfDiagonal(of: canvasVM.scene.models[idx]) * 0.9 + 0.35
+    }
+
+    private func bboxCenter(of model: Model) -> SIMD3<Float> {
+        var minP = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
+        var maxP = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
+        for v in model.meshes.first?.vertices ?? [] {
+            minP = simd_min(minP, v.position)
+            maxP = simd_max(maxP, v.position)
+        }
+        return minP.x <= maxP.x ? (minP + maxP) * 0.5 : .zero
+    }
+
+    private func bboxHalfDiagonal(of model: Model) -> Float {
+        var minP = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
+        var maxP = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
+        for v in model.meshes.first?.vertices ?? [] {
+            minP = simd_min(minP, v.position)
+            maxP = simd_max(maxP, v.position)
+        }
+        return minP.x <= maxP.x ? simd_length(maxP - minP) * 0.5 : 0.8
+    }
+
+    /// Sincroniza los overlays de flechas del gizmo con la selección/herramienta.
+    private func rebuildGizmoOverlays() {
+        canvasVM.scene.models.removeAll { Self.gizmoNames.contains($0.name) }
+        if let center = activeGizmoCenter {
+            let len = gizmoLength
+            let axes: [(SIMD3<Float>, SIMD4<Float>, String)] = [
+                (SIMD3<Float>(1, 0, 0), SIMD4<Float>(0.97, 0.44, 0.44, 1), "__gizmoX"),
+                (SIMD3<Float>(0, 1, 0), SIMD4<Float>(0.20, 0.83, 0.60, 1), "__gizmoY"),
+                (SIMD3<Float>(0, 0, 1), SIMD4<Float>(0.30, 0.64, 1.00, 1), "__gizmoZ"),
+            ]
+            for (axis, color, name) in axes {
+                let m = Model(name: name)
+                m.meshes = [GizmoBuilder.arrowMesh(center: center, axis: axis, length: len)]
+                m.color = color
+                canvasVM.scene.addModel(m)
+            }
+        }
+        canvasVM.objectWillChange.send()
+    }
 
     private var isSketchTool: Bool {
         selectedTool.isSketchTool
@@ -208,6 +266,14 @@ struct CADModeView: View {
                         },
                         onEmptyTap: {
                             if selectedTool == .select { selectionController.deselect() }
+                        },
+                        gizmoCenter: activeGizmoCenter,
+                        gizmoAxisLength: gizmoLength,
+                        onGizmoDragBegan: { axis in
+                            HapticService.shared.light()
+                            gizmoAxis = axis
+                            dragModelIndex = selectionController.selection?.modelIndex
+                            dragAccum = .zero
                         })
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                         SnapGuideOverlay(
@@ -255,13 +321,21 @@ struct CADModeView: View {
         }
         .onChange(of: selectedTool) { newTool in
             if newTool != .pushPull { pushPullController.clear() }
-            if newTool != .select { selectionController.deselect() }
+            // Las herramientas de transformación CONSERVAN la selección de cuerpo
+            // (Shapr3D: seleccionas y luego eliges qué hacerle); el resto la limpia.
+            if newTool != .select && ![.move, .rotate, .scale].contains(newTool) {
+                selectionController.deselect()
+            }
             if newTool != .measure { measurePointA = nil; measurePointB = nil }
             executeCADTool(newTool, canvasVM: canvasVM, toolVM: toolVM)
+            rebuildGizmoOverlays()
         }
         .onChange(of: selectionController.outlinedModelId) { newId in
             renderer.outlinedModelId = newId
             canvasVM.objectWillChange.send()
+        }
+        .onChange(of: selectionController.selection) { _ in
+            rebuildGizmoOverlays()
         }
         .onChange(of: pushPullController.highlightMesh) { newMesh in
             // Sincronizar el overlay de resaltado de cara con la selección actual
@@ -986,27 +1060,34 @@ struct CADModeView: View {
 
     // MARK: - Transformación directa (Mover/Rotar/Escalar)
 
-    /// Parámetros del gesto acumulado, interpretados según la herramienta.
-    /// Sensibilidades calibradas para iPad (puntos de pantalla → mundo/ángulo).
-    private func transformParams(for model: Model) -> (delta: SIMD3<Float>, angle: Float, factor: Float, center: SIMD3<Float>) {
+    /// Parámetros del gesto acumulado, interpretados según herramienta y eje del
+    /// gizmo (nil = libre). Fuente única de verdad para preview Y bake.
+    private func transformParams(for model: Model) -> (delta: SIMD3<Float>, angle: Float, axis: SIMD3<Float>, factor: Float, center: SIMD3<Float>) {
         let cam = canvasVM.scene.camera
         let forward = simd_normalize(cam.target - cam.position)
         let right = simd_normalize(simd_cross(forward, cam.up))
         let up = simd_cross(right, forward)
         let dist = simd_length(cam.position - cam.target)
         let k = dist * 0.0011
-        let delta = right * dragAccum.x * k - up * dragAccum.y * k
+
+        let delta: SIMD3<Float>
+        let rotAxis: SIMD3<Float>
+        if let axis = gizmoAxis {
+            // Restringido: el drag se proyecta sobre la dirección del eje EN PANTALLA
+            // (arrastrar a lo largo de la flecha mueve; perpendicular no hace nada).
+            var axisScreen = SIMD2<Float>(simd_dot(axis, right), -simd_dot(axis, up))
+            let l = simd_length(axisScreen)
+            axisScreen = l > 0.15 ? axisScreen / l : SIMD2<Float>(1, 0)
+            let amount = simd_dot(dragAccum, axisScreen) * k
+            delta = axis * amount
+            rotAxis = axis
+        } else {
+            delta = right * dragAccum.x * k - up * dragAccum.y * k
+            rotAxis = SIMD3<Float>(0, 1, 0)
+        }
         let angle = dragAccum.x * 0.008
         let factor = max(0.05, min(20, 1 + dragAccum.y * -0.004))
-        // Centro = centroide del bounding box de la malla (espacio del modelo)
-        var minP = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
-        var maxP = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
-        for v in model.meshes.first?.vertices ?? [] {
-            minP = simd_min(minP, v.position)
-            maxP = simd_max(maxP, v.position)
-        }
-        let center = minP.x <= maxP.x ? (minP + maxP) * 0.5 : .zero
-        return (delta, angle, factor, center)
+        return (delta, angle, rotAxis, factor, bboxCenter(of: model))
     }
 
     /// Preview vivo vía TRS del modelo (el renderer sincroniza model.transform
@@ -1020,7 +1101,7 @@ struct CADModeView: View {
         case .move:
             model.position = p.delta
         case .rotate:
-            let q = simd_quatf(angle: p.angle, axis: SIMD3<Float>(0, 1, 0))
+            let q = simd_quatf(angle: p.angle, axis: p.axis)
             model.rotation = q
             model.position = p.center - q.act(p.center)
         case .scale:
@@ -1055,8 +1136,10 @@ struct CADModeView: View {
             case .move:
                 ok = BRepModeling.translate(model, by: SIMD3<Double>(Double(p.delta.x), Double(p.delta.y), Double(p.delta.z)))
             case .rotate:
-                ok = BRepModeling.rotateY(model, angle: Double(p.angle),
-                                          center: SIMD3<Double>(Double(p.center.x), Double(p.center.y), Double(p.center.z)))
+                ok = BRepModeling.rotate(model,
+                                         axis: SIMD3<Double>(Double(p.axis.x), Double(p.axis.y), Double(p.axis.z)),
+                                         angle: Double(p.angle),
+                                         center: SIMD3<Double>(Double(p.center.x), Double(p.center.y), Double(p.center.z)))
             case .scale:
                 ok = BRepModeling.scaleUniform(model, factor: Double(p.factor),
                                                center: SIMD3<Double>(Double(p.center.x), Double(p.center.y), Double(p.center.z)))
@@ -1090,6 +1173,8 @@ struct CADModeView: View {
             HapticService.shared.medium()
         }
         dragAccum = .zero
+        gizmoAxis = nil
+        rebuildGizmoOverlays()  // el centro del cuerpo cambió con el bake
         canvasVM.objectWillChange.send()
     }
 

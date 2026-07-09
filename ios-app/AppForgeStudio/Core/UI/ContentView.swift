@@ -27,6 +27,10 @@ struct ContentView: View {
     var onTransformEnded: (() -> Void)? = nil
     /// Tap en vacío → deseleccionar (el modo dueño decide qué limpiar).
     var onEmptyTap: (() -> Void)? = nil
+    /// Gizmo de transformación (centro mundo + longitud + drag por eje).
+    var gizmoCenter: SIMD3<Float>? = nil
+    var gizmoAxisLength: Float = 1.0
+    var onGizmoDragBegan: ((SIMD3<Float>) -> Void)? = nil
     @EnvironmentObject var themeManager: ThemeManager
 
     @State private var currentStroke: BrushStroke?
@@ -45,7 +49,10 @@ struct ContentView: View {
                 onTransformBegan: onTransformBegan,
                 onTransformChanged: onTransformChanged,
                 onTransformEnded: onTransformEnded,
-                onEmptyTap: onEmptyTap)
+                onEmptyTap: onEmptyTap,
+                gizmoCenter: gizmoCenter,
+                gizmoAxisLength: gizmoAxisLength,
+                onGizmoDragBegan: onGizmoDragBegan)
                 .edgesIgnoringSafeArea(.all)
 
             // HUD de diagnóstico (build de diagnóstico): convierte el device del

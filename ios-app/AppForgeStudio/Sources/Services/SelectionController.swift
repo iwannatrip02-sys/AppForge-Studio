@@ -50,8 +50,27 @@ final class SelectionController: ObservableObject {
             selection = .body(modelIndex: hit.modelIndex)
             outlinedModelId = model.id.uuidString
             highlightMesh = nil
-            statusMessage = "\(model.name) · toca de nuevo para cara o arista"
+            statusMessage = "\(model.name)\(bodyMetrics(model)) · toca de nuevo para cara/arista"
         }
+    }
+
+    // MARK: - Métricas reales (estilo barra inferior de Shapr3D)
+
+    /// Dimensiones del bbox + volumen exacto del B-rep.
+    private func bodyMetrics(_ model: Model) -> String {
+        var minP = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
+        var maxP = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
+        for v in model.meshes.first?.vertices ?? [] {
+            minP = simd_min(minP, v.position)
+            maxP = simd_max(maxP, v.position)
+        }
+        guard minP.x <= maxP.x else { return "" }
+        let d = maxP - minP
+        var s = String(format: " · %.1f×%.1f×%.1f", d.x, d.y, d.z)
+        if let vol = model.cadShape?.volume {
+            s += String(format: " · vol %.2f", vol)
+        }
+        return s
     }
 
     private func refine(hit: SurfaceHit, model: Model) {
@@ -64,7 +83,9 @@ final class SelectionController: ObservableObject {
             selection = .edge(modelIndex: hit.modelIndex, edgeIndex: e)
             outlinedModelId = nil
             highlightMesh = BRepEdgePicker.highlightTube(shape: shape, edgeIndex: e)
-            statusMessage = "Arista seleccionada"
+            let edges = shape.edges()
+            let len = e < edges.count ? edges[e].length : 0
+            statusMessage = String(format: "Arista · %.2f mm", len)
         } else if let f = BRepFacePicker.faceIndex(of: shape, nearest: hit.position),
                   let dm = model.meshes.first,
                   let hm = BRepFacePicker.highlightMesh(shape: shape, faceIndex: f,
@@ -72,7 +93,9 @@ final class SelectionController: ObservableObject {
             selection = .face(modelIndex: hit.modelIndex, faceIndex: f)
             outlinedModelId = nil
             highlightMesh = hm
-            statusMessage = "Cara seleccionada"
+            let faces = shape.faces()
+            let area = f < faces.count ? faces[f].area() : 0
+            statusMessage = String(format: "Cara · área %.2f mm²", area)
         } else {
             statusMessage = "No se encontró cara ni arista bajo el toque"
         }

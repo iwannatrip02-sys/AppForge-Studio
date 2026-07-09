@@ -93,14 +93,21 @@ enum BRepModeling {
         applyFeature(to: model) { $0.translated(by: delta) }
     }
 
+    /// Rota alrededor de un eje arbitrario que pasa por `center` (radianes).
+    @discardableResult
+    static func rotate(_ model: Model, axis: SIMD3<Double>, angle: Double,
+                       center: SIMD3<Double>) -> Bool {
+        applyFeature(to: model) { shape in
+            shape.translated(by: -center)?
+                .rotated(axis: axis, angle: angle)?
+                .translated(by: center)
+        }
+    }
+
     /// Rota alrededor del eje Y que pasa por `center` (ángulo en radianes).
     @discardableResult
     static func rotateY(_ model: Model, angle: Double, center: SIMD3<Double>) -> Bool {
-        applyFeature(to: model) { shape in
-            shape.translated(by: -center)?
-                .rotated(axis: SIMD3<Double>(0, 1, 0), angle: angle)?
-                .translated(by: center)
-        }
+        rotate(model, axis: SIMD3<Double>(0, 1, 0), angle: angle, center: center)
     }
 
     /// Escala uniforme alrededor de `center`.

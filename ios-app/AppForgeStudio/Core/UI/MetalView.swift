@@ -69,6 +69,11 @@ struct MetalView: UIViewRepresentable {
     var onTransformEnded: (() -> Void)?
     /// Tap sobre el vacío (sin hit): deseleccionar (contrato de gestos).
     var onEmptyTap: (() -> Void)?
+    /// Gizmo de transformación: centro en mundo (nil = sin gizmo) + longitud de
+    /// flecha. El drag que empieza sobre una manija restringe al eje tocado.
+    var gizmoCenter: SIMD3<Float>?
+    var gizmoAxisLength: Float = 1.0
+    var onGizmoDragBegan: ((SIMD3<Float>) -> Void)?
 
     func makeCoordinator() -> Coordinator {
         let c = Coordinator(
@@ -88,6 +93,9 @@ struct MetalView: UIViewRepresentable {
         c.onTransformChanged = onTransformChanged
         c.onTransformEnded = onTransformEnded
         c.onEmptyTap = onEmptyTap
+        c.gizmoCenter = gizmoCenter
+        c.gizmoAxisLength = gizmoAxisLength
+        c.onGizmoDragBegan = onGizmoDragBegan
         return c
     }
     
@@ -123,6 +131,9 @@ struct MetalView: UIViewRepresentable {
         context.coordinator.onTransformChanged = onTransformChanged
         context.coordinator.onTransformEnded = onTransformEnded
         context.coordinator.onEmptyTap = onEmptyTap
+        context.coordinator.gizmoCenter = gizmoCenter
+        context.coordinator.gizmoAxisLength = gizmoAxisLength
+        context.coordinator.onGizmoDragBegan = onGizmoDragBegan
         uiView.backgroundColor = metalBackground
         uiView.setNeedsDisplay()
     }
@@ -148,6 +159,9 @@ struct MetalView: UIViewRepresentable {
         var onTransformChanged: ((Float, Float) -> Void)?
         var onTransformEnded: (() -> Void)?
         var onEmptyTap: (() -> Void)?
+        var gizmoCenter: SIMD3<Float>?
+        var gizmoAxisLength: Float = 1.0
+        var onGizmoDragBegan: ((SIMD3<Float>) -> Void)?
         private var isTransforming = false
         /// Pencil = SIEMPRE herramienta, nunca orbita (BLUEPRINT S1).
         /// Se captura en shouldReceive porque los recognizers no exponen el touch.
@@ -272,15 +286,19 @@ struct MetalView: UIViewRepresentable {
                 // (sculpt), sobre vacío = orbitar. El hitTest usa ScenePicker (único
                 // camino de picking; ignora overlays "__" como el highlight de cara).
                 if singleFinger && transformEnabled, let view = gesture.view {
-                    // Mover/Rotar/Escalar: drag sobre un cuerpo = transformarlo;
-                    // drag sobre vacío = orbitar (el contrato de siempre).
-                    let ray = CameraRay.from(screenPoint: location, viewSize: view.bounds.size,
-                                             camera: scene.camera)
-                    if let hit = ScenePicker.hitTest(models: scene.models, ray: ray) {
+                    // Prioridad: manija del gizmo → cuerpo → vacío (orbitar).
+                    if let axis = gizmoAxisHit(at: location, in: view) {
                         isTransforming = true
-                        onTransformBegan?(hit)
-                    } else if !lastTouchWasPencil {
-                        isOrbiting = true
+                        onGizmoDragBegan?(axis)
+                    } else {
+                        let ray = CameraRay.from(screenPoint: location, viewSize: view.bounds.size,
+                                                 camera: scene.camera)
+                        if let hit = ScenePicker.hitTest(models: scene.models, ray: ray) {
+                            isTransforming = true
+                            onTransformBegan?(hit)
+                        } else if !lastTouchWasPencil {
+                            isOrbiting = true
+                        }
                     }
                 } else if singleFinger && sculptEnabled && renderer.sculptEngine != nil {
                     if let hit = sculptHit(at: location, in: gesture.view) {
@@ -430,6 +448,47 @@ struct MetalView: UIViewRepresentable {
             }
         }
         
+        // MARK: - Gizmo (hit-test en PANTALLA: robusto para manijas finas)
+
+        /// Proyecta un punto de mundo a coordenadas de pantalla (puntos).
+        private func projectToScreen(_ p: SIMD3<Float>, in view: UIView) -> CGPoint? {
+            let size = view.bounds.size
+            let aspect = Float(size.width / max(size.height, 1))
+            let vm = SatinRenderer.viewMatrix(for: scene.camera)
+            let pm = SatinRenderer.projectionMatrix(for: scene.camera, aspect: aspect)
+            let eye = vm * SIMD4<Float>(p.x, p.y, p.z, 1)
+            let clip = pm * eye
+            guard clip.w > 0 else { return nil }   // detrás de la cámara
+            let ndc = SIMD2<Float>(clip.x / clip.w, clip.y / clip.w)
+            return CGPoint(x: CGFloat((ndc.x + 1) * 0.5) * size.width,
+                           y: CGFloat((1 - ndc.y) * 0.5) * size.height)
+        }
+
+        /// Eje del gizmo bajo el toque (distancia 2D al segmento centro→punta < 34pt).
+        private func gizmoAxisHit(at location: CGPoint, in view: UIView) -> SIMD3<Float>? {
+            guard let center = gizmoCenter,
+                  let c2 = projectToScreen(center, in: view) else { return nil }
+            let axes: [SIMD3<Float>] = [SIMD3<Float>(1, 0, 0), SIMD3<Float>(0, 1, 0), SIMD3<Float>(0, 0, 1)]
+            var best: (axis: SIMD3<Float>, dist: CGFloat)?
+            for axis in axes {
+                guard let t2 = projectToScreen(center + axis * gizmoAxisLength, in: view) else { continue }
+                let d = distanceToSegment(location, a: c2, b: t2)
+                if d < 34, d < (best?.dist ?? .greatestFiniteMagnitude) {
+                    best = (axis, d)
+                }
+            }
+            return best?.axis
+        }
+
+        private func distanceToSegment(_ p: CGPoint, a: CGPoint, b: CGPoint) -> CGFloat {
+            let ab = CGPoint(x: b.x - a.x, y: b.y - a.y)
+            let ap = CGPoint(x: p.x - a.x, y: p.y - a.y)
+            let len2 = ab.x * ab.x + ab.y * ab.y
+            let t = len2 > 0 ? max(0, min(1, (ap.x * ab.x + ap.y * ab.y) / len2)) : 0
+            let proj = CGPoint(x: a.x + ab.x * t, y: a.y + ab.y * t)
+            return hypot(p.x - proj.x, p.y - proj.y)
+        }
+
         // MARK: - Sculpt Raycast
 
         /// Hit de superficie para sculpt vía el picking unificado (ScenePicker).

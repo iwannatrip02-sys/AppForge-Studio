@@ -83,9 +83,17 @@ fragment float4 grid_fragment(GridVertexOut in [[stage_in]]) {
     float2 gMajor = abs(fract(p / 2.5 - 0.5) - 0.5) / fwidth(p / 2.5);
     float lineMajor = 1.0 - min(min(gMajor.x, gMajor.y), 1.0);
     float fade = saturate(1.0 - length(p) / 28.0);
+
+    // Ejes del mundo (convención universal, como Shapr3D): X rojo, Z azul.
+    float axX = 1.0 - min(abs(p.y) / fwidth(p.y) / 1.6, 1.0);   // línea z=0 → eje X
+    float axZ = 1.0 - min(abs(p.x) / fwidth(p.x) / 1.6, 1.0);   // línea x=0 → eje Z
+
     float a = max(lineMinor * 0.16, lineMajor * 0.32) * fade;
+    float3 color = float3(0.44, 0.64, 0.82);   // steel #6FA3D0
+    if (axX > 0.0) { color = float3(0.97, 0.44, 0.44); a = max(a, axX * 0.55 * fade); }  // axisX #F87171
+    if (axZ > 0.0) { color = float3(0.30, 0.64, 1.00); a = max(a, axZ * 0.55 * fade); }  // axisZ #4DA3FF
     if (a < 0.01) { discard_fragment(); }
-    return float4(0.44, 0.64, 0.82, a);   // steel #6FA3D0
+    return float4(color, a);
 }
 
 struct StrokeVertexIn {
