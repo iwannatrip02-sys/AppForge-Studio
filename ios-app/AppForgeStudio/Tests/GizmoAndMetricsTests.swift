@@ -67,8 +67,7 @@ final class GizmoAndMetricsTests: XCTestCase {
         let sel = SelectionController()
         let edgePoint = SurfaceHit(modelIndex: 0, position: SIMD3<Float>(1, 0, 1),
                                    normal: SIMD3<Float>(1, 0, 0), distance: 1)
-        sel.handleTap(hit: edgePoint, models: [model])
-        sel.handleTap(hit: edgePoint, models: [model])
+        sel.handleTap(hit: edgePoint, models: [model])   // v2: UN tap directo
         XCTAssertTrue(sel.statusMessage.contains("2.00"),
                       "la arista de la caja 2×2×2 mide EXACTAMENTE 2.00 — es: \(sel.statusMessage)")
     }
@@ -78,8 +77,7 @@ final class GizmoAndMetricsTests: XCTestCase {
         let sel = SelectionController()
         let faceCenter = SurfaceHit(modelIndex: 0, position: SIMD3<Float>(0, 0, 1),
                                     normal: SIMD3<Float>(0, 0, 1), distance: 1)
-        sel.handleTap(hit: faceCenter, models: [model])
-        sel.handleTap(hit: faceCenter, models: [model])
+        sel.handleTap(hit: faceCenter, models: [model])   // v2: UN tap directo
         XCTAssertTrue(sel.statusMessage.contains("4.00"),
                       "la cara de la caja 2×2 tiene área EXACTA 4.00 — es: \(sel.statusMessage)")
     }
@@ -90,6 +88,7 @@ final class GizmoAndMetricsTests: XCTestCase {
         sel.handleTap(hit: SurfaceHit(modelIndex: 0, position: SIMD3<Float>(0, 0, 1),
                                       normal: SIMD3<Float>(0, 0, 1), distance: 1),
                       models: [model])
+        sel.escalateToBody(models: [model])   // v2: botón "Cuerpo" escala
         XCTAssertTrue(sel.statusMessage.contains("8.00"),
                       "el cuerpo reporta volumen exacto 8.00 — es: \(sel.statusMessage)")
     }

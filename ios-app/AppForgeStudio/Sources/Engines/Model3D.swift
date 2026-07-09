@@ -30,6 +30,10 @@ class Model: ObservableObject {
         freshCounter += 1
         return freshCounter
     }
+
+    /// Visibilidad en escena (ojo del panel de Elementos). Los invisibles no se
+    /// dibujan NI se tocan.
+    @Published var isVisible: Bool = true
     /// Aristas del B-rep como malla (tubos finos, look Shapr3D). La rellena
     /// OCCTBridge.edgesMesh en cada applyFeature/creación; el renderer la dibuja
     /// oscura y opaca (también en rayos X).

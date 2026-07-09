@@ -80,6 +80,8 @@ struct CADModeView: View {
     @State private var xrayOn = false
     /// Altura de extrusión del perfil de sketch (editable).
     @State private var sketchExtrudeHeight: Double = 1.0
+    /// Panel de Elementos visible (anatomía Shapr3D).
+    @State private var showElements = true
     /// Transformación directa en curso: índice del cuerpo arrastrado y acumulado
     /// del gesto en puntos de pantalla (se hornea al B-rep al soltar).
     @State private var dragModelIndex: Int? = nil
@@ -89,16 +91,16 @@ struct CADModeView: View {
 
     private static let gizmoNames = ["__gizmoX", "__gizmoY", "__gizmoZ"]
 
-    /// Centro del gizmo: cuerpo seleccionado + herramienta de transformación activa.
+    /// Centro del gizmo: cuerpo escalado + herramienta de transformación activa.
     private var activeGizmoCenter: SIMD3<Float>? {
         guard [.move, .rotate, .scale].contains(selectedTool),
-              case .body(let idx)? = selectionController.selection,
+              let idx = selectionController.bodyIndex,
               idx < canvasVM.scene.models.count else { return nil }
         return bboxCenter(of: canvasVM.scene.models[idx])
     }
 
     private var gizmoLength: Float {
-        guard case .body(let idx)? = selectionController.selection,
+        guard let idx = selectionController.bodyIndex,
               idx < canvasVM.scene.models.count else { return 1.0 }
         return bboxHalfDiagonal(of: canvasVM.scene.models[idx]) * 0.9 + 0.35
     }
@@ -200,7 +202,8 @@ struct CADModeView: View {
                     if selectedTool == .pushPull {
                         pushPullBar
                     }
-                    if selectionController.hasSelection && selectedTool == .select {
+                    if selectionController.hasSelection,
+                       [.select, .move, .rotate, .scale].contains(selectedTool) {
                         selectionBar
                     }
                     if isSketchTool {
@@ -274,7 +277,7 @@ struct CADModeView: View {
                         onGizmoDragBegan: { axis in
                             HapticService.shared.light()
                             gizmoAxis = axis
-                            dragModelIndex = selectionController.selection?.modelIndex
+                            dragModelIndex = selectionController.bodyIndex
                             dragAccum = .zero
                         },
                         // Sketch en viewport: taps = puntos; drag de PENCIL = trazo vivo
@@ -298,7 +301,24 @@ struct CADModeView: View {
                         // cotas vivas, relleno de perfiles) — estilo Shapr3D.
                         SketchCanvasOverlay(sketch: sketch, canvasVM: canvasVM)
                             .allowsHitTesting(false)
+
+                        // Panel de Elementos flotante (anatomía Shapr3D)
+                        if showElements {
+                            VStack {
+                                HStack {
+                                    ElementsPanel(canvasVM: canvasVM,
+                                                  selectionController: selectionController,
+                                                  renderer: renderer)
+                                    Spacer()
+                                }
+                                Spacer()
+                            }
+                            .padding(.leading, AppTheme.space2)
+                            .padding(.top, AppTheme.space2)
+                            .transition(.move(edge: .leading).combined(with: .opacity))
+                        }
                     }
+                    .animation(AppTheme.animDefault, value: showElements)
                     // (El doble tap = encuadrar vive en MetalView — gesto universal.)
                     bottomBar
             } else {
@@ -327,7 +347,7 @@ struct CADModeView: View {
             renderer.outlinedModelId = newId
             canvasVM.objectWillChange.send()
         }
-        .onChange(of: selectionController.selection) { _ in
+        .onChange(of: selectionController.bodyIndex) { _ in
             rebuildGizmoOverlays()
         }
         .onChange(of: pushPullController.highlightMesh) { newMesh in
@@ -383,6 +403,14 @@ struct CADModeView: View {
 
     private var tabSelector: some View {
         HStack(spacing: 0) {
+            // Toggle del panel de Elementos
+            Button(action: { HapticService.shared.light(); showElements.toggle() }) {
+                Image(systemName: "sidebar.left")
+                    .font(.system(size: 13))
+                    .foregroundColor(showElements ? theme.accent : theme.textSecondary)
+                    .frame(width: 34, height: 26)
+            }
+            .accessibilityLabel("Panel de elementos")
             ForEach(CADModeTab.allCases, id: \.self) { tab in
                 Button(action: { HapticService.shared.light(); selectedTab = tab }) {
                     Text(tab.displayName)
@@ -548,9 +576,8 @@ struct CADModeView: View {
                 .lineLimit(1)
             Spacer()
 
-            switch selectionController.selection {
-            case .body(let modelIndex)?:
-                // Grupo Duplicar (referencias Shapr3D): Reflejar + Patrón
+            // ---- Cuerpo escalado: acciones de cuerpo entero ----
+            if let modelIndex = selectionController.bodyIndex {
                 Button("Reflejar") {
                     HapticService.shared.medium()
                     guard modelIndex < canvasVM.scene.models.count else { return }
@@ -591,39 +618,45 @@ struct CADModeView: View {
                         .font(.caption)
                         .foregroundColor(theme.error)
                 }
-
-            case .face?:
-                Button("Push/Pull") {
-                    HapticService.shared.medium()
-                    if let hit = selectionController.lastHit {
-                        selectedTool = .pushPull
-                        toolVM.selectedTool = .pushPull
-                        pushPullController.selectFace(from: hit, in: canvasVM.scene.models)
+            } else {
+                // ---- Caras/aristas (multi): acciones directas + escalar ----
+                if case .face? = selectionController.lastItem {
+                    Button("Push/Pull") {
+                        HapticService.shared.medium()
+                        if let hit = selectionController.lastHit {
+                            selectedTool = .pushPull
+                            toolVM.selectedTool = .pushPull
+                            pushPullController.selectFace(from: hit, in: canvasVM.scene.models)
+                        }
                     }
+                    .font(.caption.bold())
                 }
-                .font(.caption.bold())
-
-            case .edge(let modelIndex, let edgeIndex)?:
-                Slider(value: $edgeFilletRadius, in: 0.01...0.5)
-                    .frame(width: 120)
-                NumericField(value: $edgeFilletRadius, range: 0.01...0.5)
-                Button("Redondear") {
-                    HapticService.shared.medium()
-                    guard modelIndex < canvasVM.scene.models.count else { return }
-                    let model = canvasVM.scene.models[modelIndex]
-                    BRepHistory.shared.recordChange(of: model)
-                    if BRepModeling.filletEdge(model, edgeIndex: edgeIndex, radius: edgeFilletRadius) {
-                        selectionController.deselect()
-                        canvasVM.objectWillChange.send()
-                        temperTick += 1
-                    } else {
-                        BRepHistory.shared.discardLast()
+                if case .edge(let modelIndex, let edgeIndex)? = selectionController.lastItem {
+                    Slider(value: $edgeFilletRadius, in: 0.01...0.5)
+                        .frame(width: 110)
+                    NumericField(value: $edgeFilletRadius, range: 0.01...0.5)
+                    Button("Redondear") {
+                        HapticService.shared.medium()
+                        guard modelIndex < canvasVM.scene.models.count else { return }
+                        let model = canvasVM.scene.models[modelIndex]
+                        BRepHistory.shared.recordChange(of: model)
+                        if BRepModeling.filletEdge(model, edgeIndex: edgeIndex,
+                                                   radius: edgeFilletRadius) {
+                            selectionController.deselect()
+                            canvasVM.objectWillChange.send()
+                            temperTick += 1
+                        } else {
+                            BRepHistory.shared.discardLast()
+                        }
                     }
+                    .font(.caption.bold())
                 }
-                .font(.caption.bold())
-
-            case nil:
-                EmptyView()
+                // Escalar la selección al cuerpo completo (mover/duplicar/eliminar)
+                Button("Cuerpo") {
+                    HapticService.shared.light()
+                    selectionController.escalateToBody(models: canvasVM.scene.models)
+                }
+                .font(.caption)
             }
 
             Button(action: { selectionController.deselect() }) {
@@ -639,8 +672,8 @@ struct CADModeView: View {
     }
 
     private var selectionIcon: String {
-        switch selectionController.selection {
-        case .body?: return "cube"
+        if selectionController.bodyIndex != nil { return "cube" }
+        switch selectionController.lastItem {
         case .face?: return "square.fill.on.square"
         case .edge?: return "angle"
         case nil: return "hand.tap"
@@ -1531,6 +1564,92 @@ struct CADModeView: View {
             if csgStatusMessage.isEmpty {
                 csgStatusMessage = "Selecciona la pieza A"
             }
+        }
+    }
+}
+
+// MARK: - Panel de Elementos (izquierdo, colapsable — anatomía Shapr3D)
+
+/// Árbol de la escena: cuerpos exactos ⬡ y mallas libres 〰, con ojo de
+/// visibilidad, selección al tocar y estética de tarjeta flotante calma.
+struct ElementsPanel: View {
+    @ObservedObject var canvasVM: CanvasViewModel
+    @ObservedObject var selectionController: SelectionController
+    let renderer: SatinRenderer
+    @EnvironmentObject var themeManager: ThemeManager
+
+    private var visibleModels: [(Int, Model)] {
+        canvasVM.scene.models.enumerated()
+            .filter { !$0.element.name.hasPrefix("__") }
+            .map { ($0.offset, $0.element) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("ELEMENTOS")
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(1.2)
+                .foregroundColor(AppTheme.textTertiary)
+                .padding(.horizontal, AppTheme.space3)
+                .padding(.vertical, AppTheme.space2)
+
+            ScrollView {
+                VStack(spacing: 1) {
+                    ForEach(visibleModels, id: \.1.id) { index, model in
+                        elementRow(index: index, model: model)
+                    }
+                    if visibleModels.isEmpty {
+                        Text("La escena está vacía")
+                            .font(.caption2)
+                            .foregroundColor(AppTheme.textTertiary)
+                            .padding(.vertical, AppTheme.space4)
+                    }
+                }
+            }
+        }
+        .frame(width: 190)
+        .frame(maxHeight: 380)
+        .glassPanel()
+    }
+
+    @ViewBuilder
+    private func elementRow(index: Int, model: Model) -> some View {
+        let isSelected = selectionController.bodyIndex == index
+        HStack(spacing: AppTheme.space2) {
+            // Badge de material: ⬡ exacto (B-rep) / 〰 libre (malla)
+            Image(systemName: model.cadShape != nil ? "hexagon" : "scribble.variable")
+                .font(.system(size: 11))
+                .foregroundColor(model.cadShape != nil ? AppTheme.steel : AppTheme.clay)
+                .frame(width: 16)
+            Text(model.name)
+                .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                .foregroundColor(isSelected ? AppTheme.accentColor
+                                 : (model.isVisible ? AppTheme.textPrimaryColor
+                                                    : AppTheme.textTertiary))
+                .lineLimit(1)
+            Spacer()
+            Button {
+                HapticService.shared.light()
+                model.isVisible.toggle()
+                model.geometryVersion = Model.nextFreshVersion()
+                canvasVM.objectWillChange.send()
+            } label: {
+                Image(systemName: model.isVisible ? "eye" : "eye.slash")
+                    .font(.system(size: 11))
+                    .foregroundColor(model.isVisible ? AppTheme.textSecondaryColor
+                                                     : AppTheme.textTertiary)
+            }
+        }
+        .padding(.horizontal, AppTheme.space3)
+        .padding(.vertical, 7)
+        .background(isSelected ? AppTheme.accentColor.opacity(0.10) : Color.clear)
+        .cornerRadius(AppTheme.radiusSM)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            HapticService.shared.light()
+            selectionController.deselect()
+            selectionController.selectBodyFromPanel(index: index,
+                                                    models: canvasVM.scene.models)
         }
     }
 }

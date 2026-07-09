@@ -266,8 +266,9 @@ class SatinRenderer: NSObject, ObservableObject {
         var lastGPUError: String?
     }
 
-    /// HUD y triángulo de sanidad activos (build de diagnóstico).
-    var diagnosticsEnabled = true
+    /// HUD y triángulo de sanidad (apagados: eran los marcadores de prototipo
+    /// más visibles; se reactivan si hay que diagnosticar render en device).
+    var diagnosticsEnabled = false
     private(set) var renderCalls = 0
     private(set) var encodedFrames = 0
     private(set) var libraryLoaded = false
@@ -844,7 +845,7 @@ class SatinRenderer: NSObject, ObservableObject {
         edgeRenderables.removeAll()
         modelIdToObject.removeAll()
 
-        for model in scene3D.models {
+        for model in scene3D.models where model.isVisible {
             if model.usesPBR {
                 let vb: MTLBuffer
                 let ib: MTLBuffer

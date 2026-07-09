@@ -52,7 +52,7 @@ enum ScenePicker {
     static func hitTest(models: [Model], ray: CameraRay) -> SurfaceHit? {
         var best: SurfaceHit?
         for (modelIndex, model) in models.enumerated() {
-            guard !model.name.hasPrefix("__") else { continue }
+            guard !model.name.hasPrefix("__"), model.isVisible else { continue }
             for mesh in model.meshes {
                 var j = 0
                 while j + 2 < mesh.indices.count {

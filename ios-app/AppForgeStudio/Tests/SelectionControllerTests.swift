@@ -3,8 +3,9 @@ import simd
 import OCCTSwift
 @testable import AppForgeStudio
 
-/// Tests del sistema de selección unificado (ÁREA 1): cuerpo → cara/arista
-/// con refinamiento por segundo tap, deselección, y estados siempre visibles.
+/// Tests de la selección DIRECTA v2 (feedback device: "sin pasar por cuerpo,
+/// en tiempo real, multi"): un tap = cara/arista tocada; taps suman; tocar lo
+/// seleccionado lo quita; "Cuerpo" escala; vacío deselecciona.
 @MainActor
 final class SelectionControllerTests: XCTestCase {
 
@@ -21,68 +22,78 @@ final class SelectionControllerTests: XCTestCase {
         SurfaceHit(modelIndex: model, position: p, normal: SIMD3<Float>(0, 0, 1), distance: 1)
     }
 
-    func testFirstTapSelectsBody() throws {
+    func testSingleTapSelectsFaceDirectly() throws {
         let model = try makeBoxModel()
         let sel = SelectionController()
+        sel.handleTap(hit: hit(SIMD3<Float>(0, 0, 1)), models: [model])   // centro cara +Z
 
+        guard case .face(0, _)? = sel.lastItem else {
+            return XCTFail("UN tap en el centro de una cara la selecciona DIRECTO, es \(String(describing: sel.lastItem))")
+        }
+        XCTAssertNotNil(sel.highlightMesh)
+        XCTAssertTrue(sel.statusMessage.contains("4.00"), "área exacta en vivo: \(sel.statusMessage)")
+    }
+
+    func testSingleTapNearEdgeSelectsEdgeDirectly() throws {
+        let model = try makeBoxModel()
+        let sel = SelectionController()
+        sel.handleTap(hit: hit(SIMD3<Float>(1, 0, 1)), models: [model])   // arista x=1,z=1
+
+        guard case .edge(0, _)? = sel.lastItem else {
+            return XCTFail("UN tap sobre la arista la selecciona DIRECTO")
+        }
+        XCTAssertTrue(sel.statusMessage.contains("2.00"), "longitud exacta: \(sel.statusMessage)")
+    }
+
+    func testMultiSelectionAccumulatesAndToggles() throws {
+        let model = try makeBoxModel()
+        let sel = SelectionController()
+        let faceA = hit(SIMD3<Float>(0, 0, 1))      // cara +Z
+        let faceB = hit(SIMD3<Float>(1, 0, 0))      // cara +X (centro)
+
+        sel.handleTap(hit: faceA, models: [model])
+        sel.handleTap(hit: faceB, models: [model])
+        XCTAssertEqual(sel.items.count, 2, "los taps SUMAN (multi-selección)")
+        XCTAssertTrue(sel.statusMessage.contains("2 caras"), "estado: \(sel.statusMessage)")
+        XCTAssertTrue(sel.statusMessage.contains("8.00"), "área total 4+4: \(sel.statusMessage)")
+
+        sel.handleTap(hit: faceB, models: [model])
+        XCTAssertEqual(sel.items.count, 1, "tocar lo seleccionado lo QUITA")
+    }
+
+    func testEscalateToBody() throws {
+        let model = try makeBoxModel()
+        let sel = SelectionController()
         sel.handleTap(hit: hit(SIMD3<Float>(0, 0, 1)), models: [model])
-        XCTAssertEqual(sel.selection, .body(modelIndex: 0))
-        XCTAssertEqual(sel.outlinedModelId, model.id.uuidString, "el cuerpo se marca para outline")
-        XCTAssertNil(sel.highlightMesh, "cuerpo = outline del renderer, sin overlay de malla")
-        XCTAssertFalse(sel.statusMessage.isEmpty)
-    }
+        sel.escalateToBody(models: [model])
 
-    func testSecondTapOnFaceCenterRefinesToFace() throws {
-        let model = try makeBoxModel()
-        let sel = SelectionController()
-        let faceCenter = hit(SIMD3<Float>(0, 0, 1))
-
-        sel.handleTap(hit: faceCenter, models: [model])
-        sel.handleTap(hit: faceCenter, models: [model])
-        guard case .face(0, _)? = sel.selection else {
-            return XCTFail("el 2º tap en el centro de una cara debe refinar a CARA, es \(String(describing: sel.selection))")
-        }
-        XCTAssertNotNil(sel.highlightMesh, "la cara seleccionada tiene highlight")
-        XCTAssertNil(sel.outlinedModelId, "al refinar, el outline de cuerpo se apaga")
-    }
-
-    func testSecondTapNearEdgeRefinesToEdge() throws {
-        let model = try makeBoxModel()
-        let sel = SelectionController()
-        let edgePoint = hit(SIMD3<Float>(1, 0, 1))  // punto medio de la arista x=1,z=1
-
-        sel.handleTap(hit: edgePoint, models: [model])
-        sel.handleTap(hit: edgePoint, models: [model])
-        guard case .edge(0, _)? = sel.selection else {
-            return XCTFail("el 2º tap sobre una arista debe refinar a ARISTA")
-        }
-        XCTAssertNotNil(sel.highlightMesh, "la arista seleccionada tiene tubo de highlight")
-    }
-
-    func testMeshOnlyModelReportsVisibleState() {
-        let model = Model(name: "Escultura")  // sin cadShape
-        var mesh = Mesh(vertices: [], indices: [])
-        mesh.vertices = [Vertex(position: .zero, normal: SIMD3<Float>(0, 0, 1), uv: .zero)]
-        model.meshes = [mesh]
-        let sel = SelectionController()
-        let p = hit(.zero)
-
-        sel.handleTap(hit: p, models: [model])   // cuerpo ✓
-        sel.handleTap(hit: p, models: [model])   // refinar → sin B-rep
-        XCTAssertEqual(sel.selection, .body(modelIndex: 0), "sin B-rep se queda en cuerpo")
-        XCTAssertTrue(sel.statusMessage.contains("malla libre"),
-                      "el estado es VISIBLE, nunca silencio (feedback: 'la esfera muda')")
+        XCTAssertEqual(sel.bodyIndex, 0)
+        XCTAssertTrue(sel.items.isEmpty, "escalar limpia los items")
+        XCTAssertEqual(sel.outlinedModelId, model.id.uuidString, "cuerpo → outline")
+        XCTAssertTrue(sel.statusMessage.contains("8.00"), "volumen exacto: \(sel.statusMessage)")
     }
 
     func testDeselectClearsEverything() throws {
         let model = try makeBoxModel()
         let sel = SelectionController()
         sel.handleTap(hit: hit(SIMD3<Float>(0, 0, 1)), models: [model])
-
+        sel.escalateToBody(models: [model])
         sel.deselect()
-        XCTAssertNil(sel.selection)
-        XCTAssertNil(sel.outlinedModelId)
+
+        XCTAssertTrue(sel.items.isEmpty)
+        XCTAssertNil(sel.bodyIndex)
         XCTAssertNil(sel.highlightMesh)
-        XCTAssertNil(sel.lastHit)
+        XCTAssertNil(sel.outlinedModelId)
+    }
+
+    func testMeshOnlyModelReportsVisibleState() {
+        let model = Model(name: "Escultura")
+        var mesh = Mesh(vertices: [], indices: [])
+        mesh.vertices = [Vertex(position: .zero, normal: SIMD3<Float>(0, 0, 1), uv: .zero)]
+        model.meshes = [mesh]
+        let sel = SelectionController()
+        sel.handleTap(hit: hit(.zero), models: [model])
+        XCTAssertTrue(sel.statusMessage.contains("malla libre"),
+                      "estado VISIBLE, nunca silencio: \(sel.statusMessage)")
     }
 }

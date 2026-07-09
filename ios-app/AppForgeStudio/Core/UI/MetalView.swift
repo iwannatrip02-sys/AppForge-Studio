@@ -492,7 +492,15 @@ struct MetalView: UIViewRepresentable {
         }
 
         @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
-            onFrameGesture?()
+            // Encuadrar SOLO al doble-tocar el VACÍO: sobre geometría chocaba con
+            // la selección múltiple ("al darle dos veces se reencuadra — conflicto").
+            guard let view = gesture.view else { return }
+            let location = gesture.location(in: view)
+            let ray = CameraRay.from(screenPoint: location, viewSize: view.bounds.size,
+                                     camera: scene.camera)
+            if ScenePicker.hitTest(models: scene.models, ray: ray) == nil {
+                onFrameGesture?()
+            }
         }
 
         @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
