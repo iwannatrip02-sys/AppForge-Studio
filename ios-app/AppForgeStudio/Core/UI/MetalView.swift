@@ -126,6 +126,8 @@ struct MetalView: UIViewRepresentable {
         v.enableSetNeedsDisplay = true
         v.isPaused = false
         v.isMultipleTouchEnabled = true
+        // ProMotion: la fluidez Shapr3D empieza aquí (iPad Pro M1 = 120 Hz)
+        v.preferredFramesPerSecond = 120
         
         renderer.updateScene(scene)
         context.coordinator.setupGestures(v)

@@ -18,10 +18,18 @@ class Model: ObservableObject {
     /// Las operaciones de ingeniería (booleanos/fillet/push-pull) van vía BRepModeling.
     var cadShape: CADShape?
     /// Se incrementa cuando la GEOMETRÍA de la malla cambia (features, bakes,
-    /// subdivisión). El renderer lo usa para reconstruir buffers GPU — antes solo
-    /// reconstruía al cambiar el NÚMERO de modelos y las operaciones se veían
-    /// con retraso o nunca.
-    var geometryVersion: Int = 0
+    /// subdivisión). El renderer lo usa para reconstruir buffers GPU.
+    /// Cada modelo NUEVO nace con una versión única (nonce): reemplazar un
+    /// overlay por otro (mismo conteo) también cambia la firma de la escena —
+    /// antes el swap dejaba visuales CONGELADOS hasta el siguiente rebuild
+    /// ("no se ve hasta que cambio de herramienta", feedback device).
+    var geometryVersion: Int = Model.nextFreshVersion()
+
+    private static var freshCounter = 0
+    static func nextFreshVersion() -> Int {
+        freshCounter += 1
+        return freshCounter
+    }
     /// Aristas del B-rep como malla (tubos finos, look Shapr3D). La rellena
     /// OCCTBridge.edgesMesh en cada applyFeature/creación; el renderer la dibuja
     /// oscura y opaca (también en rayos X).

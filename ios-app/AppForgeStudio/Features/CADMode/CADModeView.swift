@@ -282,24 +282,22 @@ struct CADModeView: View {
                         onSketchTap: { p in
                             HapticService.shared.light()
                             sketch.tap(at: p)
-                            syncSketchOverlays()
                         },
                         onSketchDragBegan: { p in
                             sketch.pencilDragBegan(at: p)
-                            syncSketchOverlays()
                         },
                         onSketchDragChanged: { p in
                             sketch.pencilDragChanged(to: p)
-                            syncSketchOverlays()
                         },
                         onSketchDragEnded: { p in
                             HapticService.shared.light()
                             sketch.pencilDragEnded(at: p)
-                            syncSketchOverlays()
                         })
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        // (PencilForceOverlay legacy eliminado: interceptaba los toques
-                        // del Pencil y chocaba con el trazo vivo del sketch nuevo.)
+                        // Sketch 2D NÍTIDO en pantalla (líneas finas, puntos,
+                        // cotas vivas, relleno de perfiles) — estilo Shapr3D.
+                        SketchCanvasOverlay(sketch: sketch, canvasVM: canvasVM)
+                            .allowsHitTesting(false)
                     }
                     // (El doble tap = encuadrar vive en MetalView — gesto universal.)
                     bottomBar
@@ -482,11 +480,11 @@ struct CADModeView: View {
                 .foregroundColor(theme.textSecondary)
                 .lineLimit(1)
             Spacer()
-            Button(action: { HapticService.shared.light(); sketch.undoLast(); syncSketchOverlays() }) {
+            Button(action: { HapticService.shared.light(); sketch.undoLast() }) {
                 Image(systemName: "arrow.uturn.backward").font(.system(size: 13))
             }
             .accessibilityLabel("Deshacer punto")
-            Button(action: { HapticService.shared.heavy(); sketch.clear(); syncSketchOverlays() }) {
+            Button(action: { HapticService.shared.heavy(); sketch.clear() }) {
                 Image(systemName: "trash").font(.system(size: 12)).foregroundColor(theme.error)
             }
             .accessibilityLabel("Borrar boceto")
@@ -505,23 +503,9 @@ struct CADModeView: View {
         .tempered(trigger: temperTick)
     }
 
-    /// Overlays del sketch: lo confirmado en acero, lo vivo en brasa.
-    private func syncSketchOverlays() {
-        canvasVM.scene.models.removeAll { $0.name == "__sketch" || $0.name == "__sketchLive" }
-        if let m = sketch.overlayMesh() {
-            let mod = Model(name: "__sketch")
-            mod.meshes = [m]
-            mod.color = SIMD4<Float>(0.56, 0.74, 0.90, 1)   // steelBright
-            canvasVM.scene.addModel(mod)
-        }
-        if let m = sketch.liveOverlayMesh() {
-            let mod = Model(name: "__sketchLive")
-            mod.meshes = [m]
-            mod.color = SIMD4<Float>(1.0, 0.48, 0.27, 1)    // brasa
-            canvasVM.scene.addModel(mod)
-        }
-        canvasVM.objectWillChange.send()
-    }
+    // (Los overlays 3D del sketch fueron reemplazados por SketchCanvasOverlay:
+    //  líneas 2D nítidas en pantalla, como Shapr3D — los tubos 3D se veían
+    //  gordos, con quiebres y "contaminantes", feedback device con referencia.)
 
     private func performSketchExtrude() {
         HapticService.shared.medium()
@@ -529,7 +513,6 @@ struct CADModeView: View {
         canvasVM.saveState()
         canvasVM.scene.addModel(model)
         sketch.clear()
-        syncSketchOverlays()
         canvasVM.scene.cadHistory.pushOperation(
             CADOperation(type: .createShape, description: "Extrusión desde boceto",
                          parameters: ["altura": sketchExtrudeHeight]))
@@ -540,13 +523,11 @@ struct CADModeView: View {
     private func performSketchRevolve() {
         HapticService.shared.medium()
         guard let model = sketch.revolveProfile() else {
-            syncSketchOverlays()
             return
         }
         canvasVM.saveState()
         canvasVM.scene.addModel(model)
         sketch.clear()
-        syncSketchOverlays()
         canvasVM.scene.cadHistory.pushOperation(
             CADOperation(type: .createShape, description: "Revolución desde boceto",
                          parameters: [:]))
@@ -1549,6 +1530,133 @@ struct CADModeView: View {
         .onAppear {
             if csgStatusMessage.isEmpty {
                 csgStatusMessage = "Selecciona la pieza A"
+            }
+        }
+    }
+}
+
+// MARK: - Sketch 2D en pantalla (nítido, como Shapr3D)
+
+/// Dibuja el sketch como GRÁFICOS 2D proyectados: líneas finas de ancho
+/// constante, círculos PERFECTOS, puntos en cada vértice, cotas en vivo y
+/// relleno translúcido en perfiles cerrados. Observa el sketch y la cámara:
+/// se redibuja en tiempo real (nada de esperar rebuilds del renderer).
+struct SketchCanvasOverlay: View {
+    @ObservedObject var sketch: SketchController
+    @ObservedObject var canvasVM: CanvasViewModel
+
+    private let steel = Color(red: 0.56, green: 0.74, blue: 0.90)
+    private let ember = Color(red: 1.0, green: 0.48, blue: 0.27)
+
+    var body: some View {
+        Canvas { ctx, size in
+            let cam = canvasVM.scene.camera
+            let aspect = Float(size.width / max(size.height, 1))
+            let vm = SatinRenderer.viewMatrix(for: cam)
+            let pm = SatinRenderer.projectionMatrix(for: cam, aspect: aspect)
+
+            func proj(_ p: SIMD2<Float>) -> CGPoint? {
+                let clip = pm * (vm * SIMD4<Float>(p.x, 0, p.y, 1))
+                guard clip.w > 0.001 else { return nil }
+                return CGPoint(x: CGFloat((clip.x / clip.w + 1) * 0.5) * size.width,
+                               y: CGFloat((1 - clip.y / clip.w) * 0.5) * size.height)
+            }
+
+            func strokePolyline(_ pts: [SIMD2<Float>], close: Bool,
+                                color: Color, width: CGFloat) {
+                let screen = pts.compactMap(proj)
+                guard screen.count >= 2 else { return }
+                var path = Path()
+                path.move(to: screen[0])
+                for p in screen.dropFirst() { path.addLine(to: p) }
+                if close { path.closeSubpath() }
+                ctx.stroke(path, with: .color(color),
+                           style: StrokeStyle(lineWidth: width, lineCap: .round,
+                                              lineJoin: .round))
+            }
+
+            func fillPolyline(_ pts: [SIMD2<Float>], color: Color) {
+                let screen = pts.compactMap(proj)
+                guard screen.count >= 3 else { return }
+                var path = Path()
+                path.move(to: screen[0])
+                for p in screen.dropFirst() { path.addLine(to: p) }
+                path.closeSubpath()
+                ctx.fill(path, with: .color(color))
+            }
+
+            func circlePts(_ c: SIMD2<Float>, _ r: Float) -> [SIMD2<Float>] {
+                (0...72).map { k in
+                    let t = Float(k) / 72 * 2 * .pi
+                    return c + SIMD2(cos(t), sin(t)) * r
+                }
+            }
+
+            func dot(_ p: SIMD2<Float>, color: Color, r: CGFloat = 4) {
+                guard let s = proj(p) else { return }
+                let rect = CGRect(x: s.x - r, y: s.y - r, width: r * 2, height: r * 2)
+                ctx.fill(Path(ellipseIn: rect), with: .color(.white))
+                ctx.stroke(Path(ellipseIn: rect), with: .color(color), lineWidth: 1.5)
+            }
+
+            func label(_ text: String, at p: SIMD2<Float>) {
+                guard let s = proj(p) else { return }
+                ctx.draw(Text(text).font(.system(size: 11, weight: .medium,
+                                                 design: .monospaced))
+                            .foregroundColor(ember),
+                         at: CGPoint(x: s.x, y: s.y - 14))
+            }
+
+            // ---- Entidades confirmadas (acero) con relleno de perfil ----
+            for e in sketch.entities {
+                switch e {
+                case .polyline(let pts, let closed):
+                    if closed { fillPolyline(pts, color: ember.opacity(0.10)) }
+                    strokePolyline(pts, close: closed, color: steel, width: 2)
+                    for p in pts { dot(p, color: steel, r: 3) }
+                case .rect(let a, let b):
+                    let corners = [a, SIMD2(b.x, a.y), b, SIMD2(a.x, b.y)]
+                    fillPolyline(corners, color: ember.opacity(0.10))
+                    strokePolyline(corners, close: true, color: steel, width: 2)
+                    for p in corners { dot(p, color: steel, r: 3) }
+                case .circle(let c, let r):
+                    fillPolyline(circlePts(c, r), color: ember.opacity(0.10))
+                    strokePolyline(circlePts(c, r), close: true, color: steel, width: 2)
+                    dot(c, color: steel, r: 3)
+                }
+            }
+
+            // ---- Cadena en curso + trazo vivo (brasa) con COTAS ----
+            if sketch.chain.count >= 2 {
+                strokePolyline(sketch.chain, close: false, color: ember, width: 2.5)
+            }
+            for p in sketch.chain { dot(p, color: ember) }
+            if let a = sketch.anchor { dot(a, color: ember) }
+
+            if let pv = sketch.preview {
+                let from: SIMD2<Float>? = sketch.chain.last ?? sketch.anchor
+                if let f = from, simd_distance(f, pv) > 1e-4 {
+                    switch sketch.activeTool {
+                    case .line:
+                        strokePolyline([f, pv], close: false, color: ember, width: 2.5)
+                        label(String(format: "%.2f", simd_distance(f, pv)),
+                              at: (f + pv) * 0.5)
+                    case .rectangle:
+                        let corners = [f, SIMD2(pv.x, f.y), pv, SIMD2(f.x, pv.y)]
+                        strokePolyline(corners, close: true, color: ember, width: 2.5)
+                        label(String(format: "%.2f × %.2f",
+                                     abs(pv.x - f.x), abs(pv.y - f.y)),
+                              at: (f + pv) * 0.5)
+                    case .circle:
+                        let r = simd_distance(f, pv)
+                        strokePolyline(circlePts(f, r), close: true,
+                                       color: ember, width: 2.5)
+                        strokePolyline([f, pv], close: false,
+                                       color: ember.opacity(0.4), width: 1)
+                        label(String(format: "R %.2f", r), at: pv)
+                    }
+                    dot(pv, color: ember)
+                }
             }
         }
     }
