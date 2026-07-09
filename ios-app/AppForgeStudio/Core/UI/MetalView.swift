@@ -204,6 +204,12 @@ struct MetalView: UIViewRepresentable {
             let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
             pinch.delegate = self
             view.addGestureRecognizer(pinch)
+
+            // Tercer eje de cámara (como Shapr3D): torcer con 2 dedos = ROLL
+            // (girar la vista alrededor del eje de mirada).
+            let roll = UIRotationGestureRecognizer(target: self, action: #selector(handleRoll(_:)))
+            roll.delegate = self
+            view.addGestureRecognizer(roll)
             
             let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
             tap.delegate = self
@@ -238,6 +244,7 @@ struct MetalView: UIViewRepresentable {
             }
             func isCameraGesture(_ g: UIGestureRecognizer) -> Bool {
                 g is UIPinchGestureRecognizer || g is UIPanGestureRecognizer
+                    || g is UIRotationGestureRecognizer
             }
             if isMultiTouchTap(gestureRecognizer) && isCameraGesture(other) { return false }
             if isMultiTouchTap(other) && isCameraGesture(gestureRecognizer) { return false }
@@ -414,6 +421,18 @@ struct MetalView: UIViewRepresentable {
                 onPinchExtrude?(distance, taper)
             case .ended, .cancelled:
                 isExtruding = false
+            default: break
+            }
+        }
+
+        @objc private func handleRoll(_ gesture: UIRotationGestureRecognizer) {
+            switch gesture.state {
+            case .changed:
+                let cam = scene.camera
+                let forward = simd_normalize(cam.target - cam.position)
+                let q = simd_quatf(angle: Float(-gesture.rotation), axis: forward)
+                scene.camera.up = simd_normalize(q.act(cam.up))
+                gesture.rotation = 0
             default: break
             }
         }

@@ -104,7 +104,10 @@ class CanvasViewModel: ObservableObject {
     }
     
     func resetView() {
+        // Encuadre isométrico (igual a la vista inicial): también endereza el
+        // roll de cámara — el doble tap es la salida de cualquier orientación rara.
         scene.camera = .default
+        scene.camera.position = SIMD3<Float>(2.6, 1.9, 2.6)
     }
     
     @Published var currentMode: AppMode = .hybrid
