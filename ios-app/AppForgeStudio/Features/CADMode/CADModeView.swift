@@ -463,10 +463,9 @@ struct CADModeView: View {
             Slider(value: $pushPullController.distance, in: -2.0...2.0)
                 .frame(width: 130)
                 .disabled(!pushPullController.hasSelection)
-            Text(String(format: "%+.2f", pushPullController.distance))
-                .font(.caption2.monospacedDigit())
-                .frame(width: 44)
-                .foregroundColor(pushPullController.distance >= 0 ? theme.accent : .orange)
+            // Valor EDITABLE: toca y escribe la distancia exacta (precisión CAD)
+            NumericField(value: $pushPullController.distance, range: -2.0...2.0)
+                .disabled(!pushPullController.hasSelection)
             Button(pushPullController.distance >= 0 ? "Añadir" : "Excavar") {
                 HapticService.shared.medium()
                 if pushPullController.apply() {
@@ -526,10 +525,7 @@ struct CADModeView: View {
             case .edge(let modelIndex, let edgeIndex)?:
                 Slider(value: $edgeFilletRadius, in: 0.01...0.5)
                     .frame(width: 120)
-                Text(String(format: "%.2f", edgeFilletRadius))
-                    .font(.caption2.monospacedDigit())
-                    .frame(width: 38)
-                    .foregroundColor(theme.accent)
+                NumericField(value: $edgeFilletRadius, range: 0.01...0.5)
                 Button("Redondear") {
                     HapticService.shared.medium()
                     guard modelIndex < canvasVM.scene.models.count else { return }

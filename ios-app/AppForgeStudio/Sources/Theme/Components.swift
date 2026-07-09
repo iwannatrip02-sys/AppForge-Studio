@@ -135,6 +135,46 @@ struct VerticalParamSlider: View {
     }
 }
 
+// MARK: NumericField — valor vivo EDITABLE (BLUEPRINT S3, precisión CAD)
+
+/// El número junto al slider deja de ser texto: tócalo y escribe el valor
+/// exacto (teclado decimal). Une el feel táctil con la precisión de ingeniería.
+struct NumericField: View {
+    @Binding var value: Double
+    var range: ClosedRange<Double> = 0.001...1000
+    var format: String = "%.2f"
+
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField("", text: $text)
+            .keyboardType(.numbersAndPunctuation)
+            .multilineTextAlignment(.trailing)
+            .font(AppTheme.Typography.monoLarge.font)
+            .foregroundColor(focused ? AppTheme.accentColor : AppTheme.textPrimaryColor)
+            .frame(width: 64)
+            .padding(.vertical, 2).padding(.horizontal, 4)
+            .background(focused ? AppTheme.accentColor.opacity(0.12) : AppTheme.bgOverlay)
+            .cornerRadius(AppTheme.radiusSM)
+            .focused($focused)
+            .onAppear { text = String(format: format, value) }
+            .onChange(of: value) { v in
+                if !focused { text = String(format: format, v) }
+            }
+            .onChange(of: text) { t in
+                guard focused else { return }
+                if let v = Double(t.replacingOccurrences(of: ",", with: ".")) {
+                    value = min(max(v, range.lowerBound), range.upperBound)
+                }
+            }
+            .onSubmit {
+                focused = false
+                text = String(format: format, value)
+            }
+    }
+}
+
 // MARK: View Extensions
 
 extension View {
