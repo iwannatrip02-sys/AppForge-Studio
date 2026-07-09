@@ -52,6 +52,42 @@ fragment float4 fragment_main(VertexOut in [[stage_in]], constant Uniforms &unif
     return float4(baseColor.rgb * lighting, baseColor.a);
 }
 
+// MARK: - Grilla universal del piso (procedural, antialiased)
+// Quad gigante en y=0; el fragment dibuja líneas cada 0.5 (menores) y 2.5
+// (mayores) con fade por distancia. Acero frío sutil (IDENTIDAD_FORGE §5:
+// la grilla jamás compite con la geometría).
+
+struct GridVertexOut {
+    float4 position [[position]];
+    float3 worldPos;
+};
+
+vertex GridVertexOut grid_vertex(uint vid [[vertex_id]],
+                                 constant Uniforms &uniforms [[buffer(1)]]) {
+    float2 corners[6] = {
+        float2(-1,-1), float2(1,-1), float2(1,1),
+        float2(-1,-1), float2(1,1), float2(-1,1)
+    };
+    float s = 60.0;
+    float3 world = float3(corners[vid].x * s, 0.0, corners[vid].y * s);
+    GridVertexOut out;
+    out.worldPos = world;
+    out.position = uniforms.projectionMatrix * uniforms.viewMatrix * float4(world, 1.0);
+    return out;
+}
+
+fragment float4 grid_fragment(GridVertexOut in [[stage_in]]) {
+    float2 p = in.worldPos.xz;
+    float2 gMinor = abs(fract(p / 0.5 - 0.5) - 0.5) / fwidth(p / 0.5);
+    float lineMinor = 1.0 - min(min(gMinor.x, gMinor.y), 1.0);
+    float2 gMajor = abs(fract(p / 2.5 - 0.5) - 0.5) / fwidth(p / 2.5);
+    float lineMajor = 1.0 - min(min(gMajor.x, gMajor.y), 1.0);
+    float fade = saturate(1.0 - length(p) / 28.0);
+    float a = max(lineMinor * 0.16, lineMajor * 0.32) * fade;
+    if (a < 0.01) { discard_fragment(); }
+    return float4(0.44, 0.64, 0.82, a);   // steel #6FA3D0
+}
+
 struct StrokeVertexIn {
     float4 position [[attribute(0)]];
     float4 color [[attribute(1)]];

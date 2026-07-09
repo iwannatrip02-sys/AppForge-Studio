@@ -270,6 +270,10 @@ class SatinRenderer: NSObject, ObservableObject {
     private(set) var lastGPUError: String?
     private var sanityPipeline: MTLRenderPipelineState?
     private var sanityDepthState: MTLDepthStencilState?
+    /// Grilla universal del piso (referencia espacial permanente).
+    private var gridPipelineState: MTLRenderPipelineState?
+    private var gridDepthState: MTLDepthStencilState?
+    var gridVisible = true
 
     func diagnostics() -> RenderDiagnostics {
         RenderDiagnostics(
@@ -338,6 +342,7 @@ class SatinRenderer: NSObject, ObservableObject {
         setupPBRPipeline(library: library)
         setupPBRIBLPipeline(library: library)
         setupIBLPipeline(library: library)
+        setupGridPipeline(library: library)
 
         iblComputePipeline = IBLPipeline(device: device, library: library)
 
@@ -404,6 +409,36 @@ class SatinRenderer: NSObject, ObservableObject {
         obj.visible = false
         cursorObject = obj
         scene?.add(obj)
+    }
+
+    private func setupGridPipeline(library: MTLLibrary) {
+        guard let vertexFn = library.makeFunction(name: "grid_vertex"),
+              let fragmentFn = library.makeFunction(name: "grid_fragment") else {
+            logger.warning("[Render] shaders de grilla no encontrados")
+            return
+        }
+        let d = MTLRenderPipelineDescriptor()
+        d.vertexFunction = vertexFn
+        d.fragmentFunction = fragmentFn
+        // Sin vertex descriptor: los vértices salen de vertex_id
+        d.colorAttachments[0].pixelFormat = mtkView?.colorPixelFormat ?? .bgra8Unorm
+        d.depthAttachmentPixelFormat = .depth32Float
+        d.colorAttachments[0].isBlendingEnabled = true
+        d.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+        d.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        d.colorAttachments[0].sourceAlphaBlendFactor = .one
+        d.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        do {
+            gridPipelineState = try device.makeRenderPipelineState(descriptor: d)
+        } catch {
+            logger.error("[Render] pipeline de grilla falló: \(error.localizedDescription)")
+        }
+        // Depth test SÍ (los objetos ocluyen la grilla), depth write NO
+        // (la grilla nunca oculta nada).
+        let dd = MTLDepthStencilDescriptor()
+        dd.depthCompareFunction = .less
+        dd.isDepthWriteEnabled = false
+        gridDepthState = device.makeDepthStencilState(descriptor: dd)
     }
 
     private func setupBasicPipeline(library: MTLLibrary) {
@@ -1224,6 +1259,24 @@ class SatinRenderer: NSObject, ObservableObject {
                     indexBufferOffset: 0
                 )
             }
+        }
+
+        // ---- Grilla universal del piso (tras la geometría: depth test la ocluye
+        // correctamente, depth write off para no ocultar nada) ----
+        if gridVisible, let gp = gridPipelineState {
+            encoder.setRenderPipelineState(gp)
+            if let gd = gridDepthState { encoder.setDepthStencilState(gd) }
+            var gridUniforms = BasicUniforms(
+                modelMatrix: matrix_identity_float4x4,
+                viewMatrix: sceneViewMatrix,
+                projectionMatrix: sceneProjectionMatrix,
+                ambientColor: .zero, lightDirection: .zero, lightColor: .zero,
+                lightIntensity: 0, normalMatrix: simd_float3x3(1),
+                modelColor: .zero
+            )
+            encoder.setVertexBytes(&gridUniforms, length: MemoryLayout<BasicUniforms>.stride, index: 1)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
+            encoder.setDepthStencilState(depthState)
         }
 
         // ---- Triángulo de sanidad (diagnóstico): se dibuja AL FINAL, encima de

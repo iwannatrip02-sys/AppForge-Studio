@@ -18,15 +18,44 @@ enum OCCTBridge {
         
         let vertexCount = occtMesh.vertices.count
         let normalCount = occtMesh.normals.count
-        
+
+        // El bridge nativo de OCCTSwift rellena (0,0,1) cuando la triangulación
+        // no trae normales → TODAS las normales iguales → sombreado plano (los
+        // objetos se ven como siluetas grises, feedback de device). Detectar
+        // normales ausentes O degeneradas y calcularlas desde los triángulos.
+        let degenerate: Bool = {
+            guard normalCount >= vertexCount, let first = occtMesh.normals.first else { return true }
+            return !occtMesh.normals.contains { simd_distance($0, first) > 0.01 }
+        }()
+        let normals: [SIMD3<Float>] = degenerate
+            ? Self.computeVertexNormals(positions: occtMesh.vertices, indices: occtMesh.indices)
+            : occtMesh.normals
+
         var vertices: [Vertex] = []
         for i in 0..<vertexCount {
-            let pos = occtMesh.vertices[i]
-            let nrm = normalCount > i ? occtMesh.normals[i] : SIMD3<Float>(0, 1, 0)
-            vertices.append(Vertex(position: pos, normal: nrm, uv: .zero))
+            vertices.append(Vertex(position: occtMesh.vertices[i],
+                                   normal: i < normals.count ? normals[i] : SIMD3<Float>(0, 1, 0),
+                                   uv: .zero))
         }
-        
+
         return Mesh(vertices: vertices, indices: occtMesh.indices)
+    }
+
+    /// Normales por vértice área-ponderadas (acumulación del cross por triángulo).
+    /// OCCT triangula por cara sin compartir vértices entre caras → las aristas
+    /// vivas se conservan nítidas.
+    static func computeVertexNormals(positions: [SIMD3<Float>],
+                                     indices: [UInt32]) -> [SIMD3<Float>] {
+        var acc = [SIMD3<Float>](repeating: .zero, count: positions.count)
+        var i = 0
+        while i + 2 < indices.count {
+            let a = Int(indices[i]), b = Int(indices[i + 1]), c = Int(indices[i + 2])
+            i += 3
+            guard a < positions.count, b < positions.count, c < positions.count else { continue }
+            let n = simd_cross(positions[b] - positions[a], positions[c] - positions[a])
+            acc[a] += n; acc[b] += n; acc[c] += n
+        }
+        return acc.map { simd_length($0) > 1e-9 ? simd_normalize($0) : SIMD3<Float>(0, 1, 0) }
     }
     
     static func toMesh(_ shape: OCCTSwift.Shape, quality: MeshQuality = .medium) -> Mesh? {

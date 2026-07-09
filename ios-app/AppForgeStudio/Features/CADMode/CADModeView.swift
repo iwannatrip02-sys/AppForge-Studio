@@ -73,6 +73,8 @@ struct CADModeView: View {
     /// Medición por toques sobre el modelo REAL (A → B → distancia exacta).
     @State private var measurePointA: SIMD3<Float>? = nil
     @State private var measurePointB: SIMD3<Float>? = nil
+    /// Highlight de la cara tocada con Seleccionar (feedback visual inmediato).
+    @State private var selFaceHighlight: Mesh? = nil
 
     private var isSketchTool: Bool {
         selectedTool.isSketchTool
@@ -161,10 +163,21 @@ struct CADModeView: View {
                                     }
                                 }
                             } else if selectedTool == .select {
-                                // Menú adaptativo (BLUEPRINT S2): tocar cerca de una
-                                // arista la selecciona y ofrece redondear; lejos, limpia.
+                                // Menú adaptativo (BLUEPRINT S2): cerca de una arista →
+                                // barra de redondear; si no, se ilumina la CARA tocada
+                                // (sin feedback visual la selección es a ciegas).
                                 if edgeFilletController.selectEdge(from: hit, in: canvasVM.scene.models) {
                                     HapticService.shared.light()
+                                    selFaceHighlight = nil
+                                } else if hit.modelIndex < canvasVM.scene.models.count,
+                                          let shape = canvasVM.scene.models[hit.modelIndex].cadShape,
+                                          let fIdx = BRepFacePicker.faceIndex(of: shape, nearest: hit.position),
+                                          let dm = canvasVM.scene.models[hit.modelIndex].meshes.first,
+                                          let hm = BRepFacePicker.highlightMesh(shape: shape, faceIndex: fIdx, displayMesh: dm) {
+                                    HapticService.shared.light()
+                                    selFaceHighlight = hm
+                                } else {
+                                    selFaceHighlight = nil
                                 }
                             }
                         },
@@ -234,6 +247,7 @@ struct CADModeView: View {
             if newTool != .pushPull { pushPullController.clear() }
             if newTool != .select { edgeFilletController.clear() }
             if newTool != .measure { measurePointA = nil; measurePointB = nil }
+            if newTool != .select { selFaceHighlight = nil }
             executeCADTool(newTool, canvasVM: canvasVM, toolVM: toolVM)
         }
         .onChange(of: pushPullController.highlightMesh) { newMesh in
@@ -252,6 +266,17 @@ struct CADModeView: View {
             canvasVM.scene.models.removeAll { $0.name == Self.edgeHighlightName }
             if let mesh = newMesh {
                 let overlay = Model(name: Self.edgeHighlightName)
+                overlay.meshes = [mesh]
+                overlay.color = SIMD4<Float>(1.0, 0.48, 0.27, 1.0)
+                canvasVM.scene.addModel(overlay)
+            }
+            canvasVM.objectWillChange.send()
+        }
+        .onChange(of: selFaceHighlight) { newMesh in
+            // Overlay de la cara tocada con Seleccionar (brasa = selección activa)
+            canvasVM.scene.models.removeAll { $0.name == "__selHighlight" }
+            if let mesh = newMesh {
+                let overlay = Model(name: "__selHighlight")
                 overlay.meshes = [mesh]
                 overlay.color = SIMD4<Float>(1.0, 0.48, 0.27, 1.0)
                 canvasVM.scene.addModel(overlay)
