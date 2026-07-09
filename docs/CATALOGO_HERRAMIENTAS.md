@@ -31,8 +31,8 @@
 
 | Pieza | Estado | Para nivel Shapr3D falta |
 |---|---|---|
-| Línea/Círculo/Rect/Arco | ❌ inutilizable | Trazo EN TIEMPO REAL (hoy no se ve mientras dibujas), radios/dimensiones en vivo, círculo por centro+radio, rect por 2 esquinas, arco por 3 puntos |
-| Regiones cerradas | ❌ | Detección de ciclos → sombreado tocable → tap = extruir (LA mecánica de Shapr3D) |
+| Línea/Círculo/Rect | ✅ v1 EN VIVO (viewport, snap, cierre, Pencil traza) · Arco ❌ | Trazo EN TIEMPO REAL (hoy no se ve mientras dibujas), radios/dimensiones en vivo, círculo por centro+radio, rect por 2 esquinas, arco por 3 puntos |
+| Regiones cerradas | ✅ v1 (cierre por snap → Extruir/Revolucionar B-rep con oráculos) | Detección de ciclos → sombreado tocable → tap = extruir (LA mecánica de Shapr3D) |
 | Constraints | ❌ UI | Motor existe (ConstraintEngine); falta inferencia visible (paralela/perpendicular/tangente como badges tocables) |
 | Planos de trabajo | ❌ | Dibujar en plano XY/XZ/YZ o sobre CARA de un sólido (fundamental); datum planes |
 | Cotas/dimensiones | ❌ | Dimensión editable al dibujar (tap número → teclado) |
