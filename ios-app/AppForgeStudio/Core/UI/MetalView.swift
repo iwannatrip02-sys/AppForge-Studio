@@ -67,6 +67,8 @@ struct MetalView: UIViewRepresentable {
     var onTransformBegan: ((SurfaceHit) -> Void)?
     var onTransformChanged: ((Float, Float) -> Void)?
     var onTransformEnded: (() -> Void)?
+    /// Tap sobre el vacío (sin hit): deseleccionar (contrato de gestos).
+    var onEmptyTap: (() -> Void)?
 
     func makeCoordinator() -> Coordinator {
         let c = Coordinator(
@@ -85,6 +87,7 @@ struct MetalView: UIViewRepresentable {
         c.onTransformBegan = onTransformBegan
         c.onTransformChanged = onTransformChanged
         c.onTransformEnded = onTransformEnded
+        c.onEmptyTap = onEmptyTap
         return c
     }
     
@@ -119,6 +122,7 @@ struct MetalView: UIViewRepresentable {
         context.coordinator.onTransformBegan = onTransformBegan
         context.coordinator.onTransformChanged = onTransformChanged
         context.coordinator.onTransformEnded = onTransformEnded
+        context.coordinator.onEmptyTap = onEmptyTap
         uiView.backgroundColor = metalBackground
         uiView.setNeedsDisplay()
     }
@@ -143,6 +147,7 @@ struct MetalView: UIViewRepresentable {
         var onTransformBegan: ((SurfaceHit) -> Void)?
         var onTransformChanged: ((Float, Float) -> Void)?
         var onTransformEnded: (() -> Void)?
+        var onEmptyTap: (() -> Void)?
         private var isTransforming = false
         /// Pencil = SIEMPRE herramienta, nunca orbita (BLUEPRINT S1).
         /// Se captura en shouldReceive porque los recognizers no exponen el touch.
@@ -420,6 +425,8 @@ struct MetalView: UIViewRepresentable {
                 // Punto de impacto REAL (antes se pasaba model.position — bug de precisión)
                 onTouch3D?(hit.position, ray.direction)
                 onSurfaceHit?(hit)
+            } else {
+                onEmptyTap?()
             }
         }
         

@@ -25,6 +25,8 @@ struct ContentView: View {
     var onTransformBegan: ((SurfaceHit) -> Void)? = nil
     var onTransformChanged: ((Float, Float) -> Void)? = nil
     var onTransformEnded: (() -> Void)? = nil
+    /// Tap en vacío → deseleccionar (el modo dueño decide qué limpiar).
+    var onEmptyTap: (() -> Void)? = nil
     @EnvironmentObject var themeManager: ThemeManager
 
     @State private var currentStroke: BrushStroke?
@@ -42,7 +44,8 @@ struct ContentView: View {
                 transformEnabled: transformEnabled,
                 onTransformBegan: onTransformBegan,
                 onTransformChanged: onTransformChanged,
-                onTransformEnded: onTransformEnded)
+                onTransformEnded: onTransformEnded,
+                onEmptyTap: onEmptyTap)
                 .edgesIgnoringSafeArea(.all)
 
             // HUD de diagnóstico (build de diagnóstico): convierte el device del

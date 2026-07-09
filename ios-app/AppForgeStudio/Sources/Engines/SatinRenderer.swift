@@ -81,6 +81,8 @@ private struct BasicRenderable {
     var modelMatrix: simd_float4x4
     var color: SIMD4<Float>
     var modelId: String  // for lookup during sculpt refresh & transform updates
+    /// Centro del bounding box (espacio del modelo) — pivote del outline de selección.
+    var center: SIMD3<Float> = .zero
 }
 
 /// @MainActor: AnimationEngine is @MainActor (ios-app/AppForgeStudio/Sources/Engines/AnimationEngine.swift:184).
@@ -274,6 +276,8 @@ class SatinRenderer: NSObject, ObservableObject {
     private var gridPipelineState: MTLRenderPipelineState?
     private var gridDepthState: MTLDepthStencilState?
     var gridVisible = true
+    /// id del modelo con outline de selección (silueta brasa). nil = ninguno.
+    var outlinedModelId: String?
 
     func diagnostics() -> RenderDiagnostics {
         RenderDiagnostics(
@@ -916,13 +920,25 @@ class SatinRenderer: NSObject, ObservableObject {
 
         let materialColor = model.usesPBR ? SIMD4<Float>(model.pbrMaterial.albedo.x, model.pbrMaterial.albedo.y, model.pbrMaterial.albedo.z, 1.0) : model.color
         let modelMatrix = model.transform
+        // Centro del bbox (pivote del outline de selección)
+        var minP = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
+        var maxP = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
+        var vi = 0
+        while vi + 2 < vertices.count {
+            let p = SIMD3<Float>(vertices[vi], vertices[vi + 1], vertices[vi + 2])
+            minP = simd_min(minP, p)
+            maxP = simd_max(maxP, p)
+            vi += 9
+        }
+        let bboxCenter = minP.x <= maxP.x ? (minP + maxP) * 0.5 : SIMD3<Float>.zero
         basicRenderables.append(BasicRenderable(
             vertexBuffer: vb,
             indexBuffer: ib,
             indexCount: indices.count,
             modelMatrix: modelMatrix,
             color: materialColor,
-            modelId: model.id.uuidString
+            modelId: model.id.uuidString,
+            center: bboxCenter
         ))
 
         // Build Satin Mesh for scene-graph operations (modelIdToObject, applyTransformsToScene, refreshNonPBRObjectGeometry)
@@ -1163,6 +1179,42 @@ class SatinRenderer: NSObject, ObservableObject {
         // We draw non-PBR objects directly via MTLRenderCommandEncoder from basicRenderables.
         if let basicPS = basicPipelineState, !basicRenderables.isEmpty {
             encoder.setRenderPipelineState(basicPS)
+
+            // ---- Outline de selección (silueta brasa): la malla agrandada ~3.5%
+            // alrededor de su centro, con culling FRONTAL, dibujada ANTES del
+            // cuerpo — solo queda visible el borde (técnica clásica de contorno).
+            if let outlineId = outlinedModelId,
+               let r = basicRenderables.first(where: { $0.modelId == outlineId }) {
+                let c = r.center
+                let s: Float = 1.035
+                var scaleM = matrix_identity_float4x4
+                scaleM.columns.0.x = s; scaleM.columns.1.y = s; scaleM.columns.2.z = s
+                var toC = matrix_identity_float4x4
+                toC.columns.3 = SIMD4<Float>(c.x, c.y, c.z, 1)
+                var fromC = matrix_identity_float4x4
+                fromC.columns.3 = SIMD4<Float>(-c.x, -c.y, -c.z, 1)
+                let outlineMatrix = r.modelMatrix * toC * scaleM * fromC
+
+                var u = BasicUniforms(
+                    modelMatrix: outlineMatrix,
+                    viewMatrix: sceneViewMatrix,
+                    projectionMatrix: sceneProjectionMatrix,
+                    ambientColor: SIMD3<Float>(1, 1, 1),   // sin sombreado: color puro
+                    lightDirection: SIMD3<Float>(0, -1, 0),
+                    lightColor: .zero, lightIntensity: 0,
+                    normalMatrix: simd_float3x3(1),
+                    modelColor: SIMD4<Float>(1.0, 0.48, 0.27, 1.0)  // brasa
+                )
+                encoder.setCullMode(.front)
+                encoder.setFrontFacing(.counterClockwise)
+                encoder.setVertexBytes(&u, length: MemoryLayout<BasicUniforms>.stride, index: 1)
+                encoder.setFragmentBytes(&u, length: MemoryLayout<BasicUniforms>.stride, index: 1)
+                encoder.setVertexBuffer(r.vertexBuffer, offset: 0, index: 0)
+                encoder.drawIndexedPrimitives(type: .triangle, indexCount: r.indexCount,
+                                              indexType: .uint32, indexBuffer: r.indexBuffer,
+                                              indexBufferOffset: 0)
+                encoder.setCullMode(.none)
+            }
 
             let ambientColor = SIMD3<Float>(0.18, 0.18, 0.18)
             let lightDirection = scene3D?.lighting.directionalLight.direction ?? simd_normalize(SIMD3<Float>(0.0, -1.0, -1.0))

@@ -26,7 +26,7 @@ struct CADModeView: View {
     @StateObject private var constraintEngine = ConstraintEngine()
     @StateObject private var assemblyEngine = AssemblyEngine()
     @StateObject private var pushPullController = PushPullController()
-    @StateObject private var edgeFilletController = EdgeFilletController()
+    @StateObject private var selectionController = SelectionController()
     @StateObject private var drawingExportController = DrawingExportController()
     @StateObject private var featureReportController = FeatureReportController()
     @ObservedObject private var brepHistory = BRepHistory.shared
@@ -73,8 +73,8 @@ struct CADModeView: View {
     /// Medición por toques sobre el modelo REAL (A → B → distancia exacta).
     @State private var measurePointA: SIMD3<Float>? = nil
     @State private var measurePointB: SIMD3<Float>? = nil
-    /// Highlight de la cara tocada con Seleccionar (feedback visual inmediato).
-    @State private var selFaceHighlight: Mesh? = nil
+    /// Radio del fillet contextual de arista (barra de selección).
+    @State private var edgeFilletRadius: Double = 0.1
     /// Transformación directa en curso: índice del cuerpo arrastrado y acumulado
     /// del gesto en puntos de pantalla (se hornea al B-rep al soltar).
     @State private var dragModelIndex: Int? = nil
@@ -144,8 +144,8 @@ struct CADModeView: View {
                     if selectedTool == .pushPull {
                         pushPullBar
                     }
-                    if edgeFilletController.hasSelection {
-                        edgeFilletBar
+                    if selectionController.hasSelection && selectedTool == .select {
+                        selectionBar
                     }
                     if showDrawingExportBar {
                         drawingExportBar
@@ -168,22 +168,9 @@ struct CADModeView: View {
                                     }
                                 }
                             } else if selectedTool == .select {
-                                // Menú adaptativo (BLUEPRINT S2): cerca de una arista →
-                                // barra de redondear; si no, se ilumina la CARA tocada
-                                // (sin feedback visual la selección es a ciegas).
-                                if edgeFilletController.selectEdge(from: hit, in: canvasVM.scene.models) {
-                                    HapticService.shared.light()
-                                    selFaceHighlight = nil
-                                } else if hit.modelIndex < canvasVM.scene.models.count,
-                                          let shape = canvasVM.scene.models[hit.modelIndex].cadShape,
-                                          let fIdx = BRepFacePicker.faceIndex(of: shape, nearest: hit.position),
-                                          let dm = canvasVM.scene.models[hit.modelIndex].meshes.first,
-                                          let hm = BRepFacePicker.highlightMesh(shape: shape, faceIndex: fIdx, displayMesh: dm) {
-                                    HapticService.shared.light()
-                                    selFaceHighlight = hm
-                                } else {
-                                    selFaceHighlight = nil
-                                }
+                                // Selección unificada (ÁREA 1): cuerpo → cara/arista
+                                HapticService.shared.light()
+                                selectionController.handleTap(hit: hit, models: canvasVM.scene.models)
                             }
                         },
                         // Tap 2 dedos = deshacer: primero el historial B-rep (features),
@@ -218,6 +205,9 @@ struct CADModeView: View {
                         },
                         onTransformEnded: {
                             bakeTransform()
+                        },
+                        onEmptyTap: {
+                            if selectedTool == .select { selectionController.deselect() }
                         })
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                         SnapGuideOverlay(
@@ -265,10 +255,13 @@ struct CADModeView: View {
         }
         .onChange(of: selectedTool) { newTool in
             if newTool != .pushPull { pushPullController.clear() }
-            if newTool != .select { edgeFilletController.clear() }
+            if newTool != .select { selectionController.deselect() }
             if newTool != .measure { measurePointA = nil; measurePointB = nil }
-            if newTool != .select { selFaceHighlight = nil }
             executeCADTool(newTool, canvasVM: canvasVM, toolVM: toolVM)
+        }
+        .onChange(of: selectionController.outlinedModelId) { newId in
+            renderer.outlinedModelId = newId
+            canvasVM.objectWillChange.send()
         }
         .onChange(of: pushPullController.highlightMesh) { newMesh in
             // Sincronizar el overlay de resaltado de cara con la selección actual
@@ -281,22 +274,11 @@ struct CADModeView: View {
             }
             canvasVM.objectWillChange.send()
         }
-        .onChange(of: edgeFilletController.highlightMesh) { newMesh in
-            // Overlay del tubo de arista seleccionada (brasa, no tocable por "__")
+        .onChange(of: selectionController.highlightMesh) { newMesh in
+            // Overlay de cara/arista seleccionada (brasa = activo; "__" = no tocable)
             canvasVM.scene.models.removeAll { $0.name == Self.edgeHighlightName }
             if let mesh = newMesh {
                 let overlay = Model(name: Self.edgeHighlightName)
-                overlay.meshes = [mesh]
-                overlay.color = SIMD4<Float>(1.0, 0.48, 0.27, 1.0)
-                canvasVM.scene.addModel(overlay)
-            }
-            canvasVM.objectWillChange.send()
-        }
-        .onChange(of: selFaceHighlight) { newMesh in
-            // Overlay de la cara tocada con Seleccionar (brasa = selección activa)
-            canvasVM.scene.models.removeAll { $0.name == "__selHighlight" }
-            if let mesh = newMesh {
-                let overlay = Model(name: "__selHighlight")
                 overlay.meshes = [mesh]
                 overlay.color = SIMD4<Float>(1.0, 0.48, 0.27, 1.0)
                 canvasVM.scene.addModel(overlay)
@@ -418,41 +400,90 @@ struct CADModeView: View {
         .tempered(trigger: temperTick)
     }
 
-    /// Barra contextual de arista (menú adaptativo, BLUEPRINT S2): aparece al tocar
-    /// una arista con Select; radio en vivo + Redondear (fillet B-rep selectivo).
-    private var edgeFilletBar: some View {
+    /// Barra contextual por SELECCIÓN (menú adaptativo, BLUEPRINT S2): ofrece
+    /// exactamente lo que aplica a lo seleccionado — cuerpo/cara/arista.
+    @ViewBuilder
+    private var selectionBar: some View {
         HStack(spacing: 10) {
-            Image(systemName: "angle")
+            Image(systemName: selectionIcon)
                 .foregroundColor(theme.accent)
-            Text(edgeFilletController.statusMessage)
+            Text(selectionController.statusMessage)
                 .font(.caption2)
                 .foregroundColor(theme.textSecondary)
                 .lineLimit(1)
             Spacer()
-            Slider(value: $edgeFilletController.radius, in: 0.01...0.5)
-                .frame(width: 130)
-            Text(String(format: "%.2f", edgeFilletController.radius))
-                .font(.caption2.monospacedDigit())
-                .frame(width: 40)
-                .foregroundColor(theme.accent)
-            Button("Redondear") {
-                HapticService.shared.medium()
-                if edgeFilletController.applyFillet() {
+
+            switch selectionController.selection {
+            case .body(let modelIndex)?:
+                Button(role: .destructive) {
+                    HapticService.shared.heavy()
+                    guard modelIndex < canvasVM.scene.models.count else { return }
+                    canvasVM.saveState()
+                    canvasVM.scene.models.remove(at: modelIndex)
+                    selectionController.deselect()
                     canvasVM.objectWillChange.send()
-                    temperTick += 1
+                } label: {
+                    Label("Eliminar", systemImage: "trash")
+                        .font(.caption)
+                        .foregroundColor(theme.error)
                 }
+
+            case .face?:
+                Button("Push/Pull") {
+                    HapticService.shared.medium()
+                    if let hit = selectionController.lastHit {
+                        selectedTool = .pushPull
+                        toolVM.selectedTool = .pushPull
+                        pushPullController.selectFace(from: hit, in: canvasVM.scene.models)
+                    }
+                }
+                .font(.caption.bold())
+
+            case .edge(let modelIndex, let edgeIndex)?:
+                Slider(value: $edgeFilletRadius, in: 0.01...0.5)
+                    .frame(width: 120)
+                Text(String(format: "%.2f", edgeFilletRadius))
+                    .font(.caption2.monospacedDigit())
+                    .frame(width: 38)
+                    .foregroundColor(theme.accent)
+                Button("Redondear") {
+                    HapticService.shared.medium()
+                    guard modelIndex < canvasVM.scene.models.count else { return }
+                    let model = canvasVM.scene.models[modelIndex]
+                    BRepHistory.shared.recordChange(of: model)
+                    if BRepModeling.filletEdge(model, edgeIndex: edgeIndex, radius: edgeFilletRadius) {
+                        selectionController.deselect()
+                        canvasVM.objectWillChange.send()
+                        temperTick += 1
+                    } else {
+                        BRepHistory.shared.discardLast()
+                    }
+                }
+                .font(.caption.bold())
+
+            case nil:
+                EmptyView()
             }
-            .font(.caption.bold())
-            Button(action: { edgeFilletController.clear() }) {
+
+            Button(action: { selectionController.deselect() }) {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundColor(theme.textSecondary)
             }
-            .accessibilityLabel("Cancelar selección de arista")
+            .accessibilityLabel("Deseleccionar")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(theme.surfaceSecondary)
         .tempered(trigger: temperTick)
+    }
+
+    private var selectionIcon: String {
+        switch selectionController.selection {
+        case .body?: return "cube"
+        case .face?: return "square.fill.on.square"
+        case .edge?: return "angle"
+        case nil: return "hand.tap"
+        }
     }
 
     /// Barra contextual de exportación de planos (DXF/PDF): selector de vista + botones de formato.
