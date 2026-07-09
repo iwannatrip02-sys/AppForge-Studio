@@ -69,6 +69,9 @@ struct CADModeView: View {
     @State private var showShareSheet: Bool = false
     /// Dispara el flash "templado" (IDENTIDAD_FORGE §6) al confirmar push/pull.
     @State private var temperTick: Int = 0
+    /// Medición por toques sobre el modelo REAL (A → B → distancia exacta).
+    @State private var measurePointA: SIMD3<Float>? = nil
+    @State private var measurePointB: SIMD3<Float>? = nil
 
     private var isSketchTool: Bool {
         selectedTool.isSketchTool
@@ -143,6 +146,19 @@ struct CADModeView: View {
                         ContentView(canvasVM: canvasVM, renderer: renderer, onSurfaceHit: { hit in
                             if selectedTool == .pushPull {
                                 pushPullController.selectFace(from: hit, in: canvasVM.scene.models)
+                            } else if selectedTool == .measure {
+                                // Medición sobre geometría real: primer toque = A,
+                                // segundo = B, tercero reinicia.
+                                HapticService.shared.light()
+                                if measurePointA == nil || measurePointB != nil {
+                                    measurePointA = hit.position
+                                    measurePointB = nil
+                                } else {
+                                    measurePointB = hit.position
+                                    if let a = measurePointA {
+                                        toolVM.measurementDistance = simd_distance(a, hit.position)
+                                    }
+                                }
                             } else if selectedTool == .select {
                                 // Menú adaptativo (BLUEPRINT S2): tocar cerca de una
                                 // arista la selecciona y ofrece redondear; lejos, limpia.
@@ -216,6 +232,7 @@ struct CADModeView: View {
         .onChange(of: selectedTool) { newTool in
             if newTool != .pushPull { pushPullController.clear() }
             if newTool != .select { edgeFilletController.clear() }
+            if newTool != .measure { measurePointA = nil; measurePointB = nil }
             executeCADTool(newTool, canvasVM: canvasVM, toolVM: toolVM)
         }
         .onChange(of: pushPullController.highlightMesh) { newMesh in
@@ -694,9 +711,30 @@ struct CADModeView: View {
             case .booleanUnion, .booleanSubtract, .booleanIntersect:
                 csgParameterBar
             case .measure:
-                MeasureTool(toolVM: toolVM, canvasVM: canvasVM)
-                    .padding(.horizontal, 10).padding(.vertical, 3)
-                    .background(theme.surfaceSecondary)
+                // Medición sobre el visor real (MeasureTool legacy tenía su propio
+                // mini-viewport con cámara falsa y congelaba la app — eliminado).
+                HStack(spacing: 10) {
+                    Image(systemName: "ruler")
+                        .foregroundColor(AppTheme.steel)
+                    Text(measurePointB != nil ? "Distancia medida"
+                         : (measurePointA != nil ? "Toca el punto B en el modelo"
+                                                 : "Toca el punto A en el modelo"))
+                        .font(.caption2)
+                        .foregroundColor(theme.textSecondary)
+                    Spacer()
+                    if measurePointA != nil, measurePointB != nil {
+                        Text(String(format: "%.2f mm", toolVM.measurementDistance))
+                            .font(.caption.monospacedDigit().bold())
+                            .foregroundColor(AppTheme.steel)
+                        Button(action: { measurePointA = nil; measurePointB = nil }) {
+                            Image(systemName: "arrow.counterclockwise")
+                                .font(.system(size: 12))
+                        }
+                        .accessibilityLabel("Reiniciar medición")
+                    }
+                }
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(theme.surfaceSecondary)
             default:
                 EmptyView()
             }
@@ -763,14 +801,18 @@ struct CADModeView: View {
     }
 
     private var bottomBar: some View {
-        HStack {
+        HStack(spacing: 12) {
             Toggle("Snap", isOn: $toolVM.gridSnapEnabled).toggleStyle(.switch).font(.caption)
-            Button(action: { showSnapOverlay.toggle() }) {
-                Image(systemName: showSnapOverlay ? "scope" : "dot.scope")
-                    .font(.system(size: 11))
-                    .foregroundColor(showSnapOverlay ? theme.accent : theme.textSecondary)
+            // Etiqueta explícita: era un icono-misterio (feedback de device)
+            Button(action: { HapticService.shared.light(); showSnapOverlay.toggle() }) {
+                HStack(spacing: 3) {
+                    Image(systemName: showSnapOverlay ? "scope" : "dot.scope")
+                        .font(.system(size: 11))
+                    Text("Guías").font(.caption2)
+                }
+                .foregroundColor(showSnapOverlay ? theme.accent : theme.textSecondary)
             }
-            .help("Toggle snap guides")
+            .accessibilityLabel("Mostrar guías de snap")
             Spacer()
             Button("Mediciones") { showMeasurements.toggle() }.font(.caption)
         }.padding(.horizontal).padding(.vertical, 4).background(theme.surface)

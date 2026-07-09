@@ -207,7 +207,22 @@ struct MetalView: UIViewRepresentable {
         }
         
         // MARK: - Gesture Handlers
-        
+
+        /// Sincroniza el estado esférico de órbita desde la cámara REAL de la escena.
+        /// Sin esto, el primer gesto "salta" a un estado viejo (la cámara pudo moverse
+        /// por el ViewCube, resetView o la posición inicial) — feedback de device:
+        /// "el desplazamiento queda como fijo en el punto anterior".
+        private func syncOrbitFromCamera() {
+            let cam = scene.camera
+            let offset = cam.position - cam.target
+            let r = simd_length(offset)
+            guard r > 0.0001 else { return }
+            orbitSpherical.radius = r
+            orbitSpherical.phi = acos(max(-1, min(1, offset.y / r)))
+            orbitSpherical.theta = atan2(offset.z, offset.x)
+            panTarget = cam.target
+        }
+
         @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
             let location = gesture.location(in: gesture.view)
             let translation = gesture.translation(in: gesture.view)
@@ -215,6 +230,7 @@ struct MetalView: UIViewRepresentable {
             switch gesture.state {
             case .began:
                 lastPanLocation = location
+                syncOrbitFromCamera()
                 let singleFinger = (gesture.numberOfTouches == 1)
                 // Router del contrato de gestos: 1 dedo sobre geometría = herramienta
                 // (sculpt), sobre vacío = orbitar. El hitTest usa ScenePicker (único
@@ -270,8 +286,16 @@ struct MetalView: UIViewRepresentable {
                     orbitSpherical.phi = max(0.1, min(.pi - 0.1, orbitSpherical.phi))
                     updateCameraOrbit()
                 } else if isPanning {
-                    panTarget.x -= dx * orbitSpherical.radius * 0.5
-                    panTarget.y += dy * orbitSpherical.radius * 0.5
+                    // Pan relativo a la CÁMARA (right/up del punto de vista actual).
+                    // Antes paneaba en ejes del mundo: tras orbitar, el arrastre se
+                    // sentía "desde donde estaba antes" (feedback de device).
+                    let cam = scene.camera
+                    let forward = simd_normalize(cam.target - cam.position)
+                    let right = simd_normalize(simd_cross(forward, cam.up))
+                    let up = simd_cross(right, forward)
+                    let scale = orbitSpherical.radius * 0.5
+                    panTarget -= right * dx * scale
+                    panTarget += up * dy * scale
                     updateCameraOrbit()
                 }
 
@@ -291,6 +315,8 @@ struct MetalView: UIViewRepresentable {
         @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
             let scale = Float(gesture.scale)
             switch gesture.state {
+            case .began:
+                syncOrbitFromCamera()
             case .changed:
                 orbitSpherical.radius /= max(0.1, scale)
                 orbitSpherical.radius = max(0.5, min(50.0, orbitSpherical.radius))

@@ -77,10 +77,12 @@ struct WorkspaceView: View {
         VStack(spacing: 0) {
             modeContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay(alignment: .bottomTrailing) {
+                // Centrado en el borde derecho: no colisiona con toolbars superiores
+                // ni con las barras inferiores (feedback: "mal posicionado").
+                .overlay(alignment: .trailing) {
                     ViewCubeControl(canvasVM: appState.canvasVM)
-                        .padding(.trailing, AppTheme.space3)
-                        .padding(.bottom, 64)
+                        .padding(.trailing, AppTheme.space2)
+                        .opacity(0.85)
                 }
             BottomModeBar(appState: appState)
         }

@@ -67,6 +67,10 @@ class CanvasViewModel: ObservableObject {
             model.cadShape = shape
             model.meshes = [mesh]
             scene.addModel(model)
+            // Cámara inicial en ángulo isométrico: ver 3 caras con sombreado
+            // distinto = percepción 3D inmediata (de frente el cubo parece un
+            // cuadrado plano — feedback de device).
+            scene.camera.position = SIMD3<Float>(2.6, 1.9, 2.6)
         } else {
             // Fallback defensivo (OCCT no disponible): esfera de malla
             let verts = generateSphereVertices(radius: 0.8, segments: 32)
