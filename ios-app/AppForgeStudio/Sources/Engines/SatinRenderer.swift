@@ -913,6 +913,36 @@ class SatinRenderer: NSObject, ObservableObject {
         return lights
     }
 
+    // MARK: - Matrices de cámara (scene3D.camera es LA fuente de verdad)
+
+    /// Matriz de vista RH (mundo→ojo). Internal para test con oráculo matemático.
+    static func viewMatrix(for cam: Scene3D.Camera) -> simd_float4x4 {
+        let f = simd_normalize(cam.target - cam.position)
+        let s = simd_normalize(simd_cross(f, cam.up))
+        let u = simd_cross(s, f)
+        return simd_float4x4(
+            SIMD4<Float>(s.x, u.x, -f.x, 0),
+            SIMD4<Float>(s.y, u.y, -f.y, 0),
+            SIMD4<Float>(s.z, u.z, -f.z, 0),
+            SIMD4<Float>(-simd_dot(s, cam.position), -simd_dot(u, cam.position),
+                         simd_dot(f, cam.position), 1)
+        )
+    }
+
+    /// Proyección perspectiva RH con NDC z∈[0,1] (convención Metal).
+    static func projectionMatrix(for cam: Scene3D.Camera, aspect: Float) -> simd_float4x4 {
+        let fovRad = cam.fov * .pi / 180
+        let y = 1 / tan(fovRad * 0.5)
+        let x = y / max(aspect, 0.0001)
+        let zs = cam.farPlane / (cam.nearPlane - cam.farPlane)
+        return simd_float4x4(
+            SIMD4<Float>(x, 0, 0, 0),
+            SIMD4<Float>(0, y, 0, 0),
+            SIMD4<Float>(0, 0, zs, -1),
+            SIMD4<Float>(0, 0, zs * cam.nearPlane, 0)
+        )
+    }
+
     func render(in view: MTKView) {
         if let se = sculptEngine, var scene = self.scene3D {
             var modifiedModelIndices = Set<Int>()
@@ -970,6 +1000,16 @@ class SatinRenderer: NSObject, ObservableObject {
 
         encoder.setDepthStencilState(depthState)
 
+        // ---- Cámara real de la escena ----
+        // BUG histórico (pantalla negra en device): se usaba la PerspectiveCamera de
+        // Satin creada en init y JAMÁS actualizada (origen, aspect 1) — la cámara de
+        // la app (orbit/pan/zoom mutan scene3D.camera) nunca llegaba a la GPU.
+        let cam = scene3D?.camera ?? .default
+        let dsz = view.drawableSize
+        let sceneAspect = dsz.height > 0 ? Float(dsz.width / dsz.height) : max(aspectRatio, 0.0001)
+        let sceneViewMatrix = Self.viewMatrix(for: cam)
+        let sceneProjectionMatrix = Self.projectionMatrix(for: cam, aspect: sceneAspect)
+
         // ---- Basic pipeline pass ----
         // Evidence: Satin 13 Object has no draw(encoder:) method.
         // We draw non-PBR objects directly via MTLRenderCommandEncoder from basicRenderables.
@@ -991,8 +1031,8 @@ class SatinRenderer: NSObject, ObservableObject {
 
                 var basicUniforms = BasicUniforms(
                     modelMatrix: m,
-                    viewMatrix: camera.viewMatrix,
-                    projectionMatrix: camera.projectionMatrix,
+                    viewMatrix: sceneViewMatrix,
+                    projectionMatrix: sceneProjectionMatrix,
                     ambientColor: ambientColor,
                     lightDirection: lightDirection,
                     lightColor: lightColor,
@@ -1026,9 +1066,9 @@ class SatinRenderer: NSObject, ObservableObject {
 
             let lighting = scene3D?.lighting ?? .default
             var lightUniforms = makeLightUniforms(from: lighting)
-            let viewMatrix = camera.viewMatrix
-            let projectionMatrix = camera.projectionMatrix
-            let cameraPos = camera.position
+            let viewMatrix = sceneViewMatrix
+            let projectionMatrix = sceneProjectionMatrix
+            let cameraPos = cam.position
             let cameraPos4 = SIMD4<Float>(cameraPos.x, cameraPos.y, cameraPos.z, 0)
 
             var iblUniforms = IBLUniforms(
