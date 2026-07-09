@@ -89,11 +89,12 @@ struct CADModeView: View {
     }
 
     private var cadTools: [CADTool] {
-        // .loft excluido: LoftEngine espera [Wire] y el puente Vertex→Wire no existe
-        // aún (F3) — no se muestran herramientas sin efecto real.
-        // .pushPull PRIMERO: es el flujo estrella (tap cara → boss/pocket) y estuvo
-        // INALCANZABLE hasta 2026-07-08 (no aparecía en ninguna lista del toolbar).
-        [.pushPull, .extrude, .loopCut, .bevel, .booleanUnion, .booleanSubtract, .booleanIntersect, .fillet, .chamfer, .shell, .sweep, .measure]
+        // Excluidos por PLACEBO (CATALOGO_HERRAMIENTAS §1): .loft (sin puente Wire,
+        // F3), .loopCut y .bevel (operaban sobre índices hardcodeados → "formas
+        // extrañas" en device; bisel real = Redondear/Chaflán selectivos), .sweep
+        // (path hardcodeado). Regla: placebo detectado = placebo retirado.
+        // .pushPull PRIMERO: es el flujo estrella (tap cara → boss/pocket).
+        [.pushPull, .extrude, .booleanUnion, .booleanSubtract, .booleanIntersect, .fillet, .chamfer, .shell, .measure]
     }
 
     private var sketchTools: [CADTool] {
