@@ -75,6 +75,30 @@ final class SketchControllerTests: XCTestCase {
         XCTAssertFalse(s.hasClosedProfile)
     }
 
+    func testDrillThroughHoleExactVolume() throws {
+        // Caja 2×2×2 + agujero PASANTE Ø0.4 por el centro de la cara superior:
+        // V = 8 − π·r²·h = 8 − π·0.04·2 ≈ 7.7487 (F-CAD-2a, INGENIERIA_INVERSA §4)
+        let shape = try XCTUnwrap(OCCTSwift.Shape.box(width: 2, height: 2, depth: 2))
+        let mesh = try XCTUnwrap(OCCTBridge.toMesh(shape, quality: .medium))
+        let model = Model(name: "Brida")
+        model.cadShape = shape
+        model.meshes = [mesh]
+
+        XCTAssertTrue(BRepModeling.drill(model, at: SIMD3<Double>(0, 0, 1),
+                                         direction: SIMD3<Double>(0, 0, -1),
+                                         radius: 0.2, depth: 0))
+        XCTAssertEqual(try volume(model), 8 - Double.pi * 0.04 * 2, accuracy: 0.01,
+                       "agujero pasante: volumen EXACTO 8 − πr²h")
+        XCTAssertNotNil(model.edgesMesh, "el agujero añade sus aristas circulares")
+
+        // Encadenable: segundo agujero en otra posición
+        XCTAssertTrue(BRepModeling.drill(model, at: SIMD3<Double>(0.6, 0, 1),
+                                         direction: SIMD3<Double>(0, 0, -1),
+                                         radius: 0.2, depth: 0))
+        XCTAssertEqual(try volume(model), 8 - 2 * Double.pi * 0.04 * 2, accuracy: 0.01,
+                       "dos agujeros = doble descuento exacto")
+    }
+
     func testMirrorAndPatternProduceExactCopies() throws {
         // Cuerpo base desde sketch (rect 1×1 en x∈[2,3]) — lejos del plano espejo
         let s = SketchController()

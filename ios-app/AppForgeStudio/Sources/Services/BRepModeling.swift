@@ -112,6 +112,18 @@ enum BRepModeling {
         rotate(model, axis: SIMD3<Double>(0, 1, 0), angle: angle, center: center)
     }
 
+    /// AGUJERO perpendicular (herramienta estrella de Fusion que Shapr3D hace a
+    /// mano): API drilled verificada @v1.8.8. depth 0 = PASANTE.
+    @discardableResult
+    static func drill(_ model: Model, at point: SIMD3<Double>,
+                      direction: SIMD3<Double>, radius: Double,
+                      depth: Double = 0) -> Bool {
+        guard radius > 1e-9 else { return false }
+        return applyFeature(to: model) {
+            $0.drilled(at: point, direction: direction, radius: radius, depth: depth)
+        }
+    }
+
     /// Copia REFLEJADA a través de un plano (v1: YZ por el origen — el plano
     /// del eje azul de la grilla). Devuelve el cuerpo nuevo, no muta el original.
     static func mirroredCopy(of model: Model,

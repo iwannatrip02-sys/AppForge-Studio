@@ -106,8 +106,8 @@ class ToolViewModel: ObservableObject {
             measurementVolume = abs(volume)
         case .select, .move, .rotate, .scale:
             break
-        case .revolve, .sketch, .pushPull:
-            // revolve: requiere perfil Wire; sketch: CADSketchView; pushPull: PushPullController
+        case .revolve, .sketch, .pushPull, .hole:
+            // revolve: requiere perfil Wire; sketch/pushPull/hole: controllers propios
             break
         case .line, .circle, .rectangle, .arc, .dimension, .constraint:
             break

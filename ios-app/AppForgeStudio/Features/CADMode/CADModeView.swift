@@ -78,6 +78,9 @@ struct CADModeView: View {
     @State private var edgeFilletRadius: Double = 0.1
     /// Espejo del estado de rayos X del renderer (para el tinte del botón).
     @State private var xrayOn = false
+    /// Herramienta Agujero (patrón universal: tocar cara = taladrar, encadenable).
+    @State private var holeRadius: Double = 0.15
+    @State private var holeDepth: Double = 0   // 0 = pasante
     /// Altura de extrusión del perfil de sketch (editable).
     @State private var sketchExtrudeHeight: Double = 1.0
     /// Panel de Elementos visible (anatomía Shapr3D).
@@ -104,7 +107,7 @@ struct CADModeView: View {
     private func tools(for group: ToolGroup) -> [CADTool] {
         switch group {
         case .draw: return sketchTools
-        case .form: return [.pushPull, .extrude, .fillet, .chamfer, .shell]
+        case .form: return [.pushPull, .hole, .extrude, .fillet, .chamfer, .shell]
         case .combine: return [.booleanUnion, .booleanSubtract, .booleanIntersect]
         case .primitives: return []
         }
@@ -236,6 +239,9 @@ struct CADModeView: View {
                     if isSketchTool {
                         sketchBar
                     }
+                    if selectedTool == .hole {
+                        holeBar
+                    }
                     if showDrawingExportBar {
                         drawingExportBar
                     }
@@ -255,6 +261,28 @@ struct CADModeView: View {
                                     if let a = measurePointA {
                                         toolVM.measurementDistance = simd_distance(a, hit.position)
                                     }
+                                }
+                            } else if selectedTool == .hole {
+                                // AGUJERO (patrón universal): tocar la cara taladra
+                                // perpendicular; la herramienta sigue activa (encadenable)
+                                guard hit.modelIndex < canvasVM.scene.models.count,
+                                      canvasVM.scene.models[hit.modelIndex].cadShape != nil
+                                else { return }
+                                let model = canvasVM.scene.models[hit.modelIndex]
+                                BRepHistory.shared.recordChange(of: model)
+                                let dir = -SIMD3<Double>(Double(hit.normal.x),
+                                                         Double(hit.normal.y),
+                                                         Double(hit.normal.z))
+                                let p = SIMD3<Double>(Double(hit.position.x),
+                                                      Double(hit.position.y),
+                                                      Double(hit.position.z))
+                                if BRepModeling.drill(model, at: p, direction: dir,
+                                                      radius: holeRadius, depth: holeDepth) {
+                                    HapticService.shared.medium()
+                                    temperTick += 1
+                                    canvasVM.objectWillChange.send()
+                                } else {
+                                    BRepHistory.shared.discardLast()
                                 }
                             } else if selectedTool == .select {
                                 // Selección unificada (ÁREA 1): cuerpo → cara/arista
@@ -516,6 +544,33 @@ struct CADModeView: View {
             .font(.caption.bold())
             .foregroundColor(pushPullController.distance >= 0 ? theme.accent : AppTheme.accentMuted)
             .disabled(!pushPullController.hasSelection)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(theme.surfaceSecondary)
+        .tempered(trigger: temperTick)
+    }
+
+    /// Barra del Agujero: Ø y profundidad editables, encadenable (patrón §0
+    /// de INGENIERIA_INVERSA_CAD: la herramienta no te expulsa al terminar).
+    private var holeBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "circle.circle")
+                .foregroundColor(theme.accent)
+            Text("Toca una cara para taladrar ⊥ (encadenable)")
+                .font(.caption2)
+                .foregroundColor(theme.textSecondary)
+                .lineLimit(1)
+            Spacer()
+            Text("Ø").font(.caption2).foregroundColor(theme.textSecondary)
+            NumericField(value: Binding(get: { holeRadius * 2 },
+                                        set: { holeRadius = $0 / 2 }),
+                         range: 0.02...4)
+            Text("Prof.").font(.caption2).foregroundColor(theme.textSecondary)
+            NumericField(value: $holeDepth, range: 0...20)
+            Text(holeDepth == 0 ? "pasante" : "ciego")
+                .font(.caption2)
+                .foregroundColor(AppTheme.steel)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -920,7 +975,7 @@ struct CADModeView: View {
         toolVM.selectedTool = tool
         if [.booleanUnion, .booleanSubtract, .booleanIntersect].contains(tool) {
             startCSGOperation(tool)
-        } else if ![.select, .move, .rotate, .scale, .pushPull].contains(tool),
+        } else if ![.select, .move, .rotate, .scale, .pushPull, .hole].contains(tool),
                   !tool.isSketchTool, tool != .measure {
             executeSelectedTool()
         }
