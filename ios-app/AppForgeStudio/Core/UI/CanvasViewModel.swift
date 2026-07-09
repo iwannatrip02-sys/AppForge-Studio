@@ -42,6 +42,7 @@ class CanvasViewModel: ObservableObject {
                   !scene.models[idx].meshes.isEmpty
             else { return }
             scene.models[idx].meshes[0] = newValue
+            scene.models[idx].geometryVersion += 1  // el renderer reconstruye buffers
             if let device = MTLCreateSystemDefaultDevice() {
                 scene.models[idx].meshes[0].uploadToGPU(device: device)
             }

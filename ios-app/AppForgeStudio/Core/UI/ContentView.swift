@@ -20,6 +20,11 @@ struct ContentView: View {
     /// CADModeView enchufa BRepHistory; SculptModeView enchufa el stack del SculptEngine.
     var onUndoGesture: (() -> Void)? = nil
     var onRedoGesture: (() -> Void)? = nil
+    /// Transformación directa (Mover/Rotar/Escalar sobre el cuerpo arrastrado).
+    var transformEnabled: Bool = false
+    var onTransformBegan: ((SurfaceHit) -> Void)? = nil
+    var onTransformChanged: ((Float, Float) -> Void)? = nil
+    var onTransformEnded: (() -> Void)? = nil
     @EnvironmentObject var themeManager: ThemeManager
 
     @State private var currentStroke: BrushStroke?
@@ -33,7 +38,11 @@ struct ContentView: View {
             }), renderer: renderer, animationEngine: canvasVM.animationEngine, onTouch3D: handleTouch, onSurfaceHit: onSurfaceHit, metalBackground: themeManager.currentTheme.metalBackground, sculptEnabled: sculptEnabled,
                 onUndoGesture: onUndoGesture ?? { HapticService.shared.light(); canvasVM.undo() },
                 onRedoGesture: onRedoGesture ?? { HapticService.shared.light(); canvasVM.redo() },
-                onFrameGesture: { HapticService.shared.medium(); canvasVM.resetView() })
+                onFrameGesture: { HapticService.shared.medium(); canvasVM.resetView() },
+                transformEnabled: transformEnabled,
+                onTransformBegan: onTransformBegan,
+                onTransformChanged: onTransformChanged,
+                onTransformEnded: onTransformEnded)
                 .edgesIgnoringSafeArea(.all)
 
             // HUD de diagnóstico (build de diagnóstico): convierte el device del

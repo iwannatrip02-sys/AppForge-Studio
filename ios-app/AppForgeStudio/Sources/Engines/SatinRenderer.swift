@@ -777,10 +777,19 @@ class SatinRenderer: NSObject, ObservableObject {
         cmdBuf.waitUntilCompleted()
     }
 
+    private var sceneGeometrySignature: Int = -1
+
     func updateScene(_ scene3D: Scene3D) {
-        let structureChanged = scene3D.models.count != sceneObjectCount
+        // Firma = conteo + versiones de geometría: reconstruir buffers cuando
+        // CUALQUIER malla cambió (features, bakes), no solo al añadir/quitar
+        // modelos (antes las operaciones se veían con retraso o nunca).
+        var signature = scene3D.models.count
+        for m in scene3D.models { signature = signature &* 31 &+ m.geometryVersion }
+        let structureChanged = signature != sceneGeometrySignature
         self.scene3D = scene3D
         if structureChanged {
+            sceneGeometrySignature = signature
+            sceneObjectCount = scene3D.models.count
             rebuildSceneFrom(scene3D)
         }
     }
@@ -1129,6 +1138,15 @@ class SatinRenderer: NSObject, ObservableObject {
 
         encodedFrames += 1
         encoder.setDepthStencilState(depthState)
+
+        // ---- Sincronizar matrices de modelo (preview vivo de transformaciones) ----
+        if let models = scene3D?.models {
+            for i in basicRenderables.indices {
+                if let m = models.first(where: { $0.id.uuidString == basicRenderables[i].modelId }) {
+                    basicRenderables[i].modelMatrix = m.transform
+                }
+            }
+        }
 
         // ---- Cámara real de la escena ----
         // BUG histórico (pantalla negra en device): se usaba la PerspectiveCamera de

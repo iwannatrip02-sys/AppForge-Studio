@@ -61,6 +61,12 @@ struct MetalView: UIViewRepresentable {
     var onUndoGesture: (() -> Void)?
     var onRedoGesture: (() -> Void)?
     var onFrameGesture: (() -> Void)?
+    /// Transformación directa (Mover/Rotar/Escalar): drag sobre un cuerpo lo
+    /// transforma; drag sobre vacío sigue orbitando (contrato de gestos intacto).
+    var transformEnabled: Bool = false
+    var onTransformBegan: ((SurfaceHit) -> Void)?
+    var onTransformChanged: ((Float, Float) -> Void)?
+    var onTransformEnded: (() -> Void)?
 
     func makeCoordinator() -> Coordinator {
         let c = Coordinator(
@@ -75,6 +81,10 @@ struct MetalView: UIViewRepresentable {
         c.onUndoGesture = onUndoGesture
         c.onRedoGesture = onRedoGesture
         c.onFrameGesture = onFrameGesture
+        c.transformEnabled = transformEnabled
+        c.onTransformBegan = onTransformBegan
+        c.onTransformChanged = onTransformChanged
+        c.onTransformEnded = onTransformEnded
         return c
     }
     
@@ -105,6 +115,10 @@ struct MetalView: UIViewRepresentable {
         context.coordinator.onUndoGesture = onUndoGesture
         context.coordinator.onRedoGesture = onRedoGesture
         context.coordinator.onFrameGesture = onFrameGesture
+        context.coordinator.transformEnabled = transformEnabled
+        context.coordinator.onTransformBegan = onTransformBegan
+        context.coordinator.onTransformChanged = onTransformChanged
+        context.coordinator.onTransformEnded = onTransformEnded
         uiView.backgroundColor = metalBackground
         uiView.setNeedsDisplay()
     }
@@ -125,6 +139,11 @@ struct MetalView: UIViewRepresentable {
         var onUndoGesture: (() -> Void)?
         var onRedoGesture: (() -> Void)?
         var onFrameGesture: (() -> Void)?
+        var transformEnabled: Bool = false
+        var onTransformBegan: ((SurfaceHit) -> Void)?
+        var onTransformChanged: ((Float, Float) -> Void)?
+        var onTransformEnded: (() -> Void)?
+        private var isTransforming = false
         /// Pencil = SIEMPRE herramienta, nunca orbita (BLUEPRINT S1).
         /// Se captura en shouldReceive porque los recognizers no exponen el touch.
         private var lastTouchWasPencil = false
@@ -235,7 +254,18 @@ struct MetalView: UIViewRepresentable {
                 // Router del contrato de gestos: 1 dedo sobre geometría = herramienta
                 // (sculpt), sobre vacío = orbitar. El hitTest usa ScenePicker (único
                 // camino de picking; ignora overlays "__" como el highlight de cara).
-                if singleFinger && sculptEnabled && renderer.sculptEngine != nil {
+                if singleFinger && transformEnabled, let view = gesture.view {
+                    // Mover/Rotar/Escalar: drag sobre un cuerpo = transformarlo;
+                    // drag sobre vacío = orbitar (el contrato de siempre).
+                    let ray = CameraRay.from(screenPoint: location, viewSize: view.bounds.size,
+                                             camera: scene.camera)
+                    if let hit = ScenePicker.hitTest(models: scene.models, ray: ray) {
+                        isTransforming = true
+                        onTransformBegan?(hit)
+                    } else if !lastTouchWasPencil {
+                        isOrbiting = true
+                    }
+                } else if singleFinger && sculptEnabled && renderer.sculptEngine != nil {
                     if let hit = sculptHit(at: location, in: gesture.view) {
                         isSculpting = true
                         lastSculptHit = hit.position
@@ -264,7 +294,9 @@ struct MetalView: UIViewRepresentable {
                 let dx = Float(translation.x) * 0.005
                 let dy = Float(translation.y) * 0.005
 
-                if isSculpting {
+                if isTransforming {
+                    onTransformChanged?(Float(translation.x), Float(translation.y))
+                } else if isSculpting {
                     if let hit = sculptHit(at: location, in: gesture.view) {
                         let prev = lastSculptHit ?? hit.position
                         let dragDelta = hit.position - prev
@@ -302,6 +334,8 @@ struct MetalView: UIViewRepresentable {
                 gesture.setTranslation(.zero, in: gesture.view)
 
             case .ended, .cancelled:
+                if isTransforming { onTransformEnded?() }
+                isTransforming = false
                 isOrbiting = false
                 isPanning = false
                 isSculpting = false

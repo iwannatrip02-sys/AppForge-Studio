@@ -17,6 +17,11 @@ class Model: ObservableObject {
     /// B-rep vivo (OCCT) — fuente de verdad geométrica cuando existe.
     /// Las operaciones de ingeniería (booleanos/fillet/push-pull) van vía BRepModeling.
     var cadShape: CADShape?
+    /// Se incrementa cuando la GEOMETRÍA de la malla cambia (features, bakes,
+    /// subdivisión). El renderer lo usa para reconstruir buffers GPU — antes solo
+    /// reconstruía al cambiar el NÚMERO de modelos y las operaciones se veían
+    /// con retraso o nunca.
+    var geometryVersion: Int = 0
     @Published var color: SIMD4<Float>
     @Published var cadHistoryID: UUID?
     @Published var originOp: String?

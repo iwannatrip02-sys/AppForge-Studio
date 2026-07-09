@@ -75,6 +75,10 @@ struct CADModeView: View {
     @State private var measurePointB: SIMD3<Float>? = nil
     /// Highlight de la cara tocada con Seleccionar (feedback visual inmediato).
     @State private var selFaceHighlight: Mesh? = nil
+    /// Transformación directa en curso: índice del cuerpo arrastrado y acumulado
+    /// del gesto en puntos de pantalla (se hornea al B-rep al soltar).
+    @State private var dragModelIndex: Int? = nil
+    @State private var dragAccum: SIMD2<Float> = .zero
 
     private var isSketchTool: Bool {
         selectedTool.isSketchTool
@@ -198,6 +202,21 @@ struct CADModeView: View {
                             } else {
                                 canvasVM.redo()
                             }
+                        },
+                        // Transformación directa: arrastra el cuerpo con la
+                        // herramienta activa → preview vivo → bake al B-rep al soltar
+                        transformEnabled: [.move, .rotate, .scale].contains(selectedTool),
+                        onTransformBegan: { hit in
+                            HapticService.shared.light()
+                            dragModelIndex = hit.modelIndex
+                            dragAccum = .zero
+                        },
+                        onTransformChanged: { dx, dy in
+                            dragAccum += SIMD2<Float>(dx, dy)
+                            applyTransformPreview()
+                        },
+                        onTransformEnded: {
+                            bakeTransform()
                         })
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                         SnapGuideOverlay(
@@ -931,6 +950,115 @@ struct CADModeView: View {
         selectedTool = allTools[newIndex]
         toolVM.selectedTool = selectedTool
         HapticService.shared.selection()
+    }
+
+    // MARK: - Transformación directa (Mover/Rotar/Escalar)
+
+    /// Parámetros del gesto acumulado, interpretados según la herramienta.
+    /// Sensibilidades calibradas para iPad (puntos de pantalla → mundo/ángulo).
+    private func transformParams(for model: Model) -> (delta: SIMD3<Float>, angle: Float, factor: Float, center: SIMD3<Float>) {
+        let cam = canvasVM.scene.camera
+        let forward = simd_normalize(cam.target - cam.position)
+        let right = simd_normalize(simd_cross(forward, cam.up))
+        let up = simd_cross(right, forward)
+        let dist = simd_length(cam.position - cam.target)
+        let k = dist * 0.0011
+        let delta = right * dragAccum.x * k - up * dragAccum.y * k
+        let angle = dragAccum.x * 0.008
+        let factor = max(0.05, min(20, 1 + dragAccum.y * -0.004))
+        // Centro = centroide del bounding box de la malla (espacio del modelo)
+        var minP = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
+        var maxP = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
+        for v in model.meshes.first?.vertices ?? [] {
+            minP = simd_min(minP, v.position)
+            maxP = simd_max(maxP, v.position)
+        }
+        let center = minP.x <= maxP.x ? (minP + maxP) * 0.5 : .zero
+        return (delta, angle, factor, center)
+    }
+
+    /// Preview vivo vía TRS del modelo (el renderer sincroniza model.transform
+    /// por frame). Al soltar, bakeTransform lo hornea al B-rep y resetea el TRS.
+    /// Pivote en el centro c: T(c)·Op·T(−c) ⇒ position compensada.
+    private func applyTransformPreview() {
+        guard let idx = dragModelIndex, idx < canvasVM.scene.models.count else { return }
+        let model = canvasVM.scene.models[idx]
+        let p = transformParams(for: model)
+        switch selectedTool {
+        case .move:
+            model.position = p.delta
+        case .rotate:
+            let q = simd_quatf(angle: p.angle, axis: SIMD3<Float>(0, 1, 0))
+            model.rotation = q
+            model.position = p.center - q.act(p.center)
+        case .scale:
+            model.scale = SIMD3<Float>(repeating: p.factor)
+            model.position = p.center * (1 - p.factor)
+        default:
+            return
+        }
+        canvasVM.objectWillChange.send()
+    }
+
+    private func resetPreviewTRS(_ model: Model) {
+        model.position = .zero
+        model.rotation = simd_quatf(real: 1, imag: .zero)
+        model.scale = SIMD3<Float>(1, 1, 1)
+    }
+
+    /// Hornea la transformación al B-rep (fuente de verdad: picking y booleanas
+    /// siguen exactos) o, si el modelo no tiene B-rep, a los vértices de la malla.
+    private func bakeTransform() {
+        guard let idx = dragModelIndex, idx < canvasVM.scene.models.count else { return }
+        let model = canvasVM.scene.models[idx]
+        let p = transformParams(for: model)
+        let preview = model.transform
+        resetPreviewTRS(model)
+        dragModelIndex = nil
+
+        if model.cadShape != nil {
+            BRepHistory.shared.recordChange(of: model)
+            let ok: Bool
+            switch selectedTool {
+            case .move:
+                ok = BRepModeling.translate(model, by: SIMD3<Double>(Double(p.delta.x), Double(p.delta.y), Double(p.delta.z)))
+            case .rotate:
+                ok = BRepModeling.rotateY(model, angle: Double(p.angle),
+                                          center: SIMD3<Double>(Double(p.center.x), Double(p.center.y), Double(p.center.z)))
+            case .scale:
+                ok = BRepModeling.scaleUniform(model, factor: Double(p.factor),
+                                               center: SIMD3<Double>(Double(p.center.x), Double(p.center.y), Double(p.center.z)))
+            default:
+                ok = false
+            }
+            if ok {
+                HapticService.shared.medium()
+                temperTick += 1  // el metal se templó
+            } else {
+                BRepHistory.shared.discardLast()
+            }
+        } else {
+            // Malla sin B-rep (esculpida/importada): hornear a los vértices
+            canvasVM.saveState()
+            for mi in model.meshes.indices {
+                for vi in model.meshes[mi].vertices.indices {
+                    let pos = model.meshes[mi].vertices[vi].position
+                    let world = preview * SIMD4<Float>(pos.x, pos.y, pos.z, 1)
+                    model.meshes[mi].vertices[vi].position = SIMD3<Float>(world.x, world.y, world.z)
+                }
+                // Rotación/escala mueven las normales: recalcular desde triángulos
+                let positions = model.meshes[mi].vertices.map { $0.position }
+                let normals = OCCTBridge.computeVertexNormals(positions: positions,
+                                                              indices: model.meshes[mi].indices)
+                for vi in model.meshes[mi].vertices.indices where vi < normals.count {
+                    model.meshes[mi].vertices[vi].normal = normals[vi]
+                }
+            }
+            model.geometryVersion += 1
+            HapticService.shared.medium()
+        }
+        dragAccum = .zero
+        canvasVM.objectWillChange.send()
     }
 
     // (performBoolean y sus 3 wrappers eliminados 2026-07-08: eran el segundo camino

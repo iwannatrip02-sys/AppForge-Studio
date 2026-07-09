@@ -56,6 +56,7 @@ enum BRepModeling {
         }
         model.cadShape = newShape
         model.meshes = [mesh]
+        model.geometryVersion += 1  // el renderer reconstruye los buffers GPU
         return true
     }
 
@@ -79,6 +80,37 @@ enum BRepModeling {
             let edges = shape.edges()
             guard edgeIndex >= 0, edgeIndex < edges.count else { return nil }
             return shape.filleted(edges: [edges[edgeIndex]], radius: radius)
+        }
+    }
+
+    // MARK: - Transformaciones directas (Mover/Rotar/Escalar horneadas al B-rep)
+    // Compuestas desde primitivas verificadas @v1.8.8 (translated/rotated/scaled);
+    // rotated/scaled operan alrededor del ORIGEN → conjugar con traslaciones.
+
+    /// Traslada el sólido (el B-rep es la fuente de verdad de la posición).
+    @discardableResult
+    static func translate(_ model: Model, by delta: SIMD3<Double>) -> Bool {
+        applyFeature(to: model) { $0.translated(by: delta) }
+    }
+
+    /// Rota alrededor del eje Y que pasa por `center` (ángulo en radianes).
+    @discardableResult
+    static func rotateY(_ model: Model, angle: Double, center: SIMD3<Double>) -> Bool {
+        applyFeature(to: model) { shape in
+            shape.translated(by: -center)?
+                .rotated(axis: SIMD3<Double>(0, 1, 0), angle: angle)?
+                .translated(by: center)
+        }
+    }
+
+    /// Escala uniforme alrededor de `center`.
+    @discardableResult
+    static func scaleUniform(_ model: Model, factor: Double, center: SIMD3<Double>) -> Bool {
+        guard factor > 1e-6 else { return false }
+        return applyFeature(to: model) { shape in
+            shape.translated(by: -center)?
+                .scaled(by: factor)?
+                .translated(by: center)
         }
     }
 
