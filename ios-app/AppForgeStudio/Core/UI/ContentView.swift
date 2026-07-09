@@ -39,7 +39,8 @@ struct ContentView: View {
             // HUD de diagnóstico (build de diagnóstico): convierte el device del
             // usuario en debugger — sin Mac no hay otra forma de ver el runtime.
             if renderer.diagnosticsEnabled {
-                TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+                // SwiftUI. explícito: el proyecto tiene su propio TimelineView (animación)
+                SwiftUI.TimelineView(.periodic(from: .now, by: 0.5)) { _ in
                     diagnosticsHUD
                 }
                 .allowsHitTesting(false)
