@@ -44,7 +44,10 @@ final class SelectionController: ObservableObject {
         let model = models[hit.modelIndex]
         lastHit = hit
 
-        if let sel = selection, sel.modelIndex == hit.modelIndex, case .body = sel {
+        if let sel = selection, sel.modelIndex == hit.modelIndex {
+            // Mismo cuerpo: refinar SIEMPRE a lo tocado (cara/arista nueva).
+            // Antes, con cara/arista ya seleccionada, un tap en OTRA cara
+            // devolvía a cuerpo — "no deja seleccionar la cara que uno decida".
             refine(hit: hit, model: model)
         } else {
             selection = .body(modelIndex: hit.modelIndex)
@@ -79,7 +82,9 @@ final class SelectionController: ObservableObject {
             statusMessage = "\(model.name) es malla libre — sin caras/aristas exactas"
             return
         }
-        if let e = BRepEdgePicker.edgeIndex(of: shape, nearest: hit.position, maxDistance: 0.08) {
+        // Tolerancia de arista contenida (0.05): cerca del borde gana la arista,
+        // pero un tap franco en la cara selecciona LA CARA (no roba la arista).
+        if let e = BRepEdgePicker.edgeIndex(of: shape, nearest: hit.position, maxDistance: 0.05) {
             selection = .edge(modelIndex: hit.modelIndex, edgeIndex: e)
             outlinedModelId = nil
             highlightMesh = BRepEdgePicker.highlightTube(shape: shape, edgeIndex: e)

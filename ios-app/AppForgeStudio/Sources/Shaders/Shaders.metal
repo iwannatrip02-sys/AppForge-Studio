@@ -30,6 +30,7 @@ struct Uniforms {
     float lightIntensity;
     float3x3 normalMatrix;
     float4 modelColor;   // color per-modelo (debe espejar BasicUniforms en Swift)
+    float4 cameraPos;    // posición de cámara (specular/rim del shading moderno)
 };
 
 vertex VertexOut vertex_main(VertexIn in [[stage_in]], constant Uniforms &uniforms [[buffer(1)]]) {
@@ -43,13 +44,55 @@ vertex VertexOut vertex_main(VertexIn in [[stage_in]], constant Uniforms &unifor
     return out;
 }
 
+// Shading "estudio" (acabado Shapr3D/Nomad, adiós al lambert plano de los 90):
+// half-Lambert (sin negros duros) + ambiente HEMISFÉRICO (cielo frío arriba,
+// suelo oscuro abajo) + especular Blinn suave + rim frío sutil.
 fragment float4 fragment_main(VertexOut in [[stage_in]], constant Uniforms &uniforms [[buffer(1)]]) {
     float3 N = normalize(in.worldNormal);
     float3 L = normalize(-uniforms.lightDirection);
-    float diff = max(dot(N, L), 0.0);
-    float3 lighting = uniforms.ambientColor + uniforms.lightColor * uniforms.lightIntensity * diff;
+    float3 V = normalize(uniforms.cameraPos.xyz - in.worldPosition);
+
+    float ndl = dot(N, L) * 0.5 + 0.5;
+    float diff = ndl * ndl;
+
+    float hemi = N.y * 0.5 + 0.5;
+    float3 ambient = mix(float3(0.15, 0.145, 0.16), float3(0.33, 0.36, 0.42), hemi);
+
+    float3 H = normalize(L + V);
+    float spec = pow(max(dot(N, H), 0.0), 48.0) * 0.30;
+    float rim = pow(1.0 - max(dot(N, V), 0.0), 3.0) * 0.18;
+
     float4 baseColor = in.color;
-    return float4(baseColor.rgb * lighting, baseColor.a);
+    float3 lighting = ambient + uniforms.lightColor * uniforms.lightIntensity * diff;
+    float3 rgb = baseColor.rgb * lighting + float3(spec) + float3(0.55, 0.65, 0.80) * rim;
+    return float4(rgb, baseColor.a);
+}
+
+// MARK: - Fondo con gradiente (el negro plano gritaba prototipo)
+
+struct BGVertexOut {
+    float4 position [[position]];
+    float2 uv;
+};
+
+vertex BGVertexOut bg_vertex(uint vid [[vertex_id]]) {
+    // Triángulo fullscreen
+    float2 p[3] = { float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0) };
+    BGVertexOut out;
+    out.position = float4(p[vid], 0.999, 1.0);
+    out.uv = p[vid] * 0.5 + 0.5;
+    return out;
+}
+
+fragment float4 bg_fragment(BGVertexOut in [[stage_in]]) {
+    // Taller de noche: sutil luz cenital fría que cae a grafito profundo,
+    // con viñeta suave en las esquinas.
+    float3 top = float3(0.085, 0.095, 0.125);
+    float3 bottom = float3(0.035, 0.038, 0.052);
+    float3 c = mix(bottom, top, in.uv.y);
+    float2 d = in.uv - float2(0.5, 0.55);
+    c *= 1.0 - dot(d, d) * 0.55;   // viñeta
+    return float4(c, 1.0);
 }
 
 // MARK: - Grilla universal del piso (procedural, antialiased)

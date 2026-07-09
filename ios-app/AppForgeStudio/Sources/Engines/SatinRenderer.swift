@@ -25,6 +25,7 @@ private struct BasicUniforms {
     var lightIntensity: Float
     var normalMatrix: simd_float3x3
     var modelColor: SIMD4<Float>   // espeja Uniforms.modelColor del shader básico
+    var cameraPos: SIMD4<Float>    // posición de cámara (specular/rim)
 }
 
 struct GPUPBRMaterial {
@@ -278,6 +279,8 @@ class SatinRenderer: NSObject, ObservableObject {
     private var gridPipelineState: MTLRenderPipelineState?
     private var gridDepthState: MTLDepthStencilState?
     var gridVisible = true
+    /// Fondo con gradiente + viñeta (el negro plano gritaba prototipo).
+    private var bgPipelineState: MTLRenderPipelineState?
     /// id del modelo con outline de selección (silueta brasa). nil = ninguno.
     var outlinedModelId: String?
     /// Rayos X: los cuerpos se dibujan translúcidos; las ARISTAS siguen opacas
@@ -356,6 +359,7 @@ class SatinRenderer: NSObject, ObservableObject {
         setupPBRIBLPipeline(library: library)
         setupIBLPipeline(library: library)
         setupGridPipeline(library: library)
+        setupBGPipeline(library: library)
 
         iblComputePipeline = IBLPipeline(device: device, library: library)
 
@@ -422,6 +426,17 @@ class SatinRenderer: NSObject, ObservableObject {
         obj.visible = false
         cursorObject = obj
         scene?.add(obj)
+    }
+
+    private func setupBGPipeline(library: MTLLibrary) {
+        guard let v = library.makeFunction(name: "bg_vertex"),
+              let f = library.makeFunction(name: "bg_fragment") else { return }
+        let d = MTLRenderPipelineDescriptor()
+        d.vertexFunction = v
+        d.fragmentFunction = f
+        d.colorAttachments[0].pixelFormat = mtkView?.colorPixelFormat ?? .bgra8Unorm
+        d.depthAttachmentPixelFormat = .depth32Float
+        bgPipelineState = try? device.makeRenderPipelineState(descriptor: d)
     }
 
     private func setupGridPipeline(library: MTLLibrary) {
@@ -1191,6 +1206,14 @@ class SatinRenderer: NSObject, ObservableObject {
               let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else { return }
 
         encodedFrames += 1
+
+        // ---- Fondo con gradiente (primero, z=0.999, escribe depth máximo) ----
+        if let bg = bgPipelineState {
+            encoder.setRenderPipelineState(bg)
+            if let sd = sanityDepthState { encoder.setDepthStencilState(sd) }
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        }
+
         encoder.setDepthStencilState(depthState)
 
         // ---- Sincronizar matrices de modelo (preview vivo de transformaciones) ----
@@ -1251,7 +1274,8 @@ class SatinRenderer: NSObject, ObservableObject {
                     lightDirection: SIMD3<Float>(0, -1, 0),
                     lightColor: .zero, lightIntensity: 0,
                     normalMatrix: simd_float3x3(1),
-                    modelColor: SIMD4<Float>(1.0, 0.48, 0.27, 1.0)  // brasa
+                    modelColor: SIMD4<Float>(1.0, 0.48, 0.27, 1.0),  // brasa
+                    cameraPos: SIMD4<Float>(cam.position.x, cam.position.y, cam.position.z, 1)
                 )
                 encoder.setCullMode(.front)
                 encoder.setFrontFacing(.counterClockwise)
@@ -1288,7 +1312,8 @@ class SatinRenderer: NSObject, ObservableObject {
                     lightColor: lightColor,
                     lightIntensity: lightIntensity,
                     normalMatrix: normalMatrix3x3,
-                    modelColor: color
+                    modelColor: color,
+                    cameraPos: SIMD4<Float>(cam.position.x, cam.position.y, cam.position.z, 1)
                 )
 
                 encoder.setVertexBytes(&basicUniforms, length: MemoryLayout<BasicUniforms>.stride, index: 1)
@@ -1405,7 +1430,8 @@ class SatinRenderer: NSObject, ObservableObject {
                 projectionMatrix: sceneProjectionMatrix,
                 ambientColor: .zero, lightDirection: .zero, lightColor: .zero,
                 lightIntensity: 0, normalMatrix: simd_float3x3(1),
-                modelColor: .zero
+                modelColor: .zero,
+                cameraPos: SIMD4<Float>(cam.position.x, cam.position.y, cam.position.z, 1)
             )
             encoder.setVertexBytes(&gridUniforms, length: MemoryLayout<BasicUniforms>.stride, index: 1)
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)

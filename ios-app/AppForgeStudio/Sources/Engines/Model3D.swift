@@ -66,7 +66,9 @@ class Model: ObservableObject {
         self.position = .zero
         self.rotation = simd_quatf(real: 1, imag: .zero)
         self.scale = SIMD3<Float>(1, 1, 1)
-        self.color = SIMD4<Float>(0.7, 0.7, 0.7, 1.0)
+        // Gris claro cálido estilo Shapr3D (con el shading estudio se lee premium;
+        // el 0.7 anterior renderizaba oscuro y "de los 90")
+        self.color = SIMD4<Float>(0.80, 0.81, 0.84, 1.0)
 
         if let device = device, !vertices.isEmpty {
             setBuffers(vertices: vertices, indices: indices, device: device)

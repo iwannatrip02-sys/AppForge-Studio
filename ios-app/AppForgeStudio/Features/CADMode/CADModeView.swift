@@ -1148,6 +1148,15 @@ struct CADModeView: View {
         default:
             return
         }
+        // El gizmo VIAJA con el cuerpo durante el drag (feedback: 'los gizmos
+        // no giran con el elemento') — mismo TRS a los overlays de flechas/anillos.
+        for name in Self.gizmoNames {
+            if let g = canvasVM.scene.models.first(where: { $0.name == name }) {
+                g.position = model.position
+                g.rotation = model.rotation
+                g.scale = model.scale
+            }
+        }
         canvasVM.objectWillChange.send()
     }
 
