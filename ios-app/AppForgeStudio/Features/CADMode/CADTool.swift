@@ -24,6 +24,7 @@ enum CADTool: String, CaseIterable, Identifiable {
     case line = "Line"
     case circle = "Circle"
     case rectangle = "Rectangle"
+    case spline = "Spline"
     case arc = "Arc"
     case dimension = "Dimension"
     case constraint = "Constraint"
@@ -56,6 +57,7 @@ enum CADTool: String, CaseIterable, Identifiable {
         case .line: return "Línea"
         case .circle: return "Círculo"
         case .rectangle: return "Rectángulo"
+        case .spline: return "Spline"
         case .arc: return "Arco"
         case .dimension: return "Cota"
         case .constraint: return "Restricción"
@@ -64,7 +66,7 @@ enum CADTool: String, CaseIterable, Identifiable {
 
     var isSketchTool: Bool {
         switch self {
-        case .line, .circle, .rectangle, .arc, .dimension, .constraint:
+        case .line, .circle, .rectangle, .spline, .arc, .dimension, .constraint:
             return true
         default:
             return false
@@ -96,6 +98,7 @@ enum CADTool: String, CaseIterable, Identifiable {
         case .line: return "line.diagonal"
         case .circle: return "circle"
         case .rectangle: return "rectangle"
+        case .spline: return "scribble"
         case .arc: return "point.topleft.down.curvedto.point.bottomright.up"
         case .dimension: return "text.magnifyingglass"
         case .constraint: return "link"

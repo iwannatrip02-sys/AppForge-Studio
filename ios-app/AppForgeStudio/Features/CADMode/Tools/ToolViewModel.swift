@@ -109,7 +109,7 @@ class ToolViewModel: ObservableObject {
         case .revolve, .sketch, .pushPull, .hole:
             // revolve: requiere perfil Wire; sketch/pushPull/hole: controllers propios
             break
-        case .line, .circle, .rectangle, .arc, .dimension, .constraint:
+        case .line, .circle, .rectangle, .spline, .arc, .dimension, .constraint:
             break
         }
     }

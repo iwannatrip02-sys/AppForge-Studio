@@ -75,6 +75,51 @@ final class SketchControllerTests: XCTestCase {
         XCTAssertFalse(s.hasClosedProfile)
     }
 
+    func testTubeAlongStraightPathVolume() throws {
+        // Cadena recta de longitud 4 + Tubo Ø0.4: cilindro πr²L exacto
+        let s = SketchController()
+        s.activeTool = .line
+        s.tap(at: SIMD2<Float>(0, 0))
+        s.tap(at: SIMD2<Float>(4, 0))
+        XCTAssertTrue(s.hasOpenPath)
+        let model = try XCTUnwrap(s.tubeAlongPath(radius: 0.2))
+        XCTAssertEqual(try volume(model), Double.pi * 0.04 * 4, accuracy: 0.02,
+                       "tubo recto = cilindro πr²L (sweep verificado)")
+    }
+
+    func testLoftSquareToSquareIsPrism() throws {
+        // Dos cuadrados idénticos 1×1, transición altura 2 → prisma volumen 2
+        let s = SketchController()
+        s.activeTool = .rectangle
+        s.tap(at: SIMD2<Float>(0, 0)); s.tap(at: SIMD2<Float>(1, 1))
+        s.tap(at: SIMD2<Float>(0, 0)); s.tap(at: SIMD2<Float>(1, 1))
+        XCTAssertTrue(s.hasTwoProfiles)
+        let model = try XCTUnwrap(s.loftProfiles(height: 2))
+        XCTAssertEqual(try volume(model), 1 * 1 * 2, accuracy: 0.03,
+                       "loft entre perfiles idénticos = prisma exacto")
+    }
+
+    func testRevolveHalfAngleIsHalfVolume() throws {
+        // Rect x∈[2,3] revolucionado 180° = mitad del anillo de Pappus
+        let s = SketchController()
+        s.activeTool = .rectangle
+        s.tap(at: SIMD2<Float>(2, 0)); s.tap(at: SIMD2<Float>(3, 1))
+        let model = try XCTUnwrap(s.revolveProfile(angle: .pi))
+        XCTAssertEqual(try volume(model), Double.pi * 2.5 * 1.0, accuracy: 0.05,
+                       "revolución 180° = ½ · 2π·R̄·A (ángulo editable REAL)")
+    }
+
+    func testSplineBecomesOpenPath() {
+        let s = SketchController()
+        s.activeTool = .spline
+        s.tap(at: SIMD2<Float>(0, 0))
+        s.tap(at: SIMD2<Float>(1, 1))
+        s.tap(at: SIMD2<Float>(2, 0))
+        s.finishSpline()
+        XCTAssertTrue(s.hasOpenPath, "la spline confirmada es ruta de Tubo")
+        XCTAssertFalse(s.hasClosedProfile, "abierta: no es perfil")
+    }
+
     func testDrillThroughHoleExactVolume() throws {
         // Caja 2×2×2 + agujero PASANTE Ø0.4 por el centro de la cara superior:
         // V = 8 − π·r²·h = 8 − π·0.04·2 ≈ 7.7487 (F-CAD-2a, INGENIERIA_INVERSA §4)

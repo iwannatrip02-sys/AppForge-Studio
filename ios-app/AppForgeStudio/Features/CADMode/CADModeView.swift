@@ -81,6 +81,13 @@ struct CADModeView: View {
     /// Herramienta Agujero (patrón universal: tocar cara = taladrar, encadenable).
     @State private var holeRadius: Double = 0.15
     @State private var holeDepth: Double = 0   // 0 = pasante
+    /// Ángulo de revolución en grados (360 = completa).
+    @State private var revolveAngleDeg: Double = 360
+    /// Ø del Tubo (sweep por ruta) y altura de la Transición (loft).
+    @State private var tubeDiameter: Double = 0.3
+    @State private var loftHeight: Double = 1.5
+    /// Grosor del Vaciado por cara tocada.
+    @State private var shellThicknessTap: Double = 0.08
     /// Altura de extrusión del perfil de sketch (editable).
     @State private var sketchExtrudeHeight: Double = 1.0
     /// Panel de Elementos visible (anatomía Shapr3D).
@@ -200,9 +207,9 @@ struct CADModeView: View {
     }
 
     private var sketchTools: [CADTool] {
-        // v1 del sketch en viewport: línea (cadena), círculo, rectángulo.
-        // Arco/cota/restricción llegan con la ola 2 del sketch (no placebo).
-        [.line, .circle, .rectangle]
+        // Sketch en viewport: línea (cadena), círculo, rectángulo, SPLINE
+        // (puntos de control; el pencil la traza directo — ruta para Tubo).
+        [.line, .circle, .rectangle, .spline]
     }
 
     /// `id` alimenta la lógica (performAddPrimitive); `label` es lo visible.
@@ -242,6 +249,9 @@ struct CADModeView: View {
                     if selectedTool == .hole {
                         holeBar
                     }
+                    if selectedTool == .shell {
+                        shellBar
+                    }
                     if showDrawingExportBar {
                         drawingExportBar
                     }
@@ -278,6 +288,24 @@ struct CADModeView: View {
                                                       Double(hit.position.z))
                                 if BRepModeling.drill(model, at: p, direction: dir,
                                                       radius: holeRadius, depth: holeDepth) {
+                                    HapticService.shared.medium()
+                                    temperTick += 1
+                                    canvasVM.objectWillChange.send()
+                                } else {
+                                    BRepHistory.shared.discardLast()
+                                }
+                            } else if selectedTool == .shell {
+                                // VACIADO por toque (ingeniería inversa §2): la cara
+                                // que tocas queda ABIERTA; grosor editable en la barra
+                                guard hit.modelIndex < canvasVM.scene.models.count,
+                                      let shape = canvasVM.scene.models[hit.modelIndex].cadShape,
+                                      let faceIdx = BRepFacePicker.faceIndex(of: shape,
+                                                                             nearest: hit.position)
+                                else { return }
+                                let model = canvasVM.scene.models[hit.modelIndex]
+                                BRepHistory.shared.recordChange(of: model)
+                                if BRepModeling.shell(model, thickness: shellThicknessTap,
+                                                      openFaceIndex: faceIdx) {
                                     HapticService.shared.medium()
                                     temperTick += 1
                                     canvasVM.objectWillChange.send()
@@ -395,6 +423,7 @@ struct CADModeView: View {
             case .line: sketch.activeTool = .line
             case .rectangle: sketch.activeTool = .rectangle
             case .circle: sketch.activeTool = .circle
+            case .spline: sketch.activeTool = .spline
             default: break
             }
             executeCADTool(newTool, canvasVM: canvasVM, toolVM: toolVM)
@@ -578,6 +607,25 @@ struct CADModeView: View {
         .tempered(trigger: temperTick)
     }
 
+    /// Barra del Vaciado: tocas la cara que queda ABIERTA, grosor editable.
+    private var shellBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "square.dashed")
+                .foregroundColor(theme.accent)
+            Text("Toca la cara que quedará ABIERTA")
+                .font(.caption2)
+                .foregroundColor(theme.textSecondary)
+                .lineLimit(1)
+            Spacer()
+            Text("Grosor").font(.caption2).foregroundColor(theme.textSecondary)
+            NumericField(value: $shellThicknessTap, range: 0.01...2)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(theme.surfaceSecondary)
+        .tempered(trigger: temperTick)
+    }
+
     // MARK: - Sketch en viewport (barra + overlays + producción de sólidos)
 
     /// Barra del sketch: estado, deshacer punto, limpiar; con perfil cerrado
@@ -601,12 +649,32 @@ struct CADModeView: View {
             }
             .accessibilityLabel("Borrar boceto")
 
+            if sketch.splineChain.count >= 2 {
+                Button("Fin spline") {
+                    HapticService.shared.medium()
+                    sketch.finishSpline()
+                }
+                .font(.caption.bold())
+            }
             if sketch.hasClosedProfile {
                 NumericField(value: $sketchExtrudeHeight, range: 0.05...20)
                 Button("Extruir") { performSketchExtrude() }
                     .font(.caption.bold())
+                NumericField(value: $revolveAngleDeg, range: 5...360, format: "%.0f°")
                 Button("Revolucionar") { performSketchRevolve() }
                     .font(.caption)
+            }
+            if sketch.hasOpenPath {
+                Text("Ø").font(.caption2).foregroundColor(theme.textSecondary)
+                NumericField(value: $tubeDiameter, range: 0.02...4)
+                Button("Tubo") { performSketchTube() }
+                    .font(.caption.bold())
+            }
+            if sketch.hasTwoProfiles {
+                Text("↑").font(.caption2).foregroundColor(theme.textSecondary)
+                NumericField(value: $loftHeight, range: 0.1...20)
+                Button("Transición") { performSketchLoft() }
+                    .font(.caption.bold())
             }
         }
         .padding(.horizontal, 10)
@@ -632,9 +700,35 @@ struct CADModeView: View {
         canvasVM.objectWillChange.send()
     }
 
+    private func performSketchTube() {
+        HapticService.shared.medium()
+        guard let model = sketch.tubeAlongPath(radius: tubeDiameter / 2) else { return }
+        canvasVM.saveState()
+        canvasVM.scene.addModel(model)
+        sketch.clear()
+        canvasVM.scene.cadHistory.pushOperation(
+            CADOperation(type: .createShape, description: "Tubo por ruta",
+                         parameters: ["diámetro": tubeDiameter]))
+        temperTick += 1
+        canvasVM.objectWillChange.send()
+    }
+
+    private func performSketchLoft() {
+        HapticService.shared.medium()
+        guard let model = sketch.loftProfiles(height: loftHeight) else { return }
+        canvasVM.saveState()
+        canvasVM.scene.addModel(model)
+        sketch.clear()
+        canvasVM.scene.cadHistory.pushOperation(
+            CADOperation(type: .createShape, description: "Transición (loft)",
+                         parameters: ["altura": loftHeight]))
+        temperTick += 1
+        canvasVM.objectWillChange.send()
+    }
+
     private func performSketchRevolve() {
         HapticService.shared.medium()
-        guard let model = sketch.revolveProfile() else {
+        guard let model = sketch.revolveProfile(angle: revolveAngleDeg * .pi / 180) else {
             return
         }
         canvasVM.saveState()
@@ -975,7 +1069,7 @@ struct CADModeView: View {
         toolVM.selectedTool = tool
         if [.booleanUnion, .booleanSubtract, .booleanIntersect].contains(tool) {
             startCSGOperation(tool)
-        } else if ![.select, .move, .rotate, .scale, .pushPull, .hole].contains(tool),
+        } else if ![.select, .move, .rotate, .scale, .pushPull, .hole, .shell].contains(tool),
                   !tool.isSketchTool, tool != .measure {
             executeSelectedTool()
         }
@@ -1818,6 +1912,27 @@ struct SketchCanvasOverlay: View {
                 ctx.fill(path, with: .color(color))
             }
 
+            // Muestreo Catmull-Rom: la spline se VE suave (16 muestras/segmento)
+            func smooth(_ pts: [SIMD2<Float>]) -> [SIMD2<Float>] {
+                guard pts.count >= 3 else { return pts }
+                var out: [SIMD2<Float>] = []
+                for i in 0..<(pts.count - 1) {
+                    let p0 = pts[max(i - 1, 0)], p1 = pts[i]
+                    let p2 = pts[i + 1], p3 = pts[min(i + 2, pts.count - 1)]
+                    for k in 0..<16 {
+                        let t = Float(k) / 16
+                        let t2 = t * t, t3 = t2 * t
+                        let a = p1 * 2
+                        let b = (p2 - p0) * t
+                        let c = (p0 * 2 - p1 * 5 + p2 * 4 - p3) * t2
+                        let d = (p1 * 3 - p0 - p2 * 3 + p3) * t3
+                        out.append((a + b + c + d) * 0.5)
+                    }
+                }
+                out.append(pts[pts.count - 1])
+                return out
+            }
+
             func circlePts(_ c: SIMD2<Float>, _ r: Float) -> [SIMD2<Float>] {
                 (0...72).map { k in
                     let t = Float(k) / 72 * 2 * .pi
@@ -1856,8 +1971,19 @@ struct SketchCanvasOverlay: View {
                     fillPolyline(circlePts(c, r), color: ember.opacity(0.10))
                     strokePolyline(circlePts(c, r), close: true, color: steel, width: 2)
                     dot(c, color: steel, r: 3)
+                case .spline(let pts):
+                    strokePolyline(smooth(pts), close: false, color: steel, width: 2)
+                    for p in pts { dot(p, color: steel, r: 3) }
                 }
             }
+
+            // Spline en curso (puntos de control + curva viva en brasa)
+            if sketch.splineChain.count >= 2 {
+                var livePts = sketch.splineChain
+                if let pv = sketch.preview { livePts.append(pv) }
+                strokePolyline(smooth(livePts), close: false, color: ember, width: 2.5)
+            }
+            for p in sketch.splineChain { dot(p, color: ember) }
 
             // ---- Cadena en curso + trazo vivo (brasa) con COTAS ----
             if sketch.chain.count >= 2 {

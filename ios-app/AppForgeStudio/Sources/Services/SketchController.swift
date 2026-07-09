@@ -14,18 +14,30 @@ private let logger = Logger(subsystem: "com.appforgestudio", category: "Sketch")
 @MainActor
 final class SketchController: ObservableObject {
 
-    enum Tool { case line, rectangle, circle }
+    enum Tool { case line, rectangle, circle, spline }
 
     enum Entity: Equatable {
         case polyline(points: [SIMD2<Float>], closed: Bool)
         case rect(a: SIMD2<Float>, b: SIMD2<Float>)
         case circle(center: SIMD2<Float>, radius: Float)
+        /// Spline por puntos de control (curva ABIERTA — ruta para Tubo/Barrido).
+        case spline(points: [SIMD2<Float>])
 
         var isClosedProfile: Bool {
             switch self {
             case .polyline(let pts, let closed): return closed && pts.count >= 3
             case .rect(let a, let b): return abs(a.x - b.x) > 1e-4 && abs(a.y - b.y) > 1e-4
             case .circle(_, let r): return r > 1e-4
+            case .spline: return false
+            }
+        }
+
+        /// Ruta abierta utilizable por Tubo/Barrido.
+        var isOpenPath: Bool {
+            switch self {
+            case .polyline(let pts, false): return pts.count >= 2
+            case .spline(let pts): return pts.count >= 2
+            default: return false
             }
         }
     }
@@ -43,6 +55,12 @@ final class SketchController: ObservableObject {
     static let snapRadius: Float = 0.14
 
     var hasClosedProfile: Bool { entities.contains { $0.isClosedProfile } }
+    /// ¿Hay ruta abierta (spline/cadena) para Tubo/Barrido?
+    var hasOpenPath: Bool { entities.contains { $0.isOpenPath } || chain.count >= 2 }
+    /// ¿Hay DOS perfiles cerrados? (Transición/loft)
+    var hasTwoProfiles: Bool { entities.filter { $0.isClosedProfile }.count >= 2 }
+    /// Cadena de spline en curso (puntos de control tocados).
+    @Published private(set) var splineChain: [SIMD2<Float>] = []
 
     /// Todos los puntos notables (snap): endpoints, esquinas, centros.
     private var snapPoints: [SIMD2<Float>] {
@@ -100,22 +118,54 @@ final class SketchController: ObservableObject {
                 anchor = p
                 statusMessage = "Toca un punto del radio"
             }
+        case .spline:
+            splineChain.append(p)
+            statusMessage = splineChain.count < 2
+                ? "Sigue añadiendo puntos de control"
+                : "\(splineChain.count) puntos · «Fin spline» para confirmar"
         }
         preview = nil
+    }
+
+    /// Confirma la spline en curso (curva abierta = ruta para Tubo).
+    func finishSpline() {
+        guard splineChain.count >= 2 else { return }
+        entities.append(.spline(points: splineChain))
+        splineChain = []
+        statusMessage = "Spline ✓ — úsala como ruta de Tubo"
     }
 
     // MARK: - Trazo vivo con Pencil (drag = dibujar)
 
     func pencilDragBegan(at p: SIMD2<Float>) {
+        if activeTool == .spline {
+            splineChain = [snap(p)]
+            preview = splineChain.first
+            return
+        }
         anchor = snap(p)
         preview = anchor
     }
 
     func pencilDragChanged(to p: SIMD2<Float>) {
+        if activeTool == .spline {
+            // El trazo del pencil siembra puntos de control cada ~0.35
+            if let last = splineChain.last, simd_distance(last, p) > 0.35 {
+                splineChain.append(p)
+            }
+            preview = p
+            return
+        }
         preview = snap(p)
     }
 
     func pencilDragEnded(at p: SIMD2<Float>) {
+        if activeTool == .spline {
+            splineChain.append(p)
+            finishSpline()   // el trazo del pencil ES la spline: fluido
+            preview = nil
+            return
+        }
         guard let a = anchor else { return }
         let end = snap(p)
         switch activeTool {
@@ -136,7 +186,8 @@ final class SketchController: ObservableObject {
     }
 
     func undoLast() {
-        if !chain.isEmpty { chain.removeLast() }
+        if !splineChain.isEmpty { splineChain.removeLast() }
+        else if !chain.isEmpty { chain.removeLast() }
         else if anchor != nil { anchor = nil }
         else if !entities.isEmpty { entities.removeLast() }
         preview = nil
@@ -145,6 +196,7 @@ final class SketchController: ObservableObject {
     func clear() {
         entities = []
         chain = []
+        splineChain = []
         anchor = nil
         preview = nil
         statusMessage = ""
@@ -156,17 +208,17 @@ final class SketchController: ObservableObject {
 
     // MARK: - OCCT: perfil → sólido REAL
 
-    private func wire(for entity: Entity) -> Wire? {
+    private func wire(for entity: Entity, atHeight y: Double = 0) -> Wire? {
         switch entity {
         case .polyline(let pts, true):
-            return Wire.polygon3D(pts.map { SIMD3<Double>(Double($0.x), 0, Double($0.y)) },
+            return Wire.polygon3D(pts.map { SIMD3<Double>(Double($0.x), y, Double($0.y)) },
                                   closed: true)
         case .rect(let a, let b):
             let corners = [a, SIMD2(b.x, a.y), b, SIMD2(a.x, b.y)]
-            return Wire.polygon3D(corners.map { SIMD3<Double>(Double($0.x), 0, Double($0.y)) },
+            return Wire.polygon3D(corners.map { SIMD3<Double>(Double($0.x), y, Double($0.y)) },
                                   closed: true)
         case .circle(let c, let r):
-            return Wire.circle(origin: SIMD3<Double>(Double(c.x), 0, Double(c.y)),
+            return Wire.circle(origin: SIMD3<Double>(Double(c.x), y, Double(c.y)),
                                normal: SIMD3<Double>(0, 1, 0),
                                radius: Double(r))
         default:
@@ -179,6 +231,65 @@ final class SketchController: ObservableObject {
             if let w = wire(for: e) { return w }
         }
         return nil
+    }
+
+    // MARK: - Rutas abiertas (Tubo / Barrido)
+
+    private func firstOpenPath() -> (points: [SIMD2<Float>], isSpline: Bool)? {
+        for e in entities {
+            if case .spline(let pts) = e, pts.count >= 2 { return (pts, true) }
+            if case .polyline(let pts, false) = e, pts.count >= 2 { return (pts, false) }
+        }
+        if chain.count >= 2 { return (chain, false) }
+        return nil
+    }
+
+    /// TUBO (plomería de cohete): círculo Ø barrido a lo largo de la ruta
+    /// dibujada (spline o cadena). API sweep verificada @v1.8.8.
+    func tubeAlongPath(radius: Double) -> Model? {
+        guard radius > 1e-9, let (pts, isSpline) = firstOpenPath() else {
+            statusMessage = "Dibuja una ruta abierta (spline o cadena) primero"
+            return nil
+        }
+        let p3 = pts.map { SIMD3<Double>(Double($0.x), 0, Double($0.y)) }
+        let path: Wire? = isSpline ? Wire.bspline(p3) : Wire.polygon3D(p3, closed: false)
+        let start = p3[0]
+        let dir3 = simd_normalize(p3[1] - p3[0])
+        guard let pathW = path,
+              let profile = Wire.circle(origin: start, normal: dir3, radius: radius),
+              let shape = OCCTSwift.Shape.sweep(profile: profile, along: pathW),
+              let mesh = OCCTBridge.toMesh(shape, quality: .medium) else {
+            statusMessage = "No se pudo crear el tubo"
+            return nil
+        }
+        let model = Model(name: "Tubo_\(UUID().uuidString.prefix(6))")
+        model.cadShape = shape
+        model.meshes = [mesh]
+        model.edgesMesh = OCCTBridge.edgesMesh(shape)
+        return model
+    }
+
+    /// TRANSICIÓN (loft): del 1er perfil cerrado (en el piso) al 2º perfil
+    /// ELEVADO a `height` — conductos rect→círculo, campanas, etc.
+    func loftProfiles(height: Double) -> Model? {
+        let closed = entities.filter { $0.isClosedProfile }
+        guard closed.count >= 2 else {
+            statusMessage = "Dibuja DOS perfiles cerrados para la transición"
+            return nil
+        }
+        guard height > 1e-9,
+              let wA = wire(for: closed[0], atHeight: 0),
+              let wB = wire(for: closed[1], atHeight: height),
+              let shape = OCCTSwift.Shape.loft(profiles: [wA, wB], solid: true),
+              let mesh = OCCTBridge.toMesh(shape, quality: .medium) else {
+            statusMessage = "No se pudo crear la transición"
+            return nil
+        }
+        let model = Model(name: "Transición_\(UUID().uuidString.prefix(6))")
+        model.cadShape = shape
+        model.meshes = [mesh]
+        model.edgesMesh = OCCTBridge.edgesMesh(shape)
+        return model
     }
 
     /// Extruye el primer perfil cerrado hacia arriba → Model con B-rep + aristas.
