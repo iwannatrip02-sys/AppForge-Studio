@@ -948,8 +948,17 @@ struct CADModeView: View {
             return
         }
 
-        guard let validShape = shape,
-              let mesh = OCCTBridge.toMesh(validShape, quality: .medium) else {
+        guard let rawShape = shape else {
+            csgStatusMessage = "No se pudo crear la primitiva"
+            return
+        }
+        // Colocar JUNTO a lo existente, no encima: antes toda primitiva nacía en
+        // el origen, unas DENTRO de otras (feedback: "no puedo sumar elementos" —
+        // sí se creaban, pero quedaban ocultas dentro del cubo inicial).
+        let slot = Double(canvasVM.scene.models.count)
+        let placedShape = rawShape.translated(by: SIMD3<Double>(slot * (size + 0.6), 0, 0)) ?? rawShape
+
+        guard let mesh = OCCTBridge.toMesh(placedShape, quality: .medium) else {
             csgStatusMessage = "No se pudo crear la primitiva"
             return
         }
@@ -957,7 +966,7 @@ struct CADModeView: View {
         let name = "\(type)_\(UUID().uuidString.prefix(8))"
         let model = Model(name: name)
         model.meshes = [mesh]
-        model.cadShape = validShape  // retener B-rep: fuente de verdad para ops de ingeniería
+        model.cadShape = placedShape  // retener B-rep: fuente de verdad para ops de ingeniería
 
         canvasVM.scene.addModel(model)
         canvasVM.scene.cadHistory.pushOperation(
