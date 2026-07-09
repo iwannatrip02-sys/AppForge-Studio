@@ -82,6 +82,33 @@ struct CADModeView: View {
     @State private var sketchExtrudeHeight: Double = 1.0
     /// Panel de Elementos visible (anatomía Shapr3D).
     @State private var showElements = true
+
+    /// Grupos del rail vertical (anatomía Shapr3D: iconos que despliegan flyouts).
+    enum ToolGroup: String, CaseIterable, Identifiable {
+        case draw = "Dibujo"
+        case form = "Formar"
+        case combine = "Combinar"
+        case primitives = "Primitivas"
+        var id: String { rawValue }
+        var icon: String {
+            switch self {
+            case .draw: return "pencil.and.outline"
+            case .form: return "square.stack.3d.up"
+            case .combine: return "circle.grid.cross"
+            case .primitives: return "cube"
+            }
+        }
+    }
+    @State private var expandedGroup: ToolGroup? = nil
+
+    private func tools(for group: ToolGroup) -> [CADTool] {
+        switch group {
+        case .draw: return sketchTools
+        case .form: return [.pushPull, .extrude, .fillet, .chamfer, .shell]
+        case .combine: return [.booleanUnion, .booleanSubtract, .booleanIntersect]
+        case .primitives: return []
+        }
+    }
     /// Transformación directa en curso: índice del cuerpo arrastrado y acumulado
     /// del gesto en puntos de pantalla (se hornea al B-rep al soltar).
     @State private var dragModelIndex: Int? = nil
@@ -196,7 +223,7 @@ struct CADModeView: View {
             // aparte (CADSketchView) era el paradigma equivocado.
             tabSelector
             if selectedTab == .model {
-                    toolbarSection
+                    animationRow
                     parameterBar
                     brepHistoryBar
                     if selectedTool == .pushPull {
@@ -302,23 +329,25 @@ struct CADModeView: View {
                         SketchCanvasOverlay(sketch: sketch, canvasVM: canvasVM)
                             .allowsHitTesting(false)
 
-                        // Panel de Elementos flotante (anatomía Shapr3D)
-                        if showElements {
-                            VStack {
-                                HStack {
-                                    ElementsPanel(canvasVM: canvasVM,
-                                                  selectionController: selectionController,
-                                                  renderer: renderer)
-                                    Spacer()
-                                }
-                                Spacer()
+                        // Chrome flotante izquierdo: panel de Elementos arriba,
+                        // RAIL de herramientas con flyouts al centro (Shapr3D)
+                        VStack(alignment: .leading, spacing: AppTheme.space2) {
+                            if showElements {
+                                ElementsPanel(canvasVM: canvasVM,
+                                              selectionController: selectionController,
+                                              renderer: renderer)
+                                    .transition(.move(edge: .leading).combined(with: .opacity))
                             }
-                            .padding(.leading, AppTheme.space2)
-                            .padding(.top, AppTheme.space2)
-                            .transition(.move(edge: .leading).combined(with: .opacity))
+                            toolRail
+                            Spacer()
                         }
+                        .padding(.leading, AppTheme.space2)
+                        .padding(.top, AppTheme.space2)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity,
+                               alignment: .topLeading)
                     }
                     .animation(AppTheme.animDefault, value: showElements)
+                    .animation(AppTheme.animSnappy, value: expandedGroup)
                     // (El doble tap = encuadrar vive en MetalView — gesto universal.)
                     bottomBar
             } else {
@@ -787,89 +816,119 @@ struct CADModeView: View {
         }
     }
 
-    private var toolbarSection: some View {
-        VStack(spacing: 2) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 2) {
-                    Button(action: { HapticService.shared.light(); canvasVM.scene.cadHistory.undo() }) {
-                        Image(systemName: "arrow.uturn.backward")
+    // MARK: - Rail vertical de herramientas (anatomía Shapr3D)
+
+    /// Columna izquierda: transformaciones siempre visibles + grupos con FLYOUT
+    /// animado (Dibujo/Formar/Combinar/Primitivas) + Medir. La tira horizontal
+    /// de chips murió aquí.
+    private var toolRail: some View {
+        HStack(alignment: .top, spacing: AppTheme.space1) {
+            VStack(spacing: 2) {
+                ForEach(transformTools, id: \.self) { tool in
+                    railToolButton(tool)
+                }
+                Rectangle().fill(theme.border).frame(width: 22, height: 1)
+                    .padding(.vertical, 3)
+                ForEach(ToolGroup.allCases) { group in
+                    Button(action: {
+                        HapticService.shared.light()
+                        expandedGroup = (expandedGroup == group) ? nil : group
+                    }) {
+                        Image(systemName: group.icon)
+                            .font(.system(size: 15))
+                            .frame(width: 40, height: 38)
+                            .foregroundColor(expandedGroup == group ? theme.accent
+                                                                     : theme.textSecondary)
+                            .toolbarGlow(active: expandedGroup == group)
                     }
-                    .disabled(!canvasVM.scene.cadHistory.canUndo)
-                    .accessibilityLabel("Deshacer")
-                    .dynamicTypeSize(...DynamicTypeSize.xLarge)
-                    Button(action: { HapticService.shared.light(); canvasVM.scene.cadHistory.redo() }) {
-                        Image(systemName: "arrow.uturn.forward")
-                    }
-                    .disabled(!canvasVM.scene.cadHistory.canRedo)
-                    .accessibilityLabel("Rehacer")
-                    .dynamicTypeSize(...DynamicTypeSize.xLarge)
-                    ForEach(transformTools, id: \.self) { tool in
-                        toolButton(tool)
-                    }
-                    theme.border.frame(width: 1, height: 20).padding(.horizontal, 4)
-                    ForEach(cadTools, id: \.self) { tool in
-                        toolButton(tool)
-                    }
-                    theme.border.frame(width: 1, height: 20).padding(.horizontal, 4)
-                    // --- Primitivas B-rep (nacen exactas; se escalan con la herramienta) ---
-                    ForEach(primitiveTools.indices, id: \.self) { idx in
-                        let prim = primitiveTools[idx]
-                        Button(action: {
-                            HapticService.shared.light()
-                            performAddPrimitive(prim.id)
-                        }) {
-                            VStack(spacing: 2) {
-                                Image(systemName: prim.icon)
-                                    .font(.system(size: 15))
-                                Text(prim.label)
-                                    .font(.system(size: 8, weight: .medium))
-                                    .lineLimit(1)
-                            }
-                            .frame(width: 56, height: 40)
-                            .foregroundColor(theme.textSecondary)
-                            .toolbarGlow(active: false)
-                        }
-                        .accessibilityLabel("Agregar \(prim.label)")
-                        .dynamicTypeSize(...DynamicTypeSize.xLarge)
-                    }
-                    theme.border.frame(width: 1, height: 20).padding(.horizontal, 4)
-                    ForEach(sketchTools, id: \.self) { tool in
-                        toolButton(tool)
-                    }
-                }.padding(.horizontal, 6).padding(.vertical, 4)
+                    .accessibilityLabel(group.rawValue)
+                }
+                Rectangle().fill(theme.border).frame(width: 22, height: 1)
+                    .padding(.vertical, 3)
+                railToolButton(.measure)
             }
-            animationRow
+            .padding(5)
+            .glassPanel()
+
+            if let group = expandedGroup {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(group.rawValue.uppercased())
+                        .font(.system(size: 9, weight: .semibold))
+                        .tracking(1.1)
+                        .foregroundColor(AppTheme.textTertiary)
+                        .padding(.horizontal, 8).padding(.top, 4)
+                    if group == .primitives {
+                        ForEach(primitiveTools.indices, id: \.self) { idx in
+                            let prim = primitiveTools[idx]
+                            flyoutButton(icon: prim.icon, label: prim.label,
+                                         active: false) {
+                                performAddPrimitive(prim.id)
+                            }
+                        }
+                    } else {
+                        ForEach(tools(for: group), id: \.self) { tool in
+                            flyoutButton(icon: tool.icon, label: tool.displayName,
+                                         active: selectedTool == tool) {
+                                activate(tool)
+                            }
+                        }
+                    }
+                }
+                .padding(5)
+                .glassPanel()
+                .transition(.move(edge: .leading).combined(with: .opacity))
+            }
         }
-        .background(theme.surface)
     }
 
-    private func toolButton(_ tool: CADTool) -> some View {
-        Button(action: {
-            HapticService.shared.light()
-            selectedTool = tool
-            toolVM.selectedTool = tool
-            if tool == .booleanUnion || tool == .booleanSubtract || tool == .booleanIntersect {
-                startCSGOperation(tool)
-            } else if tool != .select && tool != .move && tool != .rotate && tool != .scale && tool != .pushPull {
-                // Select/transform/pushPull son MODOS (esperan un toque en geometría);
-                // el resto ejecuta al instante.
-                executeSelectedTool()
-            }
-        }) {
-            VStack(spacing: 2) {
-                Image(systemName: tool.icon)
-                    .font(.system(size: 15, weight: selectedTool == tool ? .medium : .regular))
-                Text(tool.displayName)
-                    .font(.system(size: 8, weight: .medium))
-                    .lineLimit(1)
-            }
-            .frame(width: 56, height: 40)
-            .foregroundColor(selectedTool == tool ? theme.accent : theme.textSecondary)
-            .toolbarGlow(active: selectedTool == tool)
+    /// Botón de rail (icono solo, 40pt) para herramientas siempre visibles.
+    private func railToolButton(_ tool: CADTool) -> some View {
+        Button(action: { activate(tool) }) {
+            Image(systemName: tool.icon)
+                .font(.system(size: 15, weight: selectedTool == tool ? .medium : .regular))
+                .frame(width: 40, height: 38)
+                .foregroundColor(selectedTool == tool ? theme.accent : theme.textSecondary)
+                .toolbarGlow(active: selectedTool == tool)
         }
-        .accessibilityLabel("Herramienta \(tool.displayName)")
-        .dynamicTypeSize(...DynamicTypeSize.xLarge)
+        .accessibilityLabel(tool.displayName)
     }
+
+    /// Botón de flyout (icono + etiqueta) con estética calma.
+    private func flyoutButton(icon: String, label: String, active: Bool,
+                              action: @escaping () -> Void) -> some View {
+        Button(action: { HapticService.shared.light(); action() }) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 13))
+                    .frame(width: 18)
+                Text(label)
+                    .font(.system(size: 12, weight: active ? .semibold : .regular))
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 9).padding(.vertical, 7)
+            .frame(width: 148, alignment: .leading)
+            .foregroundColor(active ? theme.accent : theme.textPrimary)
+            .background(active ? theme.accent.opacity(0.12) : Color.clear)
+            .cornerRadius(AppTheme.radiusSM)
+        }
+    }
+
+    /// Activación central de herramienta (rail y flyouts): un solo camino.
+    private func activate(_ tool: CADTool) {
+        HapticService.shared.light()
+        selectedTool = tool
+        toolVM.selectedTool = tool
+        if [.booleanUnion, .booleanSubtract, .booleanIntersect].contains(tool) {
+            startCSGOperation(tool)
+        } else if ![.select, .move, .rotate, .scale, .pushPull].contains(tool),
+                  !tool.isSketchTool, tool != .measure {
+            executeSelectedTool()
+        }
+        expandedGroup = nil   // el flyout se recoge al elegir
+    }
+
+    // (toolButton horizontal eliminado: el rail vertical con flyouts es el
+    //  único camino de activación — activate(_:).)
 
     private func executeSelectedTool() {
         guard let firstMesh = canvasVM.scene.models.first?.meshes.first else { return }
@@ -1608,7 +1667,7 @@ struct ElementsPanel: View {
             }
         }
         .frame(width: 190)
-        .frame(maxHeight: 380)
+        .frame(maxHeight: 250)
         .glassPanel()
     }
 
