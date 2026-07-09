@@ -916,7 +916,8 @@ class SatinRenderer: NSObject, ObservableObject {
     // MARK: - Matrices de cámara (scene3D.camera es LA fuente de verdad)
 
     /// Matriz de vista RH (mundo→ojo). Internal para test con oráculo matemático.
-    static func viewMatrix(for cam: Scene3D.Camera) -> simd_float4x4 {
+    /// nonisolated: matemática pura sin estado — testeable fuera del MainActor.
+    nonisolated static func viewMatrix(for cam: Scene3D.Camera) -> simd_float4x4 {
         let f = simd_normalize(cam.target - cam.position)
         let s = simd_normalize(simd_cross(f, cam.up))
         let u = simd_cross(s, f)
@@ -930,7 +931,7 @@ class SatinRenderer: NSObject, ObservableObject {
     }
 
     /// Proyección perspectiva RH con NDC z∈[0,1] (convención Metal).
-    static func projectionMatrix(for cam: Scene3D.Camera, aspect: Float) -> simd_float4x4 {
+    nonisolated static func projectionMatrix(for cam: Scene3D.Camera, aspect: Float) -> simd_float4x4 {
         let fovRad = cam.fov * .pi / 180
         let y = 1 / tan(fovRad * 0.5)
         let x = y / max(aspect, 0.0001)

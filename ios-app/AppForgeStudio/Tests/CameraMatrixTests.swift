@@ -14,7 +14,8 @@ final class CameraMatrixTests: XCTestCase {
     private func clip(_ p: SIMD3<Float>, cam: Scene3D.Camera, aspect: Float = 1.5) -> SIMD4<Float> {
         let v = SatinRenderer.viewMatrix(for: cam)
         let pr = SatinRenderer.projectionMatrix(for: cam, aspect: aspect)
-        return pr * v * SIMD4<Float>(p.x, p.y, p.z, 1)
+        let eye: SIMD4<Float> = v * SIMD4<Float>(p.x, p.y, p.z, 1)
+        return pr * eye
     }
 
     func testOriginIsVisibleFromDefaultCamera() {
