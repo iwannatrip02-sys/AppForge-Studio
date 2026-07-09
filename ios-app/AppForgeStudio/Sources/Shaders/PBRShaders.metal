@@ -4,12 +4,14 @@ using namespace metal;
 // Forward declaration (defined below, used in the PBR fragment shader)
 float2 brdfIBL(float NdotV, float roughness, texture2d<float> brdfLUT, sampler s);
 
+// CAUSA RAÍZ del visor negro (2026-07-08): tangent(3)/bitangent(4) no existían
+// en el vertex descriptor (el buffer real son 9 floats: pos4+normal3+uv2) →
+// makeRenderPipelineState fallaba → pbrPipelineState = nil → modelos PBR
+// invisibles. La base TBN ahora se deriva de la normal en el vertex shader.
 struct VertexIn {
     float4 position [[attribute(0)]];
     float3 normal [[attribute(1)]];
     float2 uv [[attribute(2)]];
-    float3 tangent [[attribute(3)]];
-    float3 bitangent [[attribute(4)]];
 };
 
 struct VertexOut {
@@ -189,8 +191,12 @@ vertex VertexOut pbr_vertex_main(
     float4 worldPos = uniforms.modelMatrix * float4(in.position.xyz, 1.0);
     out.position = uniforms.projectionMatrix * uniforms.viewMatrix * worldPos;
     out.worldNormal = normalize(uniforms.normalMatrix * in.normal);
-    out.worldTangent = normalize(uniforms.normalMatrix * in.tangent);
-    out.worldBitangent = normalize(uniforms.normalMatrix * in.bitangent);
+    // TBN derivada de la normal (no hay tangentes en el buffer; sin normal maps
+    // por ahora la base exacta no afecta el shading). El 0.001 evita la
+    // degeneración cuando la normal apunta exactamente hacia arriba.
+    float3 t = normalize(cross(in.normal, float3(0.0, 1.0, 0.001)));
+    out.worldTangent = normalize(uniforms.normalMatrix * t);
+    out.worldBitangent = normalize(uniforms.normalMatrix * cross(in.normal, t));
     out.uv = in.uv;
     out.worldPosition = worldPos.xyz;
     return out;

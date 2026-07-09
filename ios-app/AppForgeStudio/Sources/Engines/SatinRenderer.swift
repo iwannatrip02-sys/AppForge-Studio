@@ -24,6 +24,7 @@ private struct BasicUniforms {
     var lightColor: SIMD3<Float>
     var lightIntensity: Float
     var normalMatrix: simd_float3x3
+    var modelColor: SIMD4<Float>   // espeja Uniforms.modelColor del shader básico
 }
 
 struct GPUPBRMaterial {
@@ -323,7 +324,11 @@ class SatinRenderer: NSObject, ObservableObject {
 
     func setup() {
         setupSanityPipeline()
-        guard let library = device.makeDefaultLibrary() else {
+        // Bundle(for:) = el bundle que contiene esta clase (la app) — robusto
+        // también cuando el código corre hosteado en el bundle de tests.
+        let library = (try? device.makeDefaultLibrary(bundle: Bundle(for: SatinRenderer.self)))
+            ?? device.makeDefaultLibrary()
+        guard let library else {
             logger.error("[Render] makeDefaultLibrary FALLÓ — sin shaders, nada se dibuja")
             return
         }
@@ -1127,7 +1132,8 @@ class SatinRenderer: NSObject, ObservableObject {
                     lightDirection: lightDirection,
                     lightColor: lightColor,
                     lightIntensity: lightIntensity,
-                    normalMatrix: normalMatrix3x3
+                    normalMatrix: normalMatrix3x3,
+                    modelColor: renderable.color
                 )
 
                 encoder.setVertexBytes(&basicUniforms, length: MemoryLayout<BasicUniforms>.stride, index: 1)

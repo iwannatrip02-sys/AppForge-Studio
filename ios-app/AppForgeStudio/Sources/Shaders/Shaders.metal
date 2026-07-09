@@ -1,11 +1,15 @@
 #include <metal_stdlib>
 using namespace metal;
 
+// CAUSA RAÍZ del visor negro (2026-07-08): este struct declaraba un 4º atributo
+// `color [[attribute(3)]]` que el vertex descriptor del pipeline NO definía →
+// makeRenderPipelineState fallaba → basicPipelineState = nil → CERO draws.
+// El color del modelo ahora viaja en Uniforms.modelColor (es per-modelo, no
+// per-vértice — el buffer real son 9 floats: pos4+normal3+uv2).
 struct VertexIn {
     float4 position [[attribute(0)]];
     float3 normal [[attribute(1)]];
     float2 uv [[attribute(2)]];
-    float4 color [[attribute(3)]];
 };
 
 struct VertexOut {
@@ -25,6 +29,7 @@ struct Uniforms {
     float3 lightColor;
     float lightIntensity;
     float3x3 normalMatrix;
+    float4 modelColor;   // color per-modelo (debe espejar BasicUniforms en Swift)
 };
 
 vertex VertexOut vertex_main(VertexIn in [[stage_in]], constant Uniforms &uniforms [[buffer(1)]]) {
@@ -33,7 +38,7 @@ vertex VertexOut vertex_main(VertexIn in [[stage_in]], constant Uniforms &unifor
     out.position = uniforms.projectionMatrix * uniforms.viewMatrix * worldPos;
     out.worldNormal = normalize(uniforms.normalMatrix * in.normal);
     out.uv = in.uv;
-    out.color = in.color;
+    out.color = uniforms.modelColor;
     out.worldPosition = worldPos.xyz;
     return out;
 }
