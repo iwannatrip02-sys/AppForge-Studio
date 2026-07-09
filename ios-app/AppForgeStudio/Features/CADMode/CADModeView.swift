@@ -569,6 +569,35 @@ struct CADModeView: View {
 
             switch selectionController.selection {
             case .body(let modelIndex)?:
+                // Grupo Duplicar (referencias Shapr3D): Reflejar + Patrón
+                Button("Reflejar") {
+                    HapticService.shared.medium()
+                    guard modelIndex < canvasVM.scene.models.count else { return }
+                    if let copy = BRepModeling.mirroredCopy(of: canvasVM.scene.models[modelIndex]) {
+                        canvasVM.saveState()
+                        canvasVM.scene.addModel(copy)
+                        temperTick += 1
+                        canvasVM.objectWillChange.send()
+                    }
+                }
+                .font(.caption)
+
+                Button("Patrón ×3") {
+                    HapticService.shared.medium()
+                    guard modelIndex < canvasVM.scene.models.count else { return }
+                    let model = canvasVM.scene.models[modelIndex]
+                    let width = Double(bboxHalfDiagonal(of: model)) * 1.6 + 0.4
+                    let copies = BRepModeling.linearPattern(of: model, count: 3,
+                                                            spacing: SIMD3<Double>(width, 0, 0))
+                    if !copies.isEmpty {
+                        canvasVM.saveState()
+                        copies.forEach { canvasVM.scene.addModel($0) }
+                        temperTick += 1
+                        canvasVM.objectWillChange.send()
+                    }
+                }
+                .font(.caption)
+
                 Button(role: .destructive) {
                     HapticService.shared.heavy()
                     guard modelIndex < canvasVM.scene.models.count else { return }

@@ -112,6 +112,42 @@ enum BRepModeling {
         rotate(model, axis: SIMD3<Double>(0, 1, 0), angle: angle, center: center)
     }
 
+    /// Copia REFLEJADA a través de un plano (v1: YZ por el origen — el plano
+    /// del eje azul de la grilla). Devuelve el cuerpo nuevo, no muta el original.
+    static func mirroredCopy(of model: Model,
+                             planeNormal: SIMD3<Double> = SIMD3<Double>(1, 0, 0),
+                             planeOrigin: SIMD3<Double> = .zero) -> Model? {
+        guard let shape = model.cadShape,
+              let mirrored = shape.mirrored(planeNormal: planeNormal, planeOrigin: planeOrigin),
+              let mesh = OCCTBridge.toMesh(mirrored, quality: .medium) else { return nil }
+        let copy = Model(name: "\(model.name)_espejo")
+        copy.cadShape = mirrored
+        copy.meshes = [mesh]
+        copy.edgesMesh = OCCTBridge.edgesMesh(mirrored)
+        copy.color = model.color
+        return copy
+    }
+
+    /// Patrón LINEAL: n−1 copias trasladadas a `spacing` a lo largo de `direction`.
+    /// (Como en Shapr3D, las copias son cuerpos del árbol — editables después.)
+    static func linearPattern(of model: Model, count: Int,
+                              spacing: SIMD3<Double>) -> [Model] {
+        guard count >= 2, let shape = model.cadShape else { return [] }
+        var copies: [Model] = []
+        for i in 1..<count {
+            let offset = spacing * Double(i)
+            guard let moved = shape.translated(by: offset),
+                  let mesh = OCCTBridge.toMesh(moved, quality: .medium) else { continue }
+            let copy = Model(name: "\(model.name)_p\(i)")
+            copy.cadShape = moved
+            copy.meshes = [mesh]
+            copy.edgesMesh = OCCTBridge.edgesMesh(moved)
+            copy.color = model.color
+            copies.append(copy)
+        }
+        return copies
+    }
+
     /// Escala uniforme alrededor de `center`.
     @discardableResult
     static func scaleUniform(_ model: Model, factor: Double, center: SIMD3<Double>) -> Bool {

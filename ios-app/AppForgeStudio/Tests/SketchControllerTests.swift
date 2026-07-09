@@ -75,6 +75,33 @@ final class SketchControllerTests: XCTestCase {
         XCTAssertFalse(s.hasClosedProfile)
     }
 
+    func testMirrorAndPatternProduceExactCopies() throws {
+        // Cuerpo base desde sketch (rect 1×1 en x∈[2,3]) — lejos del plano espejo
+        let s = SketchController()
+        s.activeTool = .rectangle
+        s.tap(at: SIMD2<Float>(2, 0))
+        s.tap(at: SIMD2<Float>(3, 1))
+        let base = try XCTUnwrap(s.extrudeProfile(height: 1))
+        let baseVol = try volume(base)
+
+        let mirror = try XCTUnwrap(BRepModeling.mirroredCopy(of: base))
+        XCTAssertEqual(try volume(mirror), baseVol, accuracy: 0.01,
+                       "el espejo conserva el volumen exacto")
+        // El espejo vive al OTRO lado del plano x=0
+        let mx = mirror.meshes.first!.vertices.map { $0.position.x }
+        XCTAssertLessThan(mx.max() ?? 1, 0.01, "la copia reflejada cruza al lado x<0")
+
+        let copies = BRepModeling.linearPattern(of: base, count: 3,
+                                                spacing: SIMD3<Double>(2, 0, 0))
+        XCTAssertEqual(copies.count, 2, "patrón ×3 = original + 2 copias")
+        for (i, c) in copies.enumerated() {
+            XCTAssertEqual(try volume(c), baseVol, accuracy: 0.01)
+            let minX = c.meshes.first!.vertices.map { $0.position.x }.min() ?? 0
+            XCTAssertEqual(minX, 2 + Float(i + 1) * 2, accuracy: 0.05,
+                           "cada copia desplazada EXACTAMENTE i·spacing")
+        }
+    }
+
     func testPencilDragDrawsRectangle() throws {
         let s = SketchController()
         s.activeTool = .rectangle
