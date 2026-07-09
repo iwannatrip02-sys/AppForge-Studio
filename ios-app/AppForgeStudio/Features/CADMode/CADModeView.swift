@@ -1,6 +1,7 @@
 import SwiftUI
 import OSLog
 import CoreGraphics
+import simd
 
 private let logger = Logger(subsystem: "com.appforgestudio", category: "CADModeView")
 
