@@ -210,7 +210,19 @@ struct MetalView: UIViewRepresentable {
         }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-            true
+            // Los taps de undo/redo (2/3 dedos) NO se reconocen en simultáneo con
+            // pan/pinch: el inicio de un zoom contaba también como tap → deshacer
+            // SILENCIOSO que "borraba" el trabajo (feedback de device: 'cuando
+            // muevo desaparece lo que había hecho').
+            func isMultiTouchTap(_ g: UIGestureRecognizer) -> Bool {
+                (g as? UITapGestureRecognizer)?.numberOfTouchesRequired ?? 0 >= 2
+            }
+            func isCameraGesture(_ g: UIGestureRecognizer) -> Bool {
+                g is UIPinchGestureRecognizer || g is UIPanGestureRecognizer
+            }
+            if isMultiTouchTap(gestureRecognizer) && isCameraGesture(other) { return false }
+            if isMultiTouchTap(other) && isCameraGesture(gestureRecognizer) { return false }
+            return true
         }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
