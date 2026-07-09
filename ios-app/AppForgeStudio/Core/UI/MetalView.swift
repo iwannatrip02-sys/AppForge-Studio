@@ -76,6 +76,13 @@ struct MetalView: UIViewRepresentable {
     /// 0 = flechas (mover/escalar), 1 = anillos (rotar).
     var gizmoStyle: Int = 0
     var onGizmoDragBegan: ((SIMD3<Float>) -> Void)?
+    /// Sketch en el plano y=0: taps (dedo/pencil) = puntos; drag de PENCIL =
+    /// trazo vivo. El dedo arrastrado sigue orbitando (contrato intacto).
+    var sketchInputEnabled: Bool = false
+    var onSketchTap: ((SIMD2<Float>) -> Void)?
+    var onSketchDragBegan: ((SIMD2<Float>) -> Void)?
+    var onSketchDragChanged: ((SIMD2<Float>) -> Void)?
+    var onSketchDragEnded: ((SIMD2<Float>) -> Void)?
 
     func makeCoordinator() -> Coordinator {
         let c = Coordinator(
@@ -99,6 +106,11 @@ struct MetalView: UIViewRepresentable {
         c.gizmoAxisLength = gizmoAxisLength
         c.gizmoStyle = gizmoStyle
         c.onGizmoDragBegan = onGizmoDragBegan
+        c.sketchInputEnabled = sketchInputEnabled
+        c.onSketchTap = onSketchTap
+        c.onSketchDragBegan = onSketchDragBegan
+        c.onSketchDragChanged = onSketchDragChanged
+        c.onSketchDragEnded = onSketchDragEnded
         return c
     }
     
@@ -138,6 +150,11 @@ struct MetalView: UIViewRepresentable {
         context.coordinator.gizmoAxisLength = gizmoAxisLength
         context.coordinator.gizmoStyle = gizmoStyle
         context.coordinator.onGizmoDragBegan = onGizmoDragBegan
+        context.coordinator.sketchInputEnabled = sketchInputEnabled
+        context.coordinator.onSketchTap = onSketchTap
+        context.coordinator.onSketchDragBegan = onSketchDragBegan
+        context.coordinator.onSketchDragChanged = onSketchDragChanged
+        context.coordinator.onSketchDragEnded = onSketchDragEnded
         uiView.backgroundColor = metalBackground
         uiView.setNeedsDisplay()
     }
@@ -167,7 +184,13 @@ struct MetalView: UIViewRepresentable {
         var gizmoAxisLength: Float = 1.0
         var gizmoStyle: Int = 0
         var onGizmoDragBegan: ((SIMD3<Float>) -> Void)?
+        var sketchInputEnabled: Bool = false
+        var onSketchTap: ((SIMD2<Float>) -> Void)?
+        var onSketchDragBegan: ((SIMD2<Float>) -> Void)?
+        var onSketchDragChanged: ((SIMD2<Float>) -> Void)?
+        var onSketchDragEnded: ((SIMD2<Float>) -> Void)?
         private var isTransforming = false
+        private var isSketchDragging = false
         /// Pencil = SIEMPRE herramienta, nunca orbita (BLUEPRINT S1).
         /// Se captura en shouldReceive porque los recognizers no exponen el touch.
         private var lastTouchWasPencil = false
@@ -297,7 +320,13 @@ struct MetalView: UIViewRepresentable {
                 // Router del contrato de gestos: 1 dedo sobre geometría = herramienta
                 // (sculpt), sobre vacío = orbitar. El hitTest usa ScenePicker (único
                 // camino de picking; ignora overlays "__" como el highlight de cara).
-                if singleFinger && transformEnabled, let view = gesture.view {
+                if singleFinger && sketchInputEnabled && lastTouchWasPencil,
+                   let view = gesture.view, let p = planePoint(at: location, in: view) {
+                    // Pencil = instrumento: dibuja EN VIVO sobre el plano.
+                    // (El dedo arrastrado sigue orbitando — contrato intacto.)
+                    isSketchDragging = true
+                    onSketchDragBegan?(p)
+                } else if singleFinger && transformEnabled, let view = gesture.view {
                     // Prioridad: manija del gizmo → cuerpo → vacío (orbitar).
                     if let axis = gizmoAxisHit(at: location, in: view) {
                         isTransforming = true
@@ -341,7 +370,11 @@ struct MetalView: UIViewRepresentable {
                 let dx = Float(translation.x) * 0.005
                 let dy = Float(translation.y) * 0.005
 
-                if isTransforming {
+                if isSketchDragging {
+                    if let view = gesture.view, let p = planePoint(at: location, in: view) {
+                        onSketchDragChanged?(p)
+                    }
+                } else if isTransforming {
                     onTransformChanged?(Float(translation.x), Float(translation.y))
                 } else if isSculpting {
                     if let hit = sculptHit(at: location, in: gesture.view) {
@@ -381,6 +414,12 @@ struct MetalView: UIViewRepresentable {
                 gesture.setTranslation(.zero, in: gesture.view)
 
             case .ended, .cancelled:
+                if isSketchDragging {
+                    if let view = gesture.view, let p = planePoint(at: location, in: view) {
+                        onSketchDragEnded?(p)
+                    }
+                    isSketchDragging = false
+                }
                 if isTransforming { onTransformEnded?() }
                 isTransforming = false
                 isOrbiting = false
@@ -458,6 +497,12 @@ struct MetalView: UIViewRepresentable {
             let location = gesture.location(in: gesture.view)
             guard let view = gesture.view as? MTKView else { return }
 
+            // Sketch activo: el tap es un PUNTO en el plano de trabajo
+            if sketchInputEnabled, let p = planePoint(at: location, in: view) {
+                onSketchTap?(p)
+                return
+            }
+
             let ray = CameraRay.from(screenPoint: location, viewSize: view.bounds.size,
                                      camera: scene.camera)
             let hit = ScenePicker.hitTest(models: scene.models, ray: ray)
@@ -472,6 +517,18 @@ struct MetalView: UIViewRepresentable {
             }
         }
         
+        // MARK: - Sketch (rayo → plano de trabajo y=0)
+
+        private func planePoint(at location: CGPoint, in view: UIView) -> SIMD2<Float>? {
+            let ray = CameraRay.from(screenPoint: location, viewSize: view.bounds.size,
+                                     camera: scene.camera)
+            guard abs(ray.direction.y) > 1e-5 else { return nil }
+            let t = -ray.origin.y / ray.direction.y
+            guard t > 0 else { return nil }
+            let w = ray.origin + ray.direction * t
+            return SIMD2<Float>(w.x, w.z)
+        }
+
         // MARK: - Gizmo (hit-test en PANTALLA: robusto para manijas finas)
 
         /// Proyecta un punto de mundo a coordenadas de pantalla (puntos).

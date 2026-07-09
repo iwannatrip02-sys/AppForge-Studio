@@ -33,6 +33,12 @@ struct ContentView: View {
     /// 0 = flechas, 1 = anillos de rotación.
     var gizmoStyle: Int = 0
     var onGizmoDragBegan: ((SIMD3<Float>) -> Void)? = nil
+    /// Sketch en el plano de trabajo (taps + trazo vivo de pencil).
+    var sketchInputEnabled: Bool = false
+    var onSketchTap: ((SIMD2<Float>) -> Void)? = nil
+    var onSketchDragBegan: ((SIMD2<Float>) -> Void)? = nil
+    var onSketchDragChanged: ((SIMD2<Float>) -> Void)? = nil
+    var onSketchDragEnded: ((SIMD2<Float>) -> Void)? = nil
     @EnvironmentObject var themeManager: ThemeManager
 
     @State private var currentStroke: BrushStroke?
@@ -55,7 +61,12 @@ struct ContentView: View {
                 gizmoCenter: gizmoCenter,
                 gizmoAxisLength: gizmoAxisLength,
                 gizmoStyle: gizmoStyle,
-                onGizmoDragBegan: onGizmoDragBegan)
+                onGizmoDragBegan: onGizmoDragBegan,
+                sketchInputEnabled: sketchInputEnabled,
+                onSketchTap: onSketchTap,
+                onSketchDragBegan: onSketchDragBegan,
+                onSketchDragChanged: onSketchDragChanged,
+                onSketchDragEnded: onSketchDragEnded)
                 .edgesIgnoringSafeArea(.all)
 
             // HUD de diagnóstico (build de diagnóstico): convierte el device del

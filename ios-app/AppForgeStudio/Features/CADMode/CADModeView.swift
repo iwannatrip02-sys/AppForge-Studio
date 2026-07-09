@@ -27,6 +27,7 @@ struct CADModeView: View {
     @StateObject private var assemblyEngine = AssemblyEngine()
     @StateObject private var pushPullController = PushPullController()
     @StateObject private var selectionController = SelectionController()
+    @StateObject private var sketch = SketchController()
     @StateObject private var drawingExportController = DrawingExportController()
     @StateObject private var featureReportController = FeatureReportController()
     @ObservedObject private var brepHistory = BRepHistory.shared
@@ -77,6 +78,8 @@ struct CADModeView: View {
     @State private var edgeFilletRadius: Double = 0.1
     /// Espejo del estado de rayos X del renderer (para el tinte del botón).
     @State private var xrayOn = false
+    /// Altura de extrusión del perfil de sketch (editable).
+    @State private var sketchExtrudeHeight: Double = 1.0
     /// Transformación directa en curso: índice del cuerpo arrastrado y acumulado
     /// del gesto en puntos de pantalla (se hornea al B-rep al soltar).
     @State private var dragModelIndex: Int? = nil
@@ -165,7 +168,9 @@ struct CADModeView: View {
     }
 
     private var sketchTools: [CADTool] {
-        [.line, .circle, .rectangle, .arc, .dimension, .constraint]
+        // v1 del sketch en viewport: línea (cadena), círculo, rectángulo.
+        // Arco/cota/restricción llegan con la ola 2 del sketch (no placebo).
+        [.line, .circle, .rectangle]
     }
 
     /// `id` alimenta la lógica (performAddPrimitive); `label` es lo visible.
@@ -185,26 +190,10 @@ struct CADModeView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if isSketchTool {
-                CADSketchView(sketchEngine: sketchEngine, meshResult: $extrudedMesh)
-                    .onAppear {
-                        sketchEngine.resolveConstraints(scene: canvasVM.scene)
-                    }
-                    .onChange(of: extrudedMesh) { newMesh in
-                        if let mesh = newMesh {
-                            let name = "Extruded_\(UUID().uuidString.prefix(8))"
-                            let model = Model(name: name)
-                            model.meshes = [mesh]
-                            canvasVM.scene.addModel(model)
-                            canvasVM.objectWillChange.send()
-                            selectedTool = .select
-                            // Reconnect constraint system after scene modification
-                            sketchEngine.resolveConstraints(scene: canvasVM.scene)
-                        }
-                    }
-            } else {
-                tabSelector
-                if selectedTab == .model {
+            // El sketch vive EN el viewport (como Shapr3D) — la pantalla 2D
+            // aparte (CADSketchView) era el paradigma equivocado.
+            tabSelector
+            if selectedTab == .model {
                     toolbarSection
                     parameterBar
                     brepHistoryBar
@@ -213,6 +202,9 @@ struct CADModeView: View {
                     }
                     if selectionController.hasSelection && selectedTool == .select {
                         selectionBar
+                    }
+                    if isSketchTool {
+                        sketchBar
                     }
                     if showDrawingExportBar {
                         drawingExportBar
@@ -284,49 +276,35 @@ struct CADModeView: View {
                             gizmoAxis = axis
                             dragModelIndex = selectionController.selection?.modelIndex
                             dragAccum = .zero
+                        },
+                        // Sketch en viewport: taps = puntos; drag de PENCIL = trazo vivo
+                        sketchInputEnabled: isSketchTool,
+                        onSketchTap: { p in
+                            HapticService.shared.light()
+                            sketch.tap(at: p)
+                            syncSketchOverlays()
+                        },
+                        onSketchDragBegan: { p in
+                            sketch.pencilDragBegan(at: p)
+                            syncSketchOverlays()
+                        },
+                        onSketchDragChanged: { p in
+                            sketch.pencilDragChanged(to: p)
+                            syncSketchOverlays()
+                        },
+                        onSketchDragEnded: { p in
+                            HapticService.shared.light()
+                            sketch.pencilDragEnded(at: p)
+                            syncSketchOverlays()
                         })
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        SnapGuideOverlay(
-                            snapPoints: snapPoints,
-                            cursorScreenPosition: cursorScreenPosition,
-                            isActive: showSnapOverlay && toolVM.gridSnapEnabled
-                        )
-                        PencilForceOverlay { force, location in
-                            if force > 0.7 && !sketchEngine.entities.isEmpty && !isExtruding {
-                                extrudeDistance = Float(force) * 2.0
-                                performExtrusion()
-                            }
-                        }
+                        // (PencilForceOverlay legacy eliminado: interceptaba los toques
+                        // del Pencil y chocaba con el trazo vivo del sketch nuevo.)
                     }
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { value in
-                                cursorScreenPosition = value.location
-                                let worldPos = SIMD3<Float>(
-                                    Float(value.location.x / 300 - 0.5) * 4,
-                                    Float(1 - value.location.y / 400 - 0.5) * 3,
-                                    0
-                                )
-                                let direction = SIMD3<Float>(0, 0, -1)
-                                constraintEngine.scene = canvasVM.scene
-                                let found = constraintEngine.findSnapPoints(
-                                    position: worldPos,
-                                    direction: direction
-                                )
-                                snapPoints = found
-                                showSnapOverlay = !found.isEmpty
-                            }
-                            .onEnded { _ in
-                                constraintEngine.clearSnapState()
-                                snapPoints = []
-                                showSnapOverlay = false
-                            }
-                    )
                     // (El doble tap = encuadrar vive en MetalView — gesto universal.)
                     bottomBar
-                } else {
-                    parametricView
-                }
+            } else {
+                parametricView
             }
         }
         .onChange(of: selectedTool) { newTool in
@@ -337,6 +315,13 @@ struct CADModeView: View {
                 selectionController.deselect()
             }
             if newTool != .measure { measurePointA = nil; measurePointB = nil }
+            // Herramienta de dibujo → configurar el sketch en viewport
+            switch newTool {
+            case .line: sketch.activeTool = .line
+            case .rectangle: sketch.activeTool = .rectangle
+            case .circle: sketch.activeTool = .circle
+            default: break
+            }
             executeCADTool(newTool, canvasVM: canvasVM, toolVM: toolVM)
             rebuildGizmoOverlays()
         }
@@ -481,6 +466,92 @@ struct CADModeView: View {
         .padding(.vertical, 6)
         .background(theme.surfaceSecondary)
         .tempered(trigger: temperTick)
+    }
+
+    // MARK: - Sketch en viewport (barra + overlays + producción de sólidos)
+
+    /// Barra del sketch: estado, deshacer punto, limpiar; con perfil cerrado
+    /// aparecen altura editable + Extruir + Revolucionar (sólidos B-rep REALES).
+    private var sketchBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "pencil.and.outline")
+                .foregroundColor(theme.accent)
+            Text(sketch.statusMessage.isEmpty ? "Toca el plano para dibujar (Pencil: traza directo)"
+                                              : sketch.statusMessage)
+                .font(.caption2)
+                .foregroundColor(theme.textSecondary)
+                .lineLimit(1)
+            Spacer()
+            Button(action: { HapticService.shared.light(); sketch.undoLast(); syncSketchOverlays() }) {
+                Image(systemName: "arrow.uturn.backward").font(.system(size: 13))
+            }
+            .accessibilityLabel("Deshacer punto")
+            Button(action: { HapticService.shared.heavy(); sketch.clear(); syncSketchOverlays() }) {
+                Image(systemName: "trash").font(.system(size: 12)).foregroundColor(theme.error)
+            }
+            .accessibilityLabel("Borrar boceto")
+
+            if sketch.hasClosedProfile {
+                NumericField(value: $sketchExtrudeHeight, range: 0.05...20)
+                Button("Extruir") { performSketchExtrude() }
+                    .font(.caption.bold())
+                Button("Revolucionar") { performSketchRevolve() }
+                    .font(.caption)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(theme.surfaceSecondary)
+        .tempered(trigger: temperTick)
+    }
+
+    /// Overlays del sketch: lo confirmado en acero, lo vivo en brasa.
+    private func syncSketchOverlays() {
+        canvasVM.scene.models.removeAll { $0.name == "__sketch" || $0.name == "__sketchLive" }
+        if let m = sketch.overlayMesh() {
+            let mod = Model(name: "__sketch")
+            mod.meshes = [m]
+            mod.color = SIMD4<Float>(0.56, 0.74, 0.90, 1)   // steelBright
+            canvasVM.scene.addModel(mod)
+        }
+        if let m = sketch.liveOverlayMesh() {
+            let mod = Model(name: "__sketchLive")
+            mod.meshes = [m]
+            mod.color = SIMD4<Float>(1.0, 0.48, 0.27, 1)    // brasa
+            canvasVM.scene.addModel(mod)
+        }
+        canvasVM.objectWillChange.send()
+    }
+
+    private func performSketchExtrude() {
+        HapticService.shared.medium()
+        guard let model = sketch.extrudeProfile(height: sketchExtrudeHeight) else { return }
+        canvasVM.saveState()
+        canvasVM.scene.addModel(model)
+        sketch.clear()
+        syncSketchOverlays()
+        canvasVM.scene.cadHistory.pushOperation(
+            CADOperation(type: .createShape, description: "Extrusión desde boceto",
+                         parameters: ["altura": sketchExtrudeHeight]))
+        temperTick += 1
+        canvasVM.objectWillChange.send()
+    }
+
+    private func performSketchRevolve() {
+        HapticService.shared.medium()
+        guard let model = sketch.revolveProfile() else {
+            syncSketchOverlays()
+            return
+        }
+        canvasVM.saveState()
+        canvasVM.scene.addModel(model)
+        sketch.clear()
+        syncSketchOverlays()
+        canvasVM.scene.cadHistory.pushOperation(
+            CADOperation(type: .createShape, description: "Revolución desde boceto",
+                         parameters: [:]))
+        temperTick += 1
+        canvasVM.objectWillChange.send()
     }
 
     /// Barra contextual por SELECCIÓN (menú adaptativo, BLUEPRINT S2): ofrece
@@ -960,16 +1031,8 @@ struct CADModeView: View {
     private var bottomBar: some View {
         HStack(spacing: 12) {
             Toggle("Snap", isOn: $toolVM.gridSnapEnabled).toggleStyle(.switch).font(.caption)
-            // Etiqueta explícita: era un icono-misterio (feedback de device)
-            Button(action: { HapticService.shared.light(); showSnapOverlay.toggle() }) {
-                HStack(spacing: 3) {
-                    Image(systemName: showSnapOverlay ? "scope" : "dot.scope")
-                        .font(.system(size: 11))
-                    Text("Guías").font(.caption2)
-                }
-                .foregroundColor(showSnapOverlay ? theme.accent : theme.textSecondary)
-            }
-            .accessibilityLabel("Mostrar guías de snap")
+            // ("Guías" eliminado: su overlay dependía del snap-drag legacy retirado;
+            //  el snap real vive dentro del sketch — regla anti-placebo.)
             // Rayos X: cuerpos translúcidos, aristas visibles (look Shapr3D)
             Button(action: {
                 HapticService.shared.light()
