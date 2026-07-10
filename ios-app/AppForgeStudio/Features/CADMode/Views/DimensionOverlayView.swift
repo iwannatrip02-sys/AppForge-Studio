@@ -13,7 +13,8 @@ struct ViewportProjector {
     /// Proyecta un punto 3D del mundo a coordenadas de pantalla.
     /// Retorna nil si el punto está detrás de la cámara.
     func project(_ worldPoint: SIMD3<Float>) -> CGPoint? {
-        let clip = projectionMatrix * viewMatrix * SIMD4<Float>(worldPoint.x, worldPoint.y, worldPoint.z, 1)
+        let world = SIMD4<Float>(worldPoint.x, worldPoint.y, worldPoint.z, 1)
+        let clip = simd_mul(projectionMatrix, simd_mul(viewMatrix, world))
         guard clip.w > 0.0001 else { return nil }
         let ndcX = clip.x / clip.w
         let ndcY = clip.y / clip.w
@@ -213,13 +214,13 @@ struct DimensionOverlayView: View {
 
     private func drawLabel(_ text: String, at position: CGPoint,
                             in context: inout GraphicsContext) {
-        let font = Font.system(size: 11, weight: .medium, design: .monospaced)
-        let attributes = AttributeContainer()
-            .font(font)
+        let styled = Text(text)
+            .font(.system(size: 11, weight: .medium, design: .monospaced))
             .foregroundColor(Color(red: 1, green: 0.48, blue: 0.27))
+        let resolved = context.resolve(styled)
+        let textSize = resolved.measure(in: CGSize(width: 200, height: 30))
 
         // Fondo semitransparente para legibilidad
-        let textSize = context.resolve(Text(text).attribute(attributes)).measure(in: .init(width: 200, height: 30))
         let bgRect = CGRect(x: position.x - textSize.width / 2 - 4,
                             y: position.y - textSize.height / 2 - 2,
                             width: textSize.width + 8,
@@ -228,9 +229,8 @@ struct DimensionOverlayView: View {
         context.fill(Path(roundedRect: bgRect, cornerRadius: 3),
                       with: .color(Color(white: 0.1, opacity: 0.85)))
 
-        context.draw(Text(text).attribute(attributes),
-                      at: CGPoint(x: position.x - textSize.width / 2,
-                                  y: position.y - textSize.height / 2))
+        // anchor .center (default) alinea el texto con el fondo centrado en position
+        context.draw(resolved, at: position)
     }
 }
 

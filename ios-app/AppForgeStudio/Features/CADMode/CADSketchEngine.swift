@@ -43,6 +43,9 @@ enum SketchEntity {
 
 enum SketchEngineTool: String, CaseIterable { case select = "Seleccionar"; case point = "Punto"; case line = "Linea"; case circle = "Circulo"; case rectangle = "Rectangulo"; case arc = "Arco" }
 
+// MainActor: encapsula CADHistoryTree (aislado a MainActor) y solo lo consumen
+// vistas SwiftUI y delegates de PencilKit, ambos en el main actor.
+@MainActor
 class CADSketchEngine: ObservableObject {
     @Published var constraintManager = GeometryConstraintManager()
     @Published var historyTree = CADHistoryTree()
