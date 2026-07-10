@@ -16,11 +16,11 @@ struct ViewportProjector {
         let world = SIMD4<Float>(worldPoint.x, worldPoint.y, worldPoint.z, 1)
         let clip = simd_mul(projectionMatrix, simd_mul(viewMatrix, world))
         guard clip.w > 0.0001 else { return nil }
-        let ndcX = clip.x / clip.w
-        let ndcY = clip.y / clip.w
+        let ndcX = CGFloat(clip.x / clip.w)
+        let ndcY = CGFloat(clip.y / clip.w)
         let screenX = (ndcX + 1) * 0.5 * viewportSize.width
         let screenY = (1 - ndcY) * 0.5 * viewportSize.height
-        return CGPoint(x: CGFloat(screenX), y: CGFloat(screenY))
+        return CGPoint(x: screenX, y: screenY)
     }
 }
 
