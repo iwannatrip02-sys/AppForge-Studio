@@ -15,8 +15,13 @@ struct CameraRay {
     /// Misma matemática que usaba MetalView — extraída sin cambio de comportamiento.
     static func from(screenPoint: CGPoint, viewSize: CGSize, camera: Scene3D.Camera) -> CameraRay {
         let aspect = Float(viewSize.width / max(viewSize.height, 1))
+        // NDC en [-1,1]. El aspect NO va aquí: se aplica UNA sola vez vía halfW.
+        // Antes se multiplicaba en ndc.x Y en halfW (→ aspect²) y el toque caía
+        // desviado horizontalmente, peor hacia los bordes. Ahora el rayo coincide
+        // exacto con projectionMatrix (x = y/aspect) del render → el punto aparece
+        // donde tocas y la selección 3D acierta.
         let ndc = SIMD2<Float>(
-            (2 * Float(screenPoint.x) / Float(viewSize.width) - 1) * aspect,
+            2 * Float(screenPoint.x) / Float(viewSize.width) - 1,
             1 - 2 * Float(screenPoint.y) / Float(viewSize.height)
         )
         let fovRad = camera.fov * .pi / 180
