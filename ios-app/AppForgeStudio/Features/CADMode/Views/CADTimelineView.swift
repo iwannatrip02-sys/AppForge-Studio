@@ -97,10 +97,11 @@ struct CADTimelineView: View {
 }
 
 struct CADNodeRow: View {
-    let node: CADNode
+    let node: CADFeatureNode
     @ObservedObject var historyTree: CADHistoryTree
     let depth: Int
     @EnvironmentObject var themeManager: ThemeManager
+    @State private var isExpanded = true
 
     private var theme: AppTheme { themeManager.currentTheme }
     private var isCurrent: Bool { node.id == historyTree.currentNode?.id }
@@ -110,9 +111,9 @@ struct CADNodeRow: View {
             HStack(spacing: 6) {
                 if !node.children.isEmpty {
                     Button(action: {
-                        node.isExpanded.toggle()
+                        isExpanded.toggle()
                     }) {
-                        Image(systemName: node.isExpanded ? "chevron.down" : "chevron.right")
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                             .font(.system(size: 9))
                             .foregroundColor(theme.textSecondary)
                     }
@@ -122,7 +123,7 @@ struct CADNodeRow: View {
                         .frame(width: 10, height: 10)
                 }
 
-                Image(systemName: iconFor(node.operation.type))
+                Image(systemName: node.operation.type.icon)
                     .font(.system(size: 13))
                     .foregroundColor(colorFor(node.operation.type))
                     .frame(width: 18)
@@ -158,47 +159,27 @@ struct CADNodeRow: View {
             }
             .transition(.slide)
 
-            if node.isExpanded {
+            if isExpanded {
                 ForEach(node.children) { child in
                     CADNodeRow(node: child, historyTree: historyTree, depth: depth + 1)
                 }
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: node.isExpanded)
-    }
-
-    private func iconFor(_ type: CADOperationType) -> String {
-        switch type {
-        case .createShape: return "cube.box"
-        case .extrude, .sketchExtrude: return "arrow.up.to.line.compact"
-        case .revolve: return "rotate.3d"
-        case .sweep: return "point.topleft.down.curvedto.point.bottomright.up"
-        case .loft: return "point.3.connected.trianglepath.dotted"
-        case .booleanUnion: return "square.on.square"
-        case .booleanSubtract: return "square.slash"
-        case .booleanIntersect: return "square.on.circle"
-        case .fillet: return "circles.hexagongrid"
-        case .chamfer: return "hexagon"
-        case .shell: return "rectangle.3.group"
-        case .move, .rotate, .scale: return "arrow.up.and.down.and.arrow.left.and.right"
-        case .delete: return "trash"
-        case .unknown: return "questionmark.circle"
-        }
+        .animation(.easeInOut(duration: 0.2), value: isExpanded)
     }
 
     private func colorFor(_ type: CADOperationType) -> Color {
         switch type {
-        case .createShape: return .blue
-        case .extrude, .sketchExtrude: return .orange
-        case .revolve: return .purple
-        case .sweep: return .indigo
-        case .loft: return .teal
+        case .createPrimitive: return .blue
+        case .extrude, .sketchExtrude, .pushPull: return .orange
+        case .revolve, .sketchRevolve: return .purple
+        case .sweep, .sketchSweep: return .indigo
+        case .loft, .sketchLoft: return .teal
         case .booleanUnion, .booleanSubtract, .booleanIntersect: return .cyan
         case .fillet, .chamfer: return .green
-        case .shell: return .mint
-        case .move, .rotate, .scale: return .gray
+        case .shell, .hole: return .mint
+        case .move, .rotate, .scale, .mirror, .pattern: return .gray
         case .delete: return .red
-        case .unknown: return .secondary
         }
     }
 

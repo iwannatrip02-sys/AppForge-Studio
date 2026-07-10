@@ -200,6 +200,10 @@ final class CADHistoryTree: ObservableObject {
     private var undoStack: [CADFeatureNode] = []
     private var redoStack: [CADFeatureNode] = []
 
+    /// Nonisolated: todas las propiedades tienen valores por defecto, así que
+    /// el árbol puede crearse desde contextos no aislados (Scene3D, CADSketchEngine).
+    nonisolated init() {}
+
     var canUndo: Bool { !undoStack.isEmpty }
     var canRedo: Bool { !redoStack.isEmpty }
     var operationCount: Int { undoStack.count }

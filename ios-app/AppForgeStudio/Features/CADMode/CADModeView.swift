@@ -891,7 +891,7 @@ struct CADModeView: View {
         canvasVM.scene.addModel(model)
         sketch.clear()
         canvasVM.scene.cadHistory.pushOperation(
-            CADOperation(type: .createShape, description: "Extrusión desde boceto",
+            CADOperation(type: .sketchExtrude, description: "Extrusión desde boceto",
                          parameters: ["altura": sketchExtrudeHeight]))
         temperTick += 1
         canvasVM.objectWillChange.send()
@@ -904,7 +904,7 @@ struct CADModeView: View {
         canvasVM.scene.addModel(model)
         sketch.clear()
         canvasVM.scene.cadHistory.pushOperation(
-            CADOperation(type: .createShape, description: "Tubo por ruta",
+            CADOperation(type: .sketchSweep, description: "Tubo por ruta",
                          parameters: ["diámetro": tubeDiameter]))
         temperTick += 1
         canvasVM.objectWillChange.send()
@@ -917,7 +917,7 @@ struct CADModeView: View {
         canvasVM.scene.addModel(model)
         sketch.clear()
         canvasVM.scene.cadHistory.pushOperation(
-            CADOperation(type: .createShape, description: "Transición (loft)",
+            CADOperation(type: .sketchLoft, description: "Transición (loft)",
                          parameters: ["altura": loftHeight]))
         temperTick += 1
         canvasVM.objectWillChange.send()
@@ -932,7 +932,7 @@ struct CADModeView: View {
         canvasVM.scene.addModel(model)
         sketch.clear()
         canvasVM.scene.cadHistory.pushOperation(
-            CADOperation(type: .createShape, description: "Revolución desde boceto",
+            CADOperation(type: .sketchRevolve, description: "Revolución desde boceto",
                          parameters: [:]))
         temperTick += 1
         canvasVM.objectWillChange.send()
@@ -1887,11 +1887,11 @@ struct CADModeView: View {
 
         canvasVM.scene.addModel(model)
         canvasVM.scene.cadHistory.pushOperation(
-            CADOperation(type: .createShape, description: opDescription,
+            CADOperation(type: .createPrimitive, description: opDescription,
                          parameters: ["size": Double(primitiveSize)])
         )
         canvasVM.objectWillChange.send()
-        sketchEngine.logOperation(type: .createShape, description: opDescription)
+        sketchEngine.logOperation(type: .createPrimitive, description: opDescription)
     }
 
     private func startCSGOperation(_ tool: CADTool) {
