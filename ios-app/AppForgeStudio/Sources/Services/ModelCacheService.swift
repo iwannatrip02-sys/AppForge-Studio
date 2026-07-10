@@ -41,7 +41,11 @@ final class ModelCacheService {
         if let cached = memoryCache.object(forKey: url as NSURL) {
             return cached
         }
-        return loadFromDisk(for: url)?.0
+        // La lectura de disco corre EN la cola serial para respetar el orden de
+        // los writeToDisk/removeItem encolados. Sin esto, cache() (write async) y
+        // removeModel() (remove async) corren una carrera contra esta lectura
+        // síncrona → el modelo removido reaparecía desde disco (test flaky).
+        return serialQueue.sync { loadFromDisk(for: url)?.0 }
     }
 
     func cache(_ model: Model, for url: URL) {
