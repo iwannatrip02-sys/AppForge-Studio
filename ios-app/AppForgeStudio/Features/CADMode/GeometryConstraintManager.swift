@@ -118,104 +118,98 @@ class GeometryConstraintManager: ObservableObject {
         return constraints.filter { $0.isActive }
     }
 
-    // MARK: - 3D Constraint Solving Engine
+    // MARK: - 3D Constraint Solving Engine (delegado a SolverSwift)
 
+    /// Resuelve constraints 3D usando el solver Newton-Raphson unificado.
+    /// Proyecta puntos 3D → 2D, resuelve con SolverSwift, restaura a 3D.
     func resolveConstraints() {
         isSolving = true
         let start = CFAbsoluteTimeGetCurrent()
-        for constraint in constraints where constraint.isActive {
-            guard let provider = entityPositionProvider,
-                  let updater = entityPositionUpdater else { continue }
-            applyConstraint(constraint, provider: provider, updater: updater)
+
+        guard let provider = entityPositionProvider else {
+            isSolving = false
+            return
         }
+
+        solver.clear()
+        // Guardar z original para restaurar tras solve 2D
+        var originalZ: [UUID: Float] = [:]
+
+        for constraint in constraints where constraint.isActive {
+            for eid in constraint.entityIDs {
+                guard let pos = provider(eid) else { continue }
+                originalZ[eid] = pos.z
+                let sp = SolverPoint(id: eid,
+                                     x: Double(pos.x), y: Double(pos.y),
+                                     isFixed: false)
+                solver.addPoint(sp)
+            }
+
+            if let sc = bridgeToSolverConstraint(constraint) {
+                solver.addConstraint(sc)
+            }
+        }
+
+        let result = solver.solve()
+        if result.converged, let updater = entityPositionUpdater {
+            for sp in result.points {
+                let z = originalZ[sp.id] ?? 0
+                updater(sp.id, SIMD3<Float>(Float(sp.x), Float(sp.y), z))
+            }
+        }
+
         lastSolveDuration = CFAbsoluteTimeGetCurrent() - start
         isSolving = false
     }
 
-    private func applyConstraint(_ constraint: GeometryConstraint, provider: (UUID) -> SIMD3<Float>?, updater: (UUID, SIMD3<Float>) -> Void) {
-        guard constraint.entityIDs.count >= 2 else { return }
-        let positions = constraint.entityIDs.compactMap { provider($0) }
-        guard positions.count >= 2 else { return }
-        switch constraint.type {
+    /// Puente GeometryConstraint → SolverConstraint (reusa lógica de SketchController).
+    private func bridgeToSolverConstraint(_ gc: GeometryConstraint) -> SolverConstraint? {
+        let ids = gc.entityIDs
+        switch gc.type {
         case .horizontal:
-            if let id = constraint.entityIDs.first, var pos = provider(id) {
-                pos.y = 0
-                updater(id, pos)
-            }
+            guard let id = ids.first else { return nil }
+            return SolverConstraint(id: gc.id, type: .horizontal(pointID: id), weight: 1.0)
         case .vertical:
-            if let id = constraint.entityIDs.first, var pos = provider(id) {
-                pos.x = 0
-                updater(id, pos)
-            }
-        case .tangent:
-            if constraint.entityIDs.count >= 2 {
-                let center = positions[0]
-                let dir = normalize(positions[1] - center)
-                let radius = constraint.value ?? simd_length(positions[1] - center)
-                for i in 1..<constraint.entityIDs.count {
-                    updater(constraint.entityIDs[i], center + dir * radius)
-                }
-            }
-        case .concentric:
-            if constraint.entityIDs.count >= 2 {
-                let center = positions[0]
-                for i in 1..<constraint.entityIDs.count {
-                    updater(constraint.entityIDs[i], center)
-                }
-            }
+            guard let id = ids.first else { return nil }
+            return SolverConstraint(id: gc.id, type: .vertical(pointID: id), weight: 1.0)
+        case .distance:
+            guard ids.count >= 2 else { return nil }
+            return SolverConstraint(id: gc.id,
+                type: .distance(pointA: ids[0], pointB: ids[1], value: Double(gc.value ?? 10)),
+                weight: 1.0)
+        case .perpendicular:
+            guard ids.count >= 4 else { return nil }
+            return SolverConstraint(id: gc.id,
+                type: .perpendicular(lineAStart: ids[0], lineAEnd: ids[1],
+                                    lineBStart: ids[2], lineBEnd: ids[3]), weight: 1.0)
+        case .equal:
+            guard ids.count >= 4 else { return nil }
+            return SolverConstraint(id: gc.id,
+                type: .equal(pointA: ids[0], pointB: ids[1], pointC: ids[2], pointD: ids[3]),
+                weight: 1.0)
+        case .angle:
+            guard ids.count >= 3 else { return nil }
+            return SolverConstraint(id: gc.id,
+                type: .angle(pointA: ids[0], pointB: ids[1], pointC: ids[2],
+                            value: Double(gc.value ?? 45)), weight: 1.0)
+        case .midpoint:
+            guard ids.count >= 3 else { return nil }
+            return SolverConstraint(id: gc.id,
+                type: .midpoint(pointA: ids[0], pointB: ids[1], pointMid: ids[2]), weight: 1.0)
         case .collinear:
-            if constraint.entityIDs.count >= 2 {
-                let avg = positions.reduce(SIMD3<Float>(0,0,0), +) / Float(positions.count)
-                for id in constraint.entityIDs { updater(id, avg) }
-            }
-        default:
-            break
+            guard ids.count >= 3 else { return nil }
+            return SolverConstraint(id: gc.id,
+                type: .collinear(pointA: ids[0], pointB: ids[1], pointC: ids[2]), weight: 1.0)
+        case .tangent:
+            guard ids.count >= 2 else { return nil }
+            return SolverConstraint(id: gc.id,
+                type: .tangent(center: ids[0], point: ids[1], radius: Double(gc.value ?? 1)),
+                weight: 1.0)
+        case .concentric:
+            guard ids.count >= 2 else { return nil }
+            return SolverConstraint(id: gc.id,
+                type: .coincident(pointA: ids[0], pointB: ids[1]), weight: 1.0)
         }
-    }
-
-    // MARK: - Solver Helpers
-
-    private func applyHorizontal(_ constraint: GeometryConstraint) {
-        guard constraint.entityIDs.count == 1,
-              let pos = entityPositionProvider?(constraint.entityIDs[0]) else { return }
-        let newPos = SIMD3<Float>(pos.x, 0, pos.z)
-        entityPositionUpdater?(constraint.entityIDs[0], newPos)
-    }
-
-    private func applyVertical(_ constraint: GeometryConstraint) {
-        guard constraint.entityIDs.count == 1,
-              let pos = entityPositionProvider?(constraint.entityIDs[0]) else { return }
-        let newPos = SIMD3<Float>(0, pos.y, 0)
-        entityPositionUpdater?(constraint.entityIDs[0], newPos)
-    }
-
-    private func applyDistance(_ constraint: GeometryConstraint) {
-        guard constraint.entityIDs.count == 2,
-              let pos1 = entityPositionProvider?(constraint.entityIDs[0]),
-              let pos2 = entityPositionProvider?(constraint.entityIDs[1]),
-              let targetDist = constraint.value else { return }
-        let direction = normalize(pos2 - pos1)
-        let newPos2 = pos1 + direction * targetDist
-        entityPositionUpdater?(constraint.entityIDs[1], newPos2)
-    }
-
-    private func applyAngle(_ constraint: GeometryConstraint) {
-        // Stub: No implementado aun
-    }
-
-    private func applyEqual(_ constraint: GeometryConstraint) {
-        guard constraint.entityIDs.count == 2,
-              let pos1 = entityPositionProvider?(constraint.entityIDs[0]),
-              let _ = entityPositionProvider?(constraint.entityIDs[1]) else { return }
-        entityPositionUpdater?(constraint.entityIDs[1], pos1)
-    }
-
-    private func applyMidpoint(_ constraint: GeometryConstraint) {
-        guard constraint.entityIDs.count == 3,
-              let pos1 = entityPositionProvider?(constraint.entityIDs[0]),
-              let pos2 = entityPositionProvider?(constraint.entityIDs[1]) else { return }
-        let midpoint = (pos1 + pos2) * 0.5
-        entityPositionUpdater?(constraint.entityIDs[2], midpoint)
     }
 
     // MARK: - 2D Sketch Constraint Solving (from Sources/CADCore)

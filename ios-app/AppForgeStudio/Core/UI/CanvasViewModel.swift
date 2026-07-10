@@ -2,6 +2,7 @@ import Foundation
 import simd
 import Metal
 import Combine
+import CoreGraphics
 import OSLog
 
 private let logger = Logger(subsystem: "com.appforgestudio", category: "CanvasViewModel")
@@ -112,6 +113,39 @@ class CanvasViewModel: ObservableObject {
     }
     
     @Published var currentMode: AppMode = .hybrid
+
+    // MARK: - Matrices de cámara (para proyección 3D→pantalla en overlays)
+
+    /// Matriz de vista (mundo → ojo), consistente con SatinRenderer.viewMatrix(for:)
+    var viewMatrix: simd_float4x4 {
+        let cam = scene.camera
+        let f = simd_normalize(cam.target - cam.position)
+        let s = simd_normalize(simd_cross(f, cam.up))
+        let u = simd_cross(s, f)
+        return simd_float4x4(
+            SIMD4<Float>(s.x, u.x, -f.x, 0),
+            SIMD4<Float>(s.y, u.y, -f.y, 0),
+            SIMD4<Float>(s.z, u.z, -f.z, 0),
+            SIMD4<Float>(-simd_dot(s, cam.position), -simd_dot(u, cam.position),
+                         simd_dot(f, cam.position), 1)
+        )
+    }
+
+    /// Matriz de proyección perspectiva para un tamaño de viewport dado
+    func projectionMatrix(for viewportSize: CGSize) -> simd_float4x4 {
+        let cam = scene.camera
+        let aspect = viewportSize.height > 0 ? Float(viewportSize.width / viewportSize.height) : 1.0
+        let fovRad = cam.fov * .pi / 180
+        let y = 1 / tan(fovRad * 0.5)
+        let x = y / max(aspect, 0.0001)
+        let zs = cam.farPlane / (cam.nearPlane - cam.farPlane)
+        return simd_float4x4(
+            SIMD4<Float>(x, 0, 0, 0),
+            SIMD4<Float>(0, y, 0, 0),
+            SIMD4<Float>(0, 0, zs, -1),
+            SIMD4<Float>(0, 0, zs * cam.nearPlane, 0)
+        )
+    }
 }
 
 // MARK: - Helpers

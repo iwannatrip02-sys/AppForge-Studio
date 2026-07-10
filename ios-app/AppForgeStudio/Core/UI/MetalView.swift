@@ -83,6 +83,14 @@ struct MetalView: UIViewRepresentable {
     var onSketchDragBegan: ((SIMD2<Float>) -> Void)?
     var onSketchDragChanged: ((SIMD2<Float>) -> Void)?
     var onSketchDragEnded: ((SIMD2<Float>) -> Void)?
+    /// Plano de trabajo del boceto (por defecto el piso y=0). Poblado desde
+    /// CADModeView con `sketch.plane` para dibujar SOBRE una cara arbitraria.
+    var sketchPlaneOrigin: SIMD3<Float> = .zero
+    var sketchPlaneNormal: SIMD3<Float> = SIMD3(0, 1, 0)
+    var sketchPlaneU: SIMD3<Float> = SIMD3(1, 0, 0)
+    var sketchPlaneV: SIMD3<Float> = SIMD3(0, 0, 1)
+    /// Tap sobre una cara PLANA con herramienta de dibujo activa → definir el plano.
+    var onSketchFaceTap: ((SurfaceHit) -> Void)?
 
     func makeCoordinator() -> Coordinator {
         let c = Coordinator(
@@ -111,6 +119,11 @@ struct MetalView: UIViewRepresentable {
         c.onSketchDragBegan = onSketchDragBegan
         c.onSketchDragChanged = onSketchDragChanged
         c.onSketchDragEnded = onSketchDragEnded
+        c.sketchPlaneOrigin = sketchPlaneOrigin
+        c.sketchPlaneNormal = sketchPlaneNormal
+        c.sketchPlaneU = sketchPlaneU
+        c.sketchPlaneV = sketchPlaneV
+        c.onSketchFaceTap = onSketchFaceTap
         return c
     }
     
@@ -157,6 +170,11 @@ struct MetalView: UIViewRepresentable {
         context.coordinator.onSketchDragBegan = onSketchDragBegan
         context.coordinator.onSketchDragChanged = onSketchDragChanged
         context.coordinator.onSketchDragEnded = onSketchDragEnded
+        context.coordinator.sketchPlaneOrigin = sketchPlaneOrigin
+        context.coordinator.sketchPlaneNormal = sketchPlaneNormal
+        context.coordinator.sketchPlaneU = sketchPlaneU
+        context.coordinator.sketchPlaneV = sketchPlaneV
+        context.coordinator.onSketchFaceTap = onSketchFaceTap
         uiView.backgroundColor = metalBackground
         uiView.setNeedsDisplay()
     }
@@ -191,6 +209,11 @@ struct MetalView: UIViewRepresentable {
         var onSketchDragBegan: ((SIMD2<Float>) -> Void)?
         var onSketchDragChanged: ((SIMD2<Float>) -> Void)?
         var onSketchDragEnded: ((SIMD2<Float>) -> Void)?
+        var sketchPlaneOrigin: SIMD3<Float> = .zero
+        var sketchPlaneNormal: SIMD3<Float> = SIMD3(0, 1, 0)
+        var sketchPlaneU: SIMD3<Float> = SIMD3(1, 0, 0)
+        var sketchPlaneV: SIMD3<Float> = SIMD3(0, 0, 1)
+        var onSketchFaceTap: ((SurfaceHit) -> Void)?
         private var isTransforming = false
         private var isSketchDragging = false
         /// Pencil = SIEMPRE herramienta, nunca orbita (BLUEPRINT S1).
@@ -507,9 +530,22 @@ struct MetalView: UIViewRepresentable {
             let location = gesture.location(in: gesture.view)
             guard let view = gesture.view as? MTKView else { return }
 
-            // Sketch activo: el tap es un PUNTO en el plano de trabajo
-            if sketchInputEnabled, let p = planePoint(at: location, in: view) {
-                onSketchTap?(p)
+            // Sketch activo: primero probamos si el tap cae sobre un sólido con
+            // B-rep (una cara donde plantar el plano de trabajo, como Shapr3D).
+            // Si hay hit sobre un cadShape → onSketchFaceTap (NO onSketchTap);
+            // si no → el tap es un PUNTO en el plano de trabajo actual.
+            if sketchInputEnabled {
+                let faceRay = CameraRay.from(screenPoint: location, viewSize: view.bounds.size,
+                                             camera: scene.camera)
+                if let hit = ScenePicker.hitTest(models: scene.models, ray: faceRay),
+                   hit.modelIndex < scene.models.count,
+                   scene.models[hit.modelIndex].cadShape != nil {
+                    onSketchFaceTap?(hit)
+                    return
+                }
+                if let p = planePoint(at: location, in: view) {
+                    onSketchTap?(p)
+                }
                 return
             }
 
@@ -527,16 +563,21 @@ struct MetalView: UIViewRepresentable {
             }
         }
         
-        // MARK: - Sketch (rayo → plano de trabajo y=0)
+        // MARK: - Sketch (rayo → plano de trabajo arbitrario)
 
+        /// Intersección rayo–plano estándar y coordenadas locales (u, v) del plano
+        /// de trabajo activo. Con el piso por defecto equivale al viejo raycast a y=0.
         private func planePoint(at location: CGPoint, in view: UIView) -> SIMD2<Float>? {
             let ray = CameraRay.from(screenPoint: location, viewSize: view.bounds.size,
                                      camera: scene.camera)
-            guard abs(ray.direction.y) > 1e-5 else { return nil }
-            let t = -ray.origin.y / ray.direction.y
+            let n = sketchPlaneNormal
+            let denom = simd_dot(ray.direction, n)
+            guard abs(denom) > 1e-6 else { return nil }
+            let t = simd_dot(sketchPlaneOrigin - ray.origin, n) / denom
             guard t > 0 else { return nil }
             let w = ray.origin + ray.direction * t
-            return SIMD2<Float>(w.x, w.z)
+            let rel = w - sketchPlaneOrigin
+            return SIMD2<Float>(simd_dot(rel, sketchPlaneU), simd_dot(rel, sketchPlaneV))
         }
 
         // MARK: - Gizmo (hit-test en PANTALLA: robusto para manijas finas)

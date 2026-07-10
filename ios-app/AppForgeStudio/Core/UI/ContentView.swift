@@ -39,6 +39,13 @@ struct ContentView: View {
     var onSketchDragBegan: ((SIMD2<Float>) -> Void)? = nil
     var onSketchDragChanged: ((SIMD2<Float>) -> Void)? = nil
     var onSketchDragEnded: ((SIMD2<Float>) -> Void)? = nil
+    /// Plano de trabajo del boceto (para dibujar sobre una cara arbitraria).
+    var sketchPlaneOrigin: SIMD3<Float> = .zero
+    var sketchPlaneNormal: SIMD3<Float> = SIMD3(0, 1, 0)
+    var sketchPlaneU: SIMD3<Float> = SIMD3(1, 0, 0)
+    var sketchPlaneV: SIMD3<Float> = SIMD3(0, 0, 1)
+    /// Tap sobre una cara plana con herramienta de dibujo → definir el plano.
+    var onSketchFaceTap: ((SurfaceHit) -> Void)? = nil
     @EnvironmentObject var themeManager: ThemeManager
 
     @State private var currentStroke: BrushStroke?
@@ -66,7 +73,12 @@ struct ContentView: View {
                 onSketchTap: onSketchTap,
                 onSketchDragBegan: onSketchDragBegan,
                 onSketchDragChanged: onSketchDragChanged,
-                onSketchDragEnded: onSketchDragEnded)
+                onSketchDragEnded: onSketchDragEnded,
+                sketchPlaneOrigin: sketchPlaneOrigin,
+                sketchPlaneNormal: sketchPlaneNormal,
+                sketchPlaneU: sketchPlaneU,
+                sketchPlaneV: sketchPlaneV,
+                onSketchFaceTap: onSketchFaceTap)
                 .edgesIgnoringSafeArea(.all)
 
             // HUD de diagnóstico (build de diagnóstico): convierte el device del

@@ -24,13 +24,17 @@ struct CADModeView: View {
     @ObservedObject var animationVM: AnimationEngine
     @StateObject private var sketchEngine = CADSketchEngine()
     @StateObject private var constraintEngine = ConstraintEngine()
-    @StateObject private var assemblyEngine = AssemblyEngine()
+    @StateObject private var groupAssemblyEngine = AssemblyEngine()
     @StateObject private var pushPullController = PushPullController()
     @StateObject private var selectionController = SelectionController()
     @StateObject private var sketch = SketchController()
     @StateObject private var drawingExportController = DrawingExportController()
     @StateObject private var featureReportController = FeatureReportController()
     @ObservedObject private var brepHistory = BRepHistory.shared
+    @StateObject private var dimensionManager = DimensionManager()
+    @StateObject private var livePreviewEngine = LivePreviewEngine()
+    @StateObject private var assemblyMatesEngine = AssemblyMatesEngine()
+    @StateObject private var projectSettings = ProjectSettings.shared
 
     /// Nombre reservado del modelo overlay de resaltado de cara.
     private static let faceHighlightName = "__faceHighlight"
@@ -191,6 +195,38 @@ struct CADModeView: View {
         canvasVM.objectWillChange.send()
     }
 
+    /// Reconstruye los overlays del sketch: grid del plano de trabajo + relleno de
+    /// regiones cerradas (S4 del BLUEPRINT — el "sombreado mágico" de Shapr3D).
+    private func rebuildSketchOverlays() {
+        canvasVM.scene.models.removeAll { $0.name == "__workPlaneGrid" || $0.name == "__sketchRegions" }
+
+        guard isSketchTool else { return }
+
+        // Grid del plano de trabajo activo
+        let gridModel = Model.workPlaneGrid(plane: sketch.plane,
+                                             step: Float(projectSettings.config.gridStep))
+        gridModel.name = "__workPlaneGrid"
+        canvasVM.scene.addModel(gridModel)
+
+        // Regiones cerradas → relleno sombreado tocable
+        let regions = SketchRegionDetector.detectRegions(
+            in: sketch.entities, chain: sketch.chain
+        )
+        if !regions.isEmpty {
+            let overlay = SketchRegionOverlay()
+            let (fill, stroke) = overlay.generate(for: regions, on: sketch.plane)
+            let regionModel = Model(name: "__sketchRegions")
+            var meshes: [Mesh] = []
+            if let fill = fill { meshes.append(fill) }
+            if let stroke = stroke { meshes.append(stroke) }
+            regionModel.meshes = meshes
+            regionModel.color = SIMD4<Float>(1.0, 0.48, 0.27, 0.22)
+            canvasVM.scene.addModel(regionModel)
+        }
+
+        canvasVM.objectWillChange.send()
+    }
+
     private var isSketchTool: Bool {
         selectedTool.isSketchTool
     }
@@ -262,15 +298,27 @@ struct CADModeView: View {
                                 pushPullController.selectFace(from: hit, in: canvasVM.scene.models)
                             } else if selectedTool == .measure {
                                 // Medición sobre geometría real: primer toque = A,
-                                // segundo = B, tercero reinicia.
+                                // segundo = B, crea cota 3D persistente.
                                 HapticService.shared.light()
                                 if measurePointA == nil || measurePointB != nil {
                                     measurePointA = hit.position
                                     measurePointB = nil
+                                    dimensionManager.removeActive()
                                 } else {
                                     measurePointB = hit.position
                                     if let a = measurePointA {
-                                        toolVM.measurementDistance = simd_distance(a, hit.position)
+                                        let dist = simd_distance(a, hit.position)
+                                        toolVM.measurementDistance = dist
+                                        // Crear cota 3D persistente
+                                        dimensionManager.addLinear(
+                                            from: a, to: hit.position,
+                                            label: projectSettings.config.format(Double(dist))
+                                        )
+                                        canvasVM.scene.cadHistory.beginOperation(
+                                            "Medición: \(projectSettings.config.format(Double(dist)))",
+                                            type: .sketchExtrude,
+                                            params: ["distance": Double(dist)]
+                                        )
                                     }
                                 }
                             } else if selectedTool == .hole {
@@ -379,12 +427,48 @@ struct CADModeView: View {
                         onSketchDragEnded: { p in
                             HapticService.shared.light()
                             sketch.pencilDragEnded(at: p)
-                        })
+                        },
+                        sketchPlaneOrigin: sketch.plane.origin,
+                        sketchPlaneNormal: sketch.plane.normal,
+                        sketchPlaneU: sketch.plane.u,
+                        sketchPlaneV: sketch.plane.v,
+                        onSketchFaceTap: { hit in handleSketchFaceTap(hit) })
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                         // Sketch 2D NÍTIDO en pantalla (líneas finas, puntos,
                         // cotas vivas, relleno de perfiles) — estilo Shapr3D.
                         SketchCanvasOverlay(sketch: sketch, canvasVM: canvasVM)
+                            .ignoresSafeArea()
                             .allowsHitTesting(false)
+
+                        // Cotas 3D en viewport (estilo Shapr3D Drawings)
+                        if dimensionManager.showDimensions || selectedTool == .measure {
+                            MeasurementOverlay(dimensionManager: dimensionManager,
+                                              canvasVM: canvasVM)
+                                .ignoresSafeArea()
+                                .allowsHitTesting(false)
+                        }
+
+                        // Preview fantasma de operación activa (extrude/fillet en vivo)
+                        if livePreviewEngine.state.isActive,
+                           let previewMesh = livePreviewEngine.previewMesh {
+                            // El preview se inyecta como modelo overlay temporal
+                            Color.clear
+                                .onAppear {
+                                    let previewModel = Model(name: "__livePreview")
+                                    previewModel.meshes = [previewMesh]
+                                    previewModel.color = SIMD4<Float>(1.0, 0.48, 0.27, 0.45)
+                                    if let edges = livePreviewEngine.previewEdges {
+                                        previewModel.edgesMesh = edges
+                                    }
+                                    canvasVM.scene.models.removeAll { $0.name == "__livePreview" }
+                                    canvasVM.scene.addModel(previewModel)
+                                    canvasVM.objectWillChange.send()
+                                }
+                                .onDisappear {
+                                    canvasVM.scene.models.removeAll { $0.name == "__livePreview" }
+                                    canvasVM.objectWillChange.send()
+                                }
+                        }
 
                         // Chrome flotante izquierdo: panel de Elementos arriba,
                         // RAIL de herramientas con flyouts al centro (Shapr3D)
@@ -418,7 +502,7 @@ struct CADModeView: View {
             if newTool != .select && ![.move, .rotate, .scale].contains(newTool) {
                 selectionController.deselect()
             }
-            if newTool != .measure { measurePointA = nil; measurePointB = nil }
+            if newTool != .measure { measurePointA = nil; measurePointB = nil; dimensionManager.removeActive() }
             // Herramienta de dibujo → configurar el sketch en viewport
             switch newTool {
             case .line: sketch.activeTool = .line
@@ -430,7 +514,10 @@ struct CADModeView: View {
             }
             executeCADTool(newTool, canvasVM: canvasVM, toolVM: toolVM)
             rebuildGizmoOverlays()
+            rebuildSketchOverlays()
         }
+        .onChange(of: sketch.entities.count) { _ in rebuildSketchOverlays() }
+        .onChange(of: sketch.chain.count) { _ in rebuildSketchOverlays() }
         .onChange(of: selectionController.outlinedModelId) { newId in
             renderer.outlinedModelId = newId
             canvasVM.objectWillChange.send()
@@ -448,6 +535,15 @@ struct CADModeView: View {
                 canvasVM.scene.addModel(overlay)
             }
             canvasVM.objectWillChange.send()
+        }
+        .onChange(of: canvasVM.scene.cadHistory.recomputeRequested?.fromNodeID) { nodeID in
+            // Recompute paramétrico: una feature editada → reconstruir geometría downstream
+            guard let nodeID = nodeID, let node = canvasVM.scene.cadHistory.findNode(with: nodeID) else { return }
+            logger.info("[Parametric] recompute requested from '\(node.operation.description)'")
+            // Notificar al usuario que el modelo se está reconstruyendo
+            temperTick += 1
+            // La reconstrucción OCCT real ocurre vía BRepHistory + operaciones en CADModeView
+            // El árbol de features es el registro; la geometría se actualiza al re-ejecutar
         }
         .onChange(of: selectionController.highlightMesh) { newMesh in
             // Overlay de cara/arista seleccionada (brasa = activo; "__" = no tocable)
@@ -651,7 +747,19 @@ struct CADModeView: View {
             }
             .accessibilityLabel("Borrar boceto")
 
-            if selectedTool == .polygon {
+            // Plano sobre cara activo → botón para volver al suelo (TAREA 2)
+            if sketch.plane != .floor {
+                Button(action: { HapticService.shared.light(); sketch.resetPlaneToFloor() }) {
+                    Label("Plano: suelo", systemImage: "square.on.square.dashed")
+                        .font(.caption2)
+                }
+                .accessibilityLabel("Plano de boceto: suelo")
+            }
+
+            // Edición de la entidad seleccionada (TAREA 3): parámetros in-situ
+            if let idx = sketch.selectedEntityIndex, idx < sketch.entities.count {
+                sketchEntityEditControls(index: idx)
+            } else if selectedTool == .polygon {
                 Text("Lados").font(.caption2).foregroundColor(theme.textSecondary)
                 // Stepper numérico para lados del polígono (3-12)
                 Stepper(value: $polygonSidesUI, in: 3...12) {
@@ -699,6 +807,82 @@ struct CADModeView: View {
     // (Los overlays 3D del sketch fueron reemplazados por SketchCanvasOverlay:
     //  líneas 2D nítidas en pantalla, como Shapr3D — los tubos 3D se veían
     //  gordos, con quiebres y "contaminantes", feedback device con referencia.)
+
+    /// Controles de edición de la entidad seleccionada (TAREA 3): círculo → R;
+    /// polígono → R y Lados; rect → W y H; con botones Eliminar y ✕ (deseleccionar).
+    @ViewBuilder
+    private func sketchEntityEditControls(index: Int) -> some View {
+        // Círculo / polígono: radio editable
+        if let r = sketch.selectedRadius {
+            Text("R").font(.caption2).foregroundColor(theme.textSecondary)
+            NumericField(value: Binding(get: { Double(r) },
+                                        set: { sketch.editSelectedRadius(Float($0)) }),
+                         range: 0.02...20)
+        }
+        // Polígono: lados
+        if let sides = sketch.selectedSides {
+            Text("Lados").font(.caption2).foregroundColor(theme.textSecondary)
+            Stepper(value: Binding(get: { sides },
+                                   set: { sketch.editSelectedSides($0) }), in: 3...12) {
+                Text("\(sides)")
+                    .font(.caption.monospacedDigit().bold())
+                    .foregroundColor(theme.accent)
+                    .frame(width: 20)
+            }
+        }
+        // Rect: W y H (recalcula b desde a)
+        if let size = sketch.selectedRectSize {
+            Text("W").font(.caption2).foregroundColor(theme.textSecondary)
+            NumericField(value: Binding(get: { Double(size.w) },
+                                        set: { sketch.editSelectedRectSize(w: Float($0), h: size.h) }),
+                         range: 0.02...40)
+            Text("H").font(.caption2).foregroundColor(theme.textSecondary)
+            NumericField(value: Binding(get: { Double(size.h) },
+                                        set: { sketch.editSelectedRectSize(w: size.w, h: Float($0)) }),
+                         range: 0.02...40)
+        }
+        Button(role: .destructive) {
+            HapticService.shared.heavy()
+            sketch.deleteEntity()
+        } label: {
+            Label("Eliminar", systemImage: "trash").font(.caption)
+                .foregroundColor(theme.error)
+        }
+        Button(action: { HapticService.shared.light(); sketch.deselectEntity() }) {
+            Image(systemName: "xmark.circle.fill").foregroundColor(theme.textSecondary)
+        }
+        .accessibilityLabel("Deseleccionar entidad")
+    }
+
+    /// Tap sobre una cara PLANA de un sólido con herramienta de dibujo activa:
+    /// planta el plano de trabajo SOBRE la cara (mecánica Shapr3D). Construye la
+    /// base ortonormal (u, v) desde la normal del hit.
+    private func handleSketchFaceTap(_ hit: SurfaceHit) {
+        guard hit.modelIndex < canvasVM.scene.models.count,
+              let shape = canvasVM.scene.models[hit.modelIndex].cadShape else { return }
+        // Verificar planitud de la cara vía la Face B-rep (isPlanar existe en Face).
+        var planar = true
+        if let faceIdx = BRepFacePicker.faceIndex(of: shape, nearest: hit.position) {
+            let faces = shape.faces()
+            if faceIdx >= 0, faceIdx < faces.count {
+                planar = faces[faceIdx].isPlanar
+            }
+        }
+        guard planar else {
+            sketch.hint("La cara no es plana — no se puede plantar el boceto")
+            return
+        }
+        let normal = simd_normalize(hit.normal)
+        // Referencia para el eje u: (0,1,0), o (1,0,0) si es (casi) paralela a la normal.
+        let refA = SIMD3<Float>(0, 1, 0)
+        let refB = SIMD3<Float>(1, 0, 0)
+        let ref = abs(simd_dot(normal, refA)) > 0.98 ? refB : refA
+        let u = simd_normalize(simd_cross(normal, ref))
+        let v = simd_cross(normal, u)
+        sketch.plane = SketchController.WorkPlane(origin: hit.position, u: u, v: v, normal: normal)
+        HapticService.shared.medium()
+        sketch.hint("Plano de boceto en la cara ✓ — dibuja")
+    }
 
     private func performSketchExtrude() {
         HapticService.shared.medium()
@@ -1262,6 +1446,33 @@ struct CADModeView: View {
     /// con comportamiento distinto — dos caminos para la misma acción es un bug de UX).
     private var animationRow: some View {
         HStack {
+            // Menú Archivo compacto (New / Save)
+            Menu {
+                Button(action: { newProject() }) {
+                    Label("Nuevo proyecto", systemImage: "doc.badge.plus")
+                }
+                Button(action: { saveProject() }) {
+                    Label("Guardar", systemImage: "square.and.arrow.down")
+                }
+                .disabled(canvasVM.scene.models.isEmpty)
+                Button(action: { exportToSTEP() }) {
+                    Label("Exportar STEP", systemImage: "square.and.arrow.up")
+                }
+                .disabled(canvasVM.scene.models.isEmpty)
+                Divider()
+                Button(action: { showShareSheet = true }) {
+                    Label("Compartir...", systemImage: "paperplane")
+                }
+                .disabled(drawingExportController.exportURL == nil)
+            } label: {
+                Image(systemName: "doc")
+                    .font(.system(size: 12))
+                    .foregroundColor(theme.accent)
+            }
+            .accessibilityLabel("Archivo")
+
+            Rectangle().fill(theme.border).frame(width: 1, height: 16)
+
             Button(action: { performGroupAssembly() }) {
                 Image(systemName: "rectangle.3.group")
                     .font(.system(size: 11))
@@ -1341,6 +1552,42 @@ struct CADModeView: View {
         }.padding(.horizontal).padding(.vertical, 4).background(theme.surface)
     }
 
+    // MARK: - File Operations
+
+    private func newProject() {
+        HapticService.shared.medium()
+        canvasVM.saveState()
+        canvasVM.scene.models.removeAll { !$0.name.hasPrefix("__") }
+        canvasVM.scene.cadHistory.clear()
+        brepHistory.clear()
+        sketch.clear()
+        dimensionManager.clearAll()
+        selectionController.deselect()
+        canvasVM.objectWillChange.send()
+    }
+
+    private func saveProject() {
+        HapticService.shared.medium()
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let name = "AppForge_\(DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .short))"
+            .replacingOccurrences(of: "/", with: "-")
+        do {
+            let url = try ProjectPersistenceService.shared.saveProject(
+                name: name,
+                scene: canvasVM.scene,
+                config: projectSettings.config,
+                to: docs
+            )
+            stepExportMessage = "Proyecto guardado: \(url.lastPathComponent)"
+            showStepExportAlert = true
+            ProjectPersistenceService.shared.markProjectOpened(url)
+        } catch {
+            stepExportMessage = "Error al guardar: \(error.localizedDescription)"
+            showStepExportAlert = true
+        }
+    }
+
+    /// Exporta la escena como STEP usando la primera entidad B-rep encontrada.
     private func exportToSTEP() {
         let lines = sketchEngine.getSketchLines()
 
@@ -1584,7 +1831,7 @@ struct CADModeView: View {
     private func performGroupAssembly() {
         guard canvasVM.scene.models.count >= 2 else { return }
         let modelIDs = canvasVM.scene.models.map { $0.id }
-        assemblyEngine.createAssembly(name: "Group_\(UUID().uuidString.prefix(8))", modelIDs: modelIDs)
+        groupAssemblyEngine.createAssembly(name: "Group_\(UUID().uuidString.prefix(8))", modelIDs: modelIDs)
         sketchEngine.logOperation(type: .booleanUnion, description: "Assembly agrupado (\(modelIDs.count) modelos)")
     }
 
@@ -1919,8 +2166,11 @@ struct SketchCanvasOverlay: View {
             let vm = SatinRenderer.viewMatrix(for: cam)
             let pm = SatinRenderer.projectionMatrix(for: cam, aspect: aspect)
 
+            // Proyecta un punto 2D del boceto usando el plano de trabajo activo
+            // (world() = origin + u·x + v·y) — sobre cara arbitraria, no solo y=0.
             func proj(_ p: SIMD2<Float>) -> CGPoint? {
-                let clip = pm * (vm * SIMD4<Float>(p.x, 0, p.y, 1))
+                let w = sketch.world(p)
+                let clip = pm * (vm * SIMD4<Float>(w.x, w.y, w.z, 1))
                 guard clip.w > 0.001 else { return nil }
                 return CGPoint(x: CGFloat((clip.x / clip.w + 1) * 0.5) * size.width,
                                y: CGFloat((1 - clip.y / clip.w) * 0.5) * size.height)
@@ -1992,13 +2242,33 @@ struct SketchCanvasOverlay: View {
                          at: CGPoint(x: s.x, y: s.y - 14))
             }
 
+            // ---- Retícula ligera del plano de trabajo (solo si no es el suelo) ----
+            // 11×11 líneas locales, paso 0.5, extensión ±2.5 alrededor del origen.
+            if sketch.plane != .floor {
+                let ext: Float = 2.5, step: Float = 0.5
+                var grid = Path()
+                var k: Float = -ext
+                while k <= ext + 1e-3 {
+                    if let a = proj(SIMD2(k, -ext)), let b = proj(SIMD2(k, ext)) {
+                        grid.move(to: a); grid.addLine(to: b)
+                    }
+                    if let a = proj(SIMD2(-ext, k)), let b = proj(SIMD2(ext, k)) {
+                        grid.move(to: a); grid.addLine(to: b)
+                    }
+                    k += step
+                }
+                ctx.stroke(grid, with: .color(steel.opacity(0.15)), lineWidth: 1)
+            }
+
             // ---- Entidades confirmadas (acero) con relleno de perfil + cotas permanentes ----
-            for e in sketch.entities {
+            // La entidad seleccionada se pinta en brasa (ember) — feedback de edición.
+            for (entIndex, e) in sketch.entities.enumerated() {
+                let stroke = entIndex == sketch.selectedEntityIndex ? ember : steel
                 switch e {
                 case .polyline(let pts, let closed):
                     if closed { fillPolyline(pts, color: ember.opacity(0.10)) }
-                    strokePolyline(pts, close: closed, color: steel, width: 2)
-                    for p in pts { dot(p, color: steel, r: 3) }
+                    strokePolyline(pts, close: closed, color: stroke, width: 2)
+                    for p in pts { dot(p, color: stroke, r: 3) }
                     // Cotas: longitud de cada lado en su punto medio (≤6 lados)
                     if closed && pts.count >= 3 && pts.count <= 6 {
                         for i in 0..<pts.count {

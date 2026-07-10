@@ -12,6 +12,7 @@ struct SolverPoint {
     let id: UUID
     var x: Double
     var y: Double
+    var z: Double = 0  // 0 = 2D, != 0 = 3D constraint solving
     var isFixed: Bool
 }
 

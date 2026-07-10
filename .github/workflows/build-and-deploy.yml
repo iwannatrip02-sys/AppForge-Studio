@@ -1,0 +1,260 @@
+name: Build & Deploy IPA
+
+on:
+  push:
+    branches: [main, master, feature/*, fix/*, w*/*, f*/*]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      export_method:
+        description: 'Método de exportación'
+        required: false
+        default: 'development'
+        type: choice
+        options:
+          - development
+          - ad-hoc
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  # ── Job 1: Compilar + Test (Simulador iOS) ──────────────────────────
+  build-and-test:
+    name: Build & Test (iOS Simulator)
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 16.3
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.3.app
+          xcodebuild -version
+          swift --version
+
+      - name: Cache SPM dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ios-app/AppForgeStudio/.build
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ runner.os }}-spm-${{ hashFiles('ios-app/AppForgeStudio/Package.resolved', 'ios-app/AppForgeStudio/Package.swift') }}
+          restore-keys: ${{ runner.os }}-spm-
+
+      - name: Resolve SPM dependencies
+        working-directory: ios-app/AppForgeStudio
+        run: swift package resolve
+
+      - name: Build for iOS Simulator
+        working-directory: ios-app/AppForgeStudio
+        run: |
+          xcodebuild \
+            -scheme AppForgeStudio \
+            -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=latest' \
+            -derivedDataPath ../.derivedData \
+            -skipMacroValidation \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee build-sim.log
+          echo "BUILD_SIM_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
+
+      - name: Run Tests
+        working-directory: ios-app/AppForgeStudio
+        run: |
+          xcodebuild \
+            -scheme AppForgeStudio \
+            -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=latest' \
+            -derivedDataPath ../.derivedData \
+            -skipMacroValidation \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            test 2>&1 | tee test.log
+          echo "TEST_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
+
+      - name: Report test results
+        if: always()
+        run: |
+          if [ "${TEST_EXIT:-0}" -eq 0 ]; then
+            echo "✅ Todos los tests pasaron"
+          else
+            echo "❌ Tests fallaron — revisa test.log"
+            grep -E "failed|error|FAILED" test.log || true
+          fi
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-simulator
+          path: |
+            ios-app/AppForgeStudio/build-sim.log
+            ios-app/AppForgeStudio/test.log
+          retention-days: 3
+
+  # ── Job 2: Archive + IPA (dispositivo real) ─────────────────────────
+  archive-ipa:
+    name: Archive & Export IPA
+    runs-on: macos-15
+    needs: build-and-test
+    timeout-minutes: 40
+    if: github.event_name != 'pull_request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 16.3
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.3.app
+          xcodebuild -version
+
+      - name: Cache SPM dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ios-app/AppForgeStudio/.build
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ runner.os }}-spm-${{ hashFiles('ios-app/AppForgeStudio/Package.resolved', 'ios-app/AppForgeStudio/Package.swift') }}
+          restore-keys: ${{ runner.os }}-spm-
+
+      - name: Resolve SPM dependencies
+        working-directory: ios-app/AppForgeStudio
+        run: swift package resolve
+
+      - name: Build for iOS Device (arm64)
+        working-directory: ios-app/AppForgeStudio
+        run: |
+          xcodebuild \
+            -scheme AppForgeStudio \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath ../.derivedData \
+            -skipMacroValidation \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee build-device.log
+          echo "BUILD_DEVICE_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
+
+      - name: Generate ExportOptions.plist
+        run: |
+          EXPORT_METHOD="${{ inputs.export_method || 'development' }}"
+          cat > ExportOptions.plist << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>EXPORT_METHOD_PLACEHOLDER</string>
+            <key>compileBitcode</key>
+            <false/>
+            <key>uploadSymbols</key>
+            <false/>
+            <key>destination</key>
+            <string>export</string>
+            <key>generateAppStoreInformation</key>
+            <false/>
+            <key>manageAppVersionAndBuildNumber</key>
+            <false/>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>stripSwiftSymbols</key>
+            <true/>
+            <key>thinning</key>
+            <string>&lt;none&gt;</string>
+            <key>iCloudContainerEnvironment</key>
+            <string>Development</string>
+          </dict>
+          </plist>
+          EOF
+          sed -i '' "s/EXPORT_METHOD_PLACEHOLDER/${EXPORT_METHOD}/" ExportOptions.plist
+          echo "ExportOptions.plist generado con method=$EXPORT_METHOD"
+
+      - name: Archive app
+        working-directory: ios-app/AppForgeStudio
+        run: |
+          mkdir -p ../../build
+          xcodebuild \
+            -scheme AppForgeStudio \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath ../.derivedData \
+            -archivePath ../../build/AppForgeStudio.xcarchive \
+            -skipMacroValidation \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            OTHER_CODE_SIGN_FLAGS="--deep" \
+            archive 2>&1 | tee archive.log
+          echo "ARCHIVE_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
+
+      - name: Export IPA
+        if: success()
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath build/AppForgeStudio.xcarchive \
+            -exportPath build/ipa \
+            -exportOptionsPlist ExportOptions.plist \
+            2>&1 | tee export.log
+          echo "EXPORT_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
+
+      - name: Find and rename IPA
+        if: success()
+        run: |
+          mkdir -p build/artifacts
+          IPA_FILE=$(find build/ipa -name "*.ipa" -type f | head -1)
+          if [ -n "$IPA_FILE" ]; then
+            BUILD_DATE=$(date +%Y%m%d-%H%M)
+            SHORT_SHA=$(git rev-parse --short HEAD)
+            IPA_NAME="AppForgeStudio_${BUILD_DATE}_${SHORT_SHA}.ipa"
+            cp "$IPA_FILE" "build/artifacts/${IPA_NAME}"
+            echo "IPA_NAME=${IPA_NAME}" >> $GITHUB_ENV
+            echo "IPA generado: ${IPA_NAME}"
+            ls -lh "build/artifacts/${IPA_NAME}"
+          else
+            echo "ERROR: No se encontró el archivo IPA"
+            exit 1
+          fi
+
+      - name: Upload IPA artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AppForgeStudio-${{ env.IPA_NAME || 'unsigned' }}
+          path: build/artifacts/AppForgeStudio_*.ipa
+          retention-days: 7
+
+      - name: Upload build logs (device)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-device
+          path: |
+            ios-app/AppForgeStudio/build-device.log
+            ios-app/AppForgeStudio/archive.log
+            export.log
+          retention-days: 3
+
+      - name: Status summary
+        if: always()
+        run: |
+          echo "──────────────────────────────────────"
+          echo "  AppForge Studio CI — Build Status"
+          echo "──────────────────────────────────────"
+          echo " Build Sim: ${BUILD_SIM_EXIT:-?}"
+          echo " Build Dev: ${BUILD_DEVICE_EXIT:-?}"
+          echo " Archive:   ${ARCHIVE_EXIT:-?}"
+          echo " Export:    ${EXPORT_EXIT:-?}"
+          if [ "${EXPORT_EXIT:-1}" -eq 0 ]; then
+            echo " IPA:       ${IPA_NAME:-N/A}"
+            echo " Descargá el artifact 'AppForgeStudio-*' para instalar vía AltStore"
+          fi
+          echo "──────────────────────────────────────"
