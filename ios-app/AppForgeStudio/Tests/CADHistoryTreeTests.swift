@@ -143,10 +143,10 @@ final class CADHistoryTreeTests: XCTestCase {
 
     func testRebuildSceneCreateAndDelete() {
         let ops: [CADOperation] = [
-            CADOperation(type: .createPrimitive, description: "Box",
-                        affectedModelIDs: []),
-            CADOperation(type: .delete, description: "Delete Box",
-                        affectedModelIDs: []),
+            CADOperation(type: .createPrimitive, affectedModelIDs: [],
+                        description: "Box"),
+            CADOperation(type: .delete, affectedModelIDs: [],
+                        description: "Delete Box"),
         ]
         // Nota: delete necesita affectedModelIDs para funcionar
         var opsWithIDs = ops
@@ -162,8 +162,8 @@ final class CADHistoryTreeTests: XCTestCase {
         let model = Model(name: "Test")
         let modelID = model.id
         let ops: [CADOperation] = [
-            CADOperation(type: .move, description: "Move",
-                        affectedModelIDs: [modelID],
+            CADOperation(type: .move, affectedModelIDs: [modelID],
+                        description: "Move",
                         parameters: ["tx": 1.0, "ty": 2.0, "tz": 3.0]),
         ]
         let result = tree.rebuildSceneFromOperations(initialModels: [model], operations: ops)
@@ -179,15 +179,15 @@ final class CADHistoryTreeTests: XCTestCase {
         let modelID = model.id
         // Aplicar primer move
         let ops1: [CADOperation] = [
-            CADOperation(type: .move, description: "Move1",
-                        affectedModelIDs: [modelID],
+            CADOperation(type: .move, affectedModelIDs: [modelID],
+                        description: "Move1",
                         parameters: ["tx": 1.0, "ty": 0, "tz": 0]),
         ]
         let after1 = tree.rebuildSceneFromOperations(initialModels: [model], operations: ops1)
         // Aplicar segundo move sobre el resultado
         let ops2: [CADOperation] = [
-            CADOperation(type: .move, description: "Move2",
-                        affectedModelIDs: [modelID],
+            CADOperation(type: .move, affectedModelIDs: [modelID],
+                        description: "Move2",
                         parameters: ["tx": 2.0, "ty": 0, "tz": 0]),
         ]
         let after2 = tree.rebuildSceneFromOperations(initialModels: after1, operations: ops2)
@@ -198,8 +198,8 @@ final class CADHistoryTreeTests: XCTestCase {
         let model = Model(name: "Test")
         let modelID = model.id
         let ops: [CADOperation] = [
-            CADOperation(type: .scale, description: "Scale",
-                        affectedModelIDs: [modelID],
+            CADOperation(type: .scale, affectedModelIDs: [modelID],
+                        description: "Scale",
                         parameters: ["sx": 2.0, "sy": 1.0, "sz": 3.0]),
         ]
         let result = tree.rebuildSceneFromOperations(initialModels: [model], operations: ops)

@@ -143,7 +143,7 @@ final class DimensionAnnotationTests: XCTestCase {
         let manager = DimensionManager()
         manager.addLinear(from: SIMD3<Float>(0, 0, 0), to: SIMD3<Float>(1, 0, 0))
         manager.updateActiveEndpoint(SIMD3<Float>(5, 0, 0))
-        XCTAssertEqual(manager.annotations.first?.measuredValue, 5.0, accuracy: 0.001)
+        XCTAssertEqual(manager.annotations.first?.measuredValue ?? 0, 5.0, accuracy: 0.001)
     }
 
     @MainActor
