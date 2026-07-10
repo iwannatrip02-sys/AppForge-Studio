@@ -419,14 +419,28 @@ struct CADModeView: View {
                             sketch.tap(at: p)
                         },
                         onSketchDragBegan: { p in
-                            sketch.pencilDragBegan(at: p)
+                            // Primero intenta AGARRAR un punto/vértice existente
+                            // para moverlo; si no hay ninguno cerca, es trazo libre.
+                            if sketch.beginDrag(near: p) {
+                                HapticService.shared.medium()
+                            } else {
+                                sketch.pencilDragBegan(at: p)
+                            }
                         },
                         onSketchDragChanged: { p in
-                            sketch.pencilDragChanged(to: p)
+                            if sketch.isDraggingPoint {
+                                sketch.drag(to: p)
+                            } else {
+                                sketch.pencilDragChanged(to: p)
+                            }
                         },
                         onSketchDragEnded: { p in
                             HapticService.shared.light()
-                            sketch.pencilDragEnded(at: p)
+                            if sketch.isDraggingPoint {
+                                sketch.endDrag()
+                            } else {
+                                sketch.pencilDragEnded(at: p)
+                            }
                         },
                         sketchPlaneOrigin: sketch.plane.origin,
                         sketchPlaneNormal: sketch.plane.normal,
@@ -476,6 +490,7 @@ struct CADModeView: View {
                             if showElements {
                                 ElementsPanel(canvasVM: canvasVM,
                                               selectionController: selectionController,
+                                              sketch: sketch,
                                               renderer: renderer)
                                     .transition(.move(edge: .leading).combined(with: .opacity))
                             }
@@ -2067,6 +2082,7 @@ struct CADModeView: View {
 struct ElementsPanel: View {
     @ObservedObject var canvasVM: CanvasViewModel
     @ObservedObject var selectionController: SelectionController
+    @ObservedObject var sketch: SketchController
     let renderer: SatinRenderer
     @EnvironmentObject var themeManager: ThemeManager
 
@@ -2090,7 +2106,22 @@ struct ElementsPanel: View {
                     ForEach(visibleModels, id: \.1.id) { index, model in
                         elementRow(index: index, model: model)
                     }
-                    if visibleModels.isEmpty {
+
+                    // Boceto activo: cada entidad dibujada como fila seleccionable.
+                    if !sketch.entities.isEmpty {
+                        Text("BOCETO")
+                            .font(.system(size: 9, weight: .semibold))
+                            .tracking(1.1)
+                            .foregroundColor(AppTheme.textTertiary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, AppTheme.space3)
+                            .padding(.top, AppTheme.space2)
+                        ForEach(Array(sketch.entities.enumerated()), id: \.offset) { i, entity in
+                            sketchRow(index: i, entity: entity)
+                        }
+                    }
+
+                    if visibleModels.isEmpty && sketch.entities.isEmpty {
                         Text("La escena está vacía")
                             .font(.caption2)
                             .foregroundColor(AppTheme.textTertiary)
@@ -2100,8 +2131,43 @@ struct ElementsPanel: View {
             }
         }
         .frame(width: 190)
-        .frame(maxHeight: 250)
+        .frame(maxHeight: 320)
         .glassPanel()
+    }
+
+    private func sketchIcon(_ e: SketchController.Entity) -> String {
+        switch e {
+        case .circle: return "circle"
+        case .rect: return "rectangle"
+        case .spline: return "scribble.variable"
+        case .polygonEnt: return "pentagon"
+        case .polyline: return "line.diagonal"
+        }
+    }
+
+    @ViewBuilder
+    private func sketchRow(index: Int, entity: SketchController.Entity) -> some View {
+        let isSelected = sketch.selectedEntityIndex == index
+        HStack(spacing: AppTheme.space2) {
+            Image(systemName: sketchIcon(entity))
+                .font(.system(size: 11))
+                .foregroundColor(isSelected ? AppTheme.accentColor : AppTheme.clay)
+                .frame(width: 16)
+            Text(entity.displayName)
+                .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                .foregroundColor(isSelected ? AppTheme.accentColor : AppTheme.textPrimaryColor)
+                .lineLimit(1)
+            Spacer()
+        }
+        .padding(.horizontal, AppTheme.space3)
+        .padding(.vertical, 7)
+        .background(isSelected ? AppTheme.accentColor.opacity(0.10) : Color.clear)
+        .cornerRadius(AppTheme.radiusSM)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            HapticService.shared.light()
+            sketch.selectedEntityIndex = isSelected ? nil : index
+        }
     }
 
     @ViewBuilder

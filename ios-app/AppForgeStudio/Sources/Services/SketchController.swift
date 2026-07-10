@@ -151,6 +151,12 @@ final class SketchController: ObservableObject {
     }
     @Published var dragState: DragState = .inactive
 
+    /// True mientras se arrastra un punto/vértice existente (no un trazo nuevo).
+    var isDraggingPoint: Bool {
+        if case .dragging = dragState { return true }
+        return false
+    }
+
     /// Intenta iniciar arrastre de un punto cercano a `position`.
     /// Retorna true si encontró un punto y comenzó el drag.
     func beginDrag(near position: SIMD2<Float>) -> Bool {
