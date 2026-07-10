@@ -160,6 +160,42 @@ enum BRepModeling {
         return copies
     }
 
+    /// Patrón CIRCULAR: count−1 copias rotadas uniformemente 2π·i/count alrededor
+    /// de `axisDirection` que pasa por `axisOrigin`. Mismo patrón que linearPattern
+    /// pero con `rotated(axis:angle:)` verificada @v1.8.8. Las copias rotan
+    /// alrededor del ORIGEN (la API opera sobre el origen) — usar axisOrigin=.zero
+    /// para el caso típico (eje Y por el centro de la escena).
+    static func circularPattern(of model: Model, count: Int,
+                                axisOrigin: SIMD3<Double> = .zero,
+                                axisDirection: SIMD3<Double> = SIMD3<Double>(0, 1, 0)) -> [Model] {
+        guard count >= 2, let shape = model.cadShape else { return [] }
+        let axis = simd_normalize(axisDirection)
+        var copies: [Model] = []
+        for i in 1..<count {
+            let angle = 2 * Double.pi * Double(i) / Double(count)
+            // rotated(axis:angle:) opera alrededor del ORIGEN — conjugar con traslaciones
+            // si axisOrigin ≠ .zero (patrón estándar: T(-o)·R·T(o))
+            let rotated: CADShape?
+            if simd_length(axisOrigin) > 1e-9 {
+                rotated = shape
+                    .translated(by: -axisOrigin)?
+                    .rotated(axis: axis, angle: angle)?
+                    .translated(by: axisOrigin)
+            } else {
+                rotated = shape.rotated(axis: axis, angle: angle)
+            }
+            guard let rotShape = rotated,
+                  let mesh = OCCTBridge.toMesh(rotShape, quality: .medium) else { continue }
+            let copy = Model(name: "\(model.name)_c\(i)")
+            copy.cadShape = rotShape
+            copy.meshes = [mesh]
+            copy.edgesMesh = OCCTBridge.edgesMesh(rotShape)
+            copy.color = model.color
+            copies.append(copy)
+        }
+        return copies
+    }
+
     /// Escala uniforme alrededor de `center`.
     @discardableResult
     static func scaleUniform(_ model: Model, factor: Double, center: SIMD3<Double>) -> Bool {

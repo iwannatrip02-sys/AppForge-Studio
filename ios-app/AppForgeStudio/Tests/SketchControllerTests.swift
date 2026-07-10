@@ -181,4 +181,40 @@ final class SketchControllerTests: XCTestCase {
         let model = try XCTUnwrap(s.extrudeProfile(height: 1))
         XCTAssertEqual(try volume(model), 4 * 5 * 1, accuracy: 0.02)
     }
+
+    // MARK: - Polígono regular
+
+    func testHexagonExtrudedVolume() throws {
+        // Hexágono regular r=1 extruido h=1 → V = (3√3/2)·r²·h ≈ 2.598
+        let s = SketchController()
+        s.activeTool = .polygon
+        s.polygonSides = 6
+        s.tap(at: SIMD2<Float>(0, 0))     // centro
+        s.tap(at: SIMD2<Float>(1, 0))     // radio 1
+        XCTAssertTrue(s.hasClosedProfile, "polígono regular = perfil cerrado")
+        let model = try XCTUnwrap(s.extrudeProfile(height: 1))
+        let expected = 3 * sqrt(3.0) / 2 * 1 * 1 * 1   // ≈ 2.598
+        XCTAssertEqual(try volume(model), expected, accuracy: 0.05,
+                       "hexágono r=1 h=1 → volumen = (3√3/2)r²h")
+        XCTAssertNotNil(model.edgesMesh, "sólido poligonal nace con aristas")
+    }
+
+    func testCircularPatternProducesExactCopies() throws {
+        // Rect x∈[2,3] extruido h=1, patrón ○×4 → 3 copias, cada una mismo volumen
+        let s = SketchController()
+        s.activeTool = .rectangle
+        s.tap(at: SIMD2<Float>(2, 0))
+        s.tap(at: SIMD2<Float>(3, 1))
+        let base = try XCTUnwrap(s.extrudeProfile(height: 1))
+        let baseVol = try volume(base)
+
+        let copies = BRepModeling.circularPattern(of: base, count: 4,
+                                                  axisOrigin: .zero,
+                                                  axisDirection: SIMD3<Double>(0, 1, 0))
+        XCTAssertEqual(copies.count, 3, "patrón ○×4 = original + 3 copias")
+        for (i, copy) in copies.enumerated() {
+            XCTAssertEqual(try volume(copy), baseVol, accuracy: 0.01,
+                           "copia circular \(i+1) conserva el volumen exacto")
+        }
+    }
 }

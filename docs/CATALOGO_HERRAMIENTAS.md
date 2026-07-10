@@ -21,9 +21,12 @@
 | Unir/Restar/Intersecar | ✅ | Flujo A/B + booleana B-rep OCCT exacta | Preview coloreado antes de aplicar, boolean por gesto (arrastrar un cuerpo dentro de otro), mantener originales opcional |
 | Redondear | ✅ | Global (toolbar) + SELECTIVO por arista tocada (único en tablet junto a Shapr3D) | Radio variable, cadenas de aristas tangentes, preview |
 | Chaflán | 🟡 | Solo global (todas las aristas) | Por arista (API OCCT lo permite: chamferedTwoDistances), asimétrico |
-| Vaciar | ✅ | Shell B-rep real (cara mayor abierta) | Elegir la cara abierta tocándola, grosor por cara |
-| Barrer | 🟡 | Genera geometría pero con path HARDCODEADO | Barrer perfil real a lo largo de curva dibujada |
-| Loft | ❌ oculto | LoftEngine espera Wire; puente no existe (F3) | Loft entre 2+ perfiles de sketch |
+| Vaciar | ✅ | Shell B-rep real; toca la cara que queda ABIERTA, grosor editable | Grosor por cara (no global), redondeo de la apertura |
+| Barrer (Tubo) | ✅ | Sweep real OCCT: spline/cadena dibujada → tubo Ø exacto | Perfil arbitrario (no solo círculo), torsión controlada |
+| Transición (Loft) | ✅ | Loft OCCT entre dos perfiles cerrados elevados | Loft entre 3+ perfiles, guías tangentes |
+| Patrón lineal | ✅ | count-1 copias B-rep rotadas uniformemente, bake edgesMesh | Dirección libre (no solo X), patrón por cara |
+| Patrón circular | ✅ | count-1 copias rotadas 2π·i/count alrededor del eje Y del origen | Eje de rotación elegible, radio configurable |
+| Reflejar | ✅ | Espejo B-rep sobre el plano XZ (eje Y) | Espejo sobre cara plana, fusionar/mantener separado |
 | Medir | ✅ nuevo | Dos toques sobre el modelo → distancia mm exacta | Medir arista (longitud), cara (área), ángulos, cotas persistentes en pantalla |
 | Primitivas (5) | ✅ | B-rep reales, colocadas en fila | Tamaño/posición al crear (drag para dimensionar como Shapr3D), más primitivas (tubo, cuña, prisma) |
 
@@ -32,12 +35,13 @@
 | Pieza | Estado | Para nivel Shapr3D falta |
 |---|---|---|
 | Línea/Círculo/Rect | ✅ v1 EN VIVO (viewport, snap, cierre, Pencil traza) · Arco ❌ | Trazo EN TIEMPO REAL (hoy no se ve mientras dibujas), radios/dimensiones en vivo, círculo por centro+radio, rect por 2 esquinas, arco por 3 puntos |
+| Polígono regular | ✅ N lados 3-12, perfil cerrado, extruible/revolucionable, Pencil drag | Lados parametrizables con restricciones, polígono inserto en círculo |
 | Regiones cerradas | ✅ v1 (cierre por snap → Extruir/Revolucionar B-rep con oráculos) | Detección de ciclos → sombreado tocable → tap = extruir (LA mecánica de Shapr3D) |
+| Cotas persistentes | ✅ rect "W×H", círculo "R x.xx", polígono "R x.xx · N lados" en acero | Cotas editables (tap número → teclado → recalcula perfil) |
 | Constraints | ❌ UI | Motor existe (ConstraintEngine); falta inferencia visible (paralela/perpendicular/tangente como badges tocables) |
 | Planos de trabajo | ❌ | Dibujar en plano XY/XZ/YZ o sobre CARA de un sólido (fundamental); datum planes |
-| Cotas/dimensiones | ❌ | Dimensión editable al dibujar (tap número → teclado) |
 | Recortar/Extender | ❌ | Trim/extend entre curvas |
-| Spline | ❌ | Curva por puntos de control con Pencil |
+| Spline | ✅ B-spline por puntos de control con Pencil, ruta para Tubo/Barrido | Spline cerrada como perfil, tangentes editables |
 | Proyección | ❌ | Proyectar aristas/curvas de un sólido al plano de sketch |
 
 ## 3. SCULPT — motor conectado, experiencia por construir
@@ -87,7 +91,7 @@
 6. Consolidar herramientas placebo (Corte/Bisel → flujos reales o fuera del toolbar).
 7. Sculpt pro (máscaras → dyntopo → multires).
 8. Inicio/proyectos + configuración.
-9. Patrones (lineal/circular), mirror, offset de cara, draft (catálogo Shapr3D fase 2).
+9. ~~Patrones lineal/circular~~ ✅, ~~mirror~~ ✅; pendiente: offset de cara, draft (catálogo Shapr3D fase 2).
 
 *Regla de siempre: herramienta que no alcance su fila "✅" con flujo claro, no se
 muestra en el toolbar. Placebo detectado = placebo retirado.*

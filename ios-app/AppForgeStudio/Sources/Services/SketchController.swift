@@ -14,7 +14,7 @@ private let logger = Logger(subsystem: "com.appforgestudio", category: "Sketch")
 @MainActor
 final class SketchController: ObservableObject {
 
-    enum Tool { case line, rectangle, circle, spline }
+    enum Tool { case line, rectangle, circle, spline, polygon }
 
     enum Entity: Equatable {
         case polyline(points: [SIMD2<Float>], closed: Bool)
@@ -22,6 +22,8 @@ final class SketchController: ObservableObject {
         case circle(center: SIMD2<Float>, radius: Float)
         /// Spline por puntos de control (curva ABIERTA — ruta para Tubo/Barrido).
         case spline(points: [SIMD2<Float>])
+        /// Polígono regular N lados (perfil cerrado — extruible/revolucionable).
+        case polygonEnt(center: SIMD2<Float>, radius: Float, sides: Int)
 
         var isClosedProfile: Bool {
             switch self {
@@ -29,6 +31,7 @@ final class SketchController: ObservableObject {
             case .rect(let a, let b): return abs(a.x - b.x) > 1e-4 && abs(a.y - b.y) > 1e-4
             case .circle(_, let r): return r > 1e-4
             case .spline: return false
+            case .polygonEnt(_, let r, let s): return r > 1e-4 && s >= 3
             }
         }
 
@@ -40,17 +43,27 @@ final class SketchController: ObservableObject {
             default: return false
             }
         }
+
+        /// Vértices del polígono regular (y=0) para overlay y Wire.
+        static func polygonVerts(center: SIMD2<Float>, radius: Float, sides: Int) -> [SIMD2<Float>] {
+            (0..<sides).map { k in
+                let t = Float(k) / Float(sides) * 2 * .pi - .pi / 2
+                return center + SIMD2(cos(t), sin(t)) * radius
+            }
+        }
     }
 
     @Published private(set) var entities: [Entity] = []
     /// Cadena de líneas en curso (tap a tap).
     @Published private(set) var chain: [SIMD2<Float>] = []
-    /// Ancla del gesto de 2 taps (rect: esquina A; círculo: centro).
+    /// Ancla del gesto de 2 taps (rect: esquina A; círculo/polígono: centro).
     @Published private(set) var anchor: SIMD2<Float>? = nil
     /// Punto vivo bajo el dedo/pencil (preview).
     @Published var preview: SIMD2<Float>? = nil
     @Published private(set) var statusMessage = ""
     var activeTool: Tool = .line
+    /// Número de lados del polígono (editable en sketchBar, rango 3-12).
+    @Published var polygonSides: Int = 6
 
     static let snapRadius: Float = 0.14
 
@@ -71,6 +84,8 @@ final class SketchController: ObservableObject {
             case .rect(let a, let b):
                 pts.append(contentsOf: [a, b, SIMD2(a.x, b.y), SIMD2(b.x, a.y)])
             case .circle(let c, _): pts.append(c)
+            case .polygonEnt(let c, _, _): pts.append(c)
+            case .spline: break
             }
         }
         return pts
@@ -123,6 +138,18 @@ final class SketchController: ObservableObject {
             statusMessage = splineChain.count < 2
                 ? "Sigue añadiendo puntos de control"
                 : "\(splineChain.count) puntos · «Fin spline» para confirmar"
+        case .polygon:
+            if let c = anchor {
+                let r = simd_distance(c, p)
+                if r > 1e-3 {
+                    entities.append(.polygonEnt(center: c, radius: r, sides: polygonSides))
+                }
+                anchor = nil
+                statusMessage = "Polígono ✓ — extruye o revoluciona"
+            } else {
+                anchor = p
+                statusMessage = "Toca un vértice del radio"
+            }
         }
         preview = nil
     }
@@ -180,6 +207,14 @@ final class SketchController: ObservableObject {
             let r = simd_distance(a, end)
             if r > 1e-3 { entities.append(.circle(center: a, radius: r)) }
             statusMessage = "Círculo ✓ — extruye o revoluciona"
+        case .polygon:
+            let r = simd_distance(a, end)
+            if r > 1e-3 {
+                entities.append(.polygonEnt(center: a, radius: r, sides: polygonSides))
+            }
+            statusMessage = "Polígono ✓ — extruye o revoluciona"
+        case .spline:
+            break
         }
         anchor = nil
         preview = nil
@@ -202,6 +237,10 @@ final class SketchController: ObservableObject {
         statusMessage = ""
     }
 
+    /// Establece un mensaje de ayuda visible en la sketchBar (usado por flujos externos
+    /// como el botón Extruir del flyout cuando aún no hay perfil cerrado).
+    func hint(_ s: String) { statusMessage = s }
+
     // MARK: - Plano ↔ mundo (v1: piso y=0; el eje de revolución es Z del mundo)
 
     func world(_ p: SIMD2<Float>) -> SIMD3<Float> { SIMD3(p.x, 0, p.y) }
@@ -221,6 +260,10 @@ final class SketchController: ObservableObject {
             return Wire.circle(origin: SIMD3<Double>(Double(c.x), y, Double(c.y)),
                                normal: SIMD3<Double>(0, 1, 0),
                                radius: Double(r))
+        case .polygonEnt(let c, let r, let sides):
+            let verts = Entity.polygonVerts(center: c, radius: r, sides: sides)
+            return Wire.polygon3D(verts.map { SIMD3<Double>(Double($0.x), y, Double($0.y)) },
+                                  closed: true)
         default:
             return nil
         }
@@ -361,6 +404,14 @@ final class SketchController: ObservableObject {
                 case .circle:
                     appendCircleTube(center: f, radius: simd_distance(f, p),
                                      to: &v, indices: &i)
+                case .polygon:
+                    let r = simd_distance(f, p)
+                    let pts = Entity.polygonVerts(center: f, radius: r, sides: polygonSides)
+                    var line = pts.map(world)
+                    if let first = line.first { line.append(first) }
+                    GizmoBuilder.appendTube(polyline: line, radius: 0.02, to: &v, indices: &i)
+                case .spline:
+                    break
                 }
             }
         }
@@ -382,6 +433,13 @@ final class SketchController: ObservableObject {
                                     to: &v, indices: &i)
         case .circle(let c, let r):
             appendCircleTube(center: c, radius: r, to: &v, indices: &i)
+        case .polygonEnt(let c, let r, let sides):
+            let pts = Entity.polygonVerts(center: c, radius: r, sides: sides)
+            var line = pts.map(world)
+            if let f = line.first { line.append(f) }
+            GizmoBuilder.appendTube(polyline: line, radius: 0.02, to: &v, indices: &i)
+        case .spline:
+            break
         }
     }
 

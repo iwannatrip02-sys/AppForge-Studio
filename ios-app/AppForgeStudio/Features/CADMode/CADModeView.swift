@@ -81,6 +81,8 @@ struct CADModeView: View {
     /// Herramienta Agujero (patrón universal: tocar cara = taladrar, encadenable).
     @State private var holeRadius: Double = 0.15
     @State private var holeDepth: Double = 0   // 0 = pasante
+    /// Número de lados del polígono activo en el sketch (sincronizado con SketchController).
+    @State private var polygonSidesUI: Int = 6
     /// Ángulo de revolución en grados (360 = completa).
     @State private var revolveAngleDeg: Double = 360
     /// Ø del Tubo (sweep por ruta) y altura de la Transición (loft).
@@ -207,9 +209,8 @@ struct CADModeView: View {
     }
 
     private var sketchTools: [CADTool] {
-        // Sketch en viewport: línea (cadena), círculo, rectángulo, SPLINE
-        // (puntos de control; el pencil la traza directo — ruta para Tubo).
-        [.line, .circle, .rectangle, .spline]
+        // Sketch en viewport: línea (cadena), círculo, rectángulo, SPLINE, POLÍGONO.
+        [.line, .circle, .rectangle, .spline, .polygon]
     }
 
     /// `id` alimenta la lógica (performAddPrimitive); `label` es lo visible.
@@ -424,6 +425,7 @@ struct CADModeView: View {
             case .rectangle: sketch.activeTool = .rectangle
             case .circle: sketch.activeTool = .circle
             case .spline: sketch.activeTool = .spline
+            case .polygon: sketch.activeTool = .polygon
             default: break
             }
             executeCADTool(newTool, canvasVM: canvasVM, toolVM: toolVM)
@@ -649,6 +651,17 @@ struct CADModeView: View {
             }
             .accessibilityLabel("Borrar boceto")
 
+            if selectedTool == .polygon {
+                Text("Lados").font(.caption2).foregroundColor(theme.textSecondary)
+                // Stepper numérico para lados del polígono (3-12)
+                Stepper(value: $polygonSidesUI, in: 3...12) {
+                    Text("\(polygonSidesUI)")
+                        .font(.caption.monospacedDigit().bold())
+                        .foregroundColor(theme.accent)
+                        .frame(width: 20)
+                }
+                .onChange(of: polygonSidesUI) { v in sketch.polygonSides = v }
+            }
             if sketch.splineChain.count >= 2 {
                 Button("Fin spline") {
                     HapticService.shared.medium()
@@ -775,6 +788,22 @@ struct CADModeView: View {
                     let width = Double(bboxHalfDiagonal(of: model)) * 1.6 + 0.4
                     let copies = BRepModeling.linearPattern(of: model, count: 3,
                                                             spacing: SIMD3<Double>(width, 0, 0))
+                    if !copies.isEmpty {
+                        canvasVM.saveState()
+                        copies.forEach { canvasVM.scene.addModel($0) }
+                        temperTick += 1
+                        canvasVM.objectWillChange.send()
+                    }
+                }
+                .font(.caption)
+
+                Button("Patrón ○×6") {
+                    HapticService.shared.medium()
+                    guard modelIndex < canvasVM.scene.models.count else { return }
+                    let model = canvasVM.scene.models[modelIndex]
+                    let copies = BRepModeling.circularPattern(of: model, count: 6,
+                                                              axisOrigin: .zero,
+                                                              axisDirection: SIMD3<Double>(0, 1, 0))
                     if !copies.isEmpty {
                         canvasVM.saveState()
                         copies.forEach { canvasVM.scene.addModel($0) }
@@ -1069,7 +1098,15 @@ struct CADModeView: View {
         toolVM.selectedTool = tool
         if [.booleanUnion, .booleanSubtract, .booleanIntersect].contains(tool) {
             startCSGOperation(tool)
-        } else if ![.select, .move, .rotate, .scale, .pushPull, .hole, .shell].contains(tool),
+        } else if tool == .extrude {
+            // Extruir desde el flyout Formar: si ya hay perfil cerrado lo extruye;
+            // si no, el usuario llega al sketchBar que pedirá el perfil primero.
+            if sketch.hasClosedProfile {
+                performSketchExtrude()
+            } else {
+                sketch.hint("Dibuja un perfil cerrado y toca «Extruir»")
+            }
+        } else if ![.select, .move, .rotate, .scale, .pushPull, .hole, .shell, .extrude].contains(tool),
                   !tool.isSketchTool, tool != .measure {
             executeSelectedTool()
         }
@@ -1947,33 +1984,65 @@ struct SketchCanvasOverlay: View {
                 ctx.stroke(Path(ellipseIn: rect), with: .color(color), lineWidth: 1.5)
             }
 
-            func label(_ text: String, at p: SIMD2<Float>) {
+            func label(_ text: String, at p: SIMD2<Float>, color: Color = ember) {
                 guard let s = proj(p) else { return }
                 ctx.draw(Text(text).font(.system(size: 11, weight: .medium,
                                                  design: .monospaced))
-                            .foregroundColor(ember),
+                            .foregroundColor(color),
                          at: CGPoint(x: s.x, y: s.y - 14))
             }
 
-            // ---- Entidades confirmadas (acero) con relleno de perfil ----
+            // ---- Entidades confirmadas (acero) con relleno de perfil + cotas permanentes ----
             for e in sketch.entities {
                 switch e {
                 case .polyline(let pts, let closed):
                     if closed { fillPolyline(pts, color: ember.opacity(0.10)) }
                     strokePolyline(pts, close: closed, color: steel, width: 2)
                     for p in pts { dot(p, color: steel, r: 3) }
+                    // Cotas: longitud de cada lado en su punto medio (≤6 lados)
+                    if closed && pts.count >= 3 && pts.count <= 6 {
+                        for i in 0..<pts.count {
+                            let a = pts[i], b = pts[(i + 1) % pts.count]
+                            let mid = (a + b) * 0.5
+                            label(String(format: "%.2f", simd_distance(a, b)),
+                                  at: mid, color: steel)
+                        }
+                    }
                 case .rect(let a, let b):
                     let corners = [a, SIMD2(b.x, a.y), b, SIMD2(a.x, b.y)]
                     fillPolyline(corners, color: ember.opacity(0.10))
                     strokePolyline(corners, close: true, color: steel, width: 2)
                     for p in corners { dot(p, color: steel, r: 3) }
+                    // Cota rect: "W×H" en el centro
+                    let center2D = (a + b) * 0.5
+                    label(String(format: "%.2f × %.2f", abs(b.x - a.x), abs(b.y - a.y)),
+                          at: center2D, color: steel)
                 case .circle(let c, let r):
                     fillPolyline(circlePts(c, r), color: ember.opacity(0.10))
                     strokePolyline(circlePts(c, r), close: true, color: steel, width: 2)
                     dot(c, color: steel, r: 3)
+                    // Cota círculo: "R x.xx" junto al centro
+                    label(String(format: "R %.2f", r), at: c, color: steel)
                 case .spline(let pts):
                     strokePolyline(smooth(pts), close: false, color: steel, width: 2)
                     for p in pts { dot(p, color: steel, r: 3) }
+                case .polygonEnt(let c, let r, let sides):
+                    let verts = SketchController.Entity.polygonVerts(center: c, radius: r, sides: sides)
+                    fillPolyline(verts, color: ember.opacity(0.10))
+                    strokePolyline(verts, close: true, color: steel, width: 2)
+                    for p in verts { dot(p, color: steel, r: 3) }
+                    dot(c, color: steel, r: 2)
+                    // Cota central: "R x.xx · N lados"
+                    label(String(format: "R %.2f · %d lados", r, sides), at: c, color: steel)
+                    // Cotas laterales: longitud de cada lado (≤6 lados)
+                    if sides <= 6 {
+                        for i in 0..<sides {
+                            let pa = verts[i], pb = verts[(i + 1) % sides]
+                            let mid = (pa + pb) * 0.5
+                            label(String(format: "%.2f", simd_distance(pa, pb)),
+                                  at: mid, color: steel)
+                        }
+                    }
                 }
             }
 
@@ -2013,6 +2082,16 @@ struct SketchCanvasOverlay: View {
                         strokePolyline([f, pv], close: false,
                                        color: ember.opacity(0.4), width: 1)
                         label(String(format: "R %.2f", r), at: pv)
+                    case .polygon:
+                        let r = simd_distance(f, pv)
+                        let polyVerts = SketchController.Entity.polygonVerts(
+                            center: f, radius: r, sides: sketch.polygonSides)
+                        fillPolyline(polyVerts, color: ember.opacity(0.10))
+                        strokePolyline(polyVerts, close: true, color: ember, width: 2.5)
+                        label(String(format: "R %.2f · %d lados", r, sketch.polygonSides),
+                              at: pv)
+                    default:
+                        break
                     }
                     dot(pv, color: ember)
                 }
