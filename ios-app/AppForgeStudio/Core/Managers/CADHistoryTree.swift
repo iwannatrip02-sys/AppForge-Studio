@@ -207,9 +207,9 @@ final class CADHistoryTree: ObservableObject {
     var canUndo: Bool { !undoStack.isEmpty }
     var canRedo: Bool { !redoStack.isEmpty }
     var operationCount: Int { undoStack.count }
-    /// Cadena lineal de operaciones activas (para el timeline UI)
+    /// Cadena lineal de operaciones activas (para el timeline UI) — excluye suprimidas
     var activeChain: [CADOperation] {
-        undoStack.map { $0.operation }
+        undoStack.filter { !$0.isSuppressed }.map { $0.operation }
     }
 
     // MARK: - Registrar operación

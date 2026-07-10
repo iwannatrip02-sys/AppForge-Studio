@@ -302,10 +302,11 @@ final class SketchController: ObservableObject {
 
     func tap(at raw: SIMD2<Float>) {
         let p = snap(raw)
-        // Editar entidad existente: si NO estamos a mitad de dibujar y el tap cae
-        // sobre el centro/vértice de una entidad, la seleccionamos (TAREA 3).
+        // Editar entidad existente: solo el CENTRO selecciona mientras hay
+        // herramienta de dibujo activa — los vértices son targets de snap para
+        // seguir dibujando (mecánica Shapr3D: dibujar tiene prioridad).
         if chain.isEmpty, anchor == nil, splineChain.isEmpty {
-            if selectEntity(near: p) {
+            if selectEntity(near: p, centersOnly: true) {
                 preview = nil
                 return
             }
@@ -445,6 +446,8 @@ final class SketchController: ObservableObject {
         anchor = nil
         preview = nil
         selectedEntityIndex = nil
+        activeConstraints = []
+        dragState = .inactive
         statusMessage = ""
     }
 
@@ -457,11 +460,11 @@ final class SketchController: ObservableObject {
     /// Selecciona la entidad cuyo centro/vértice está a < snapRadius·1.5 de `p`.
     /// Si ninguna, deselecciona y devuelve false (el tap sigue su curso normal).
     @discardableResult
-    func selectEntity(near p: SIMD2<Float>) -> Bool {
+    func selectEntity(near p: SIMD2<Float>, centersOnly: Bool = false) -> Bool {
         let radius = Self.snapRadius * 1.5
         var best: (idx: Int, dist: Float)?
         for (i, e) in entities.enumerated() {
-            for pt in e.pickPoints {
+            for pt in (centersOnly ? [e.center] : e.pickPoints) {
                 let d = simd_distance(pt, p)
                 if d < radius, d < (best?.dist ?? .greatestFiniteMagnitude) {
                     best = (i, d)
@@ -846,21 +849,28 @@ final class SketchController: ObservableObject {
         let distTol: Float = 0.15
         let lenRatioTol: Float = 0.03
 
-        // Buscar pares de líneas para parallel/perpendicular/equal
-        let lines = entities.compactMap { e -> (SIMD2<Float>, SIMD2<Float>)? in
+        // Segmentos reales: cada tramo de polilínea/cadena, no solo extremos.
+        // (La cadena en curso también infiere — el usuario ve los badges al dibujar.)
+        var segments: [(SIMD2<Float>, SIMD2<Float>)] = []
+        for e in entities {
             switch e {
-            case .polyline(let polyPts, _) where polyPts.count >= 2:
-                return (polyPts.first!, polyPts.last!)
+            case .polyline(let polyPts, let closed) where polyPts.count >= 2:
+                for k in 0..<(polyPts.count - 1) { segments.append((polyPts[k], polyPts[k + 1])) }
+                if closed && polyPts.count >= 3 { segments.append((polyPts.last!, polyPts.first!)) }
             case .rect(let a, let b):
-                return (a, b)
-            default: return nil
+                segments.append((a, b))
+            default: break
             }
         }
+        if chain.count >= 2 {
+            for k in 0..<(chain.count - 1) { segments.append((chain[k], chain[k + 1])) }
+        }
+        segments.removeAll { simd_distance($0.0, $0.1) < 1e-5 }
 
-        for i in 0..<lines.count {
-            for j in (i+1)..<lines.count {
-                let (a1, a2) = lines[i]
-                let (b1, b2) = lines[j]
+        for i in 0..<segments.count {
+            for j in (i+1)..<segments.count {
+                let (a1, a2) = segments[i]
+                let (b1, b2) = segments[j]
                 let dirA = simd_normalize(a2 - a1)
                 let dirB = simd_normalize(b2 - b1)
                 let dot = abs(simd_dot(dirA, dirB))
@@ -869,12 +879,9 @@ final class SketchController: ObservableObject {
                 let lenA = simd_distance(a1, a2)
                 let lenB = simd_distance(b1, b2)
 
-                if angle < angleTol {
-                    activeConstraints.append(GeometryConstraint(
-                        type: .perpendicular, entityIDs: [],
-                        value: 0, label: "Paralelo"
-                    ))
-                } else if abs(angle - .pi / 2) < angleTol {
+                // NOTA: paralelas detectadas NO se agregan al solver — ConstraintType
+                // aún no tiene .parallel y forzar .perpendicular rompería la geometría.
+                if abs(angle - .pi / 2) < angleTol {
                     activeConstraints.append(GeometryConstraint(
                         type: .perpendicular, entityIDs: [],
                         value: 90, label: "Perpendicular"
@@ -904,28 +911,32 @@ final class SketchController: ObservableObject {
             }
         }
 
-        // Detectar líneas horizontales/verticales
+        // Detectar segmentos horizontales/verticales
+        for (i, seg) in segments.enumerated() {
+            let dir = simd_normalize(seg.1 - seg.0)
+            if abs(dir.x) < angleTol {
+                activeConstraints.append(GeometryConstraint(
+                    type: .vertical, entityIDs: [UUID.from(hash: "seg_\(i)")],
+                    label: "Vertical"
+                ))
+            } else if abs(dir.y) < angleTol {
+                activeConstraints.append(GeometryConstraint(
+                    type: .horizontal, entityIDs: [UUID.from(hash: "seg_\(i)")],
+                    label: "Horizontal"
+                ))
+            }
+        }
+        // Un rectángulo es H+V por construcción (sus lados son axis-aligned)
         for (i, e) in entities.enumerated() {
-            switch e {
-            case .polyline(let polyPts, _) where polyPts.count >= 2:
-                let dir = simd_normalize(polyPts.last! - polyPts.first!)
-                if abs(dir.x) < angleTol {
-                    activeConstraints.append(GeometryConstraint(
-                        type: .vertical, entityIDs: [UUID.from(hash: "ent_\(i)")],
-                        label: "Vertical"
-                    ))
-                } else if abs(dir.y) < angleTol {
-                    activeConstraints.append(GeometryConstraint(
-                        type: .horizontal, entityIDs: [UUID.from(hash: "ent_\(i)")],
-                        label: "Horizontal"
-                    ))
-                }
-            case .rect:
+            if case .rect = e {
                 activeConstraints.append(GeometryConstraint(
                     type: .horizontal, entityIDs: [UUID.from(hash: "ent_\(i)")],
-                    label: "Horizontal/Vertical"
+                    label: "Horizontal"
                 ))
-            default: break
+                activeConstraints.append(GeometryConstraint(
+                    type: .vertical, entityIDs: [UUID.from(hash: "ent_\(i)")],
+                    label: "Vertical"
+                ))
             }
         }
 
