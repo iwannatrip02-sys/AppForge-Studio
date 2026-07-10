@@ -145,7 +145,7 @@ final class AssemblyMatesEngine: ObservableObject {
             let target = centerA + dir * mate.value; let delta = target - centerB
             let dF = SIMD3<Float>(Float(delta.x), Float(delta.y), Float(delta.z))
             if simd_length(dF) > tolerance { models[mate.entityB.modelIndex].position += dF }
-            return abs(simd_distance(centerA, centerB) - mate.value)
+            return Float(abs(simd_distance(centerA, centerB) - mate.value))
         case .perpendicular:
             let q = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(0, 1, 0))
             models[mate.entityB.modelIndex].rotation = simd_mul(q, models[mate.entityB.modelIndex].rotation)
@@ -165,7 +165,7 @@ final class AssemblyMatesEngine: ObservableObject {
             let target = centerA + dir * tanDist; let delta = target - centerB
             let dF = SIMD3<Float>(Float(delta.x), Float(delta.y), Float(delta.z))
             if simd_length(dF) > tolerance { models[mate.entityB.modelIndex].position += dF }
-            return abs(simd_distance(centerA, centerB) - tanDist)
+            return Float(abs(simd_distance(centerA, centerB) - tanDist))
         case .lock: return 0
         }
     }

@@ -2160,16 +2160,19 @@ struct SketchCanvasOverlay: View {
     private let ember = Color(red: 1.0, green: 0.48, blue: 0.27)
 
     var body: some View {
-        Canvas { ctx, size in
+        // Capturado en body (MainActor): el closure de Canvas es no-aislado
+        // y no puede llamar métodos de SketchController directamente.
+        let plane = sketch.plane
+        return Canvas { ctx, size in
             let cam = canvasVM.scene.camera
             let aspect = Float(size.width / max(size.height, 1))
             let vm = SatinRenderer.viewMatrix(for: cam)
             let pm = SatinRenderer.projectionMatrix(for: cam, aspect: aspect)
 
             // Proyecta un punto 2D del boceto usando el plano de trabajo activo
-            // (world() = origin + u·x + v·y) — sobre cara arbitraria, no solo y=0.
+            // (origin + u·x + v·y) — sobre cara arbitraria, no solo y=0.
             func proj(_ p: SIMD2<Float>) -> CGPoint? {
-                let w = sketch.world(p)
+                let w = plane.origin + plane.u * p.x + plane.v * p.y
                 let clip = pm * (vm * SIMD4<Float>(w.x, w.y, w.z, 1))
                 guard clip.w > 0.001 else { return nil }
                 return CGPoint(x: CGFloat((clip.x / clip.w + 1) * 0.5) * size.width,
@@ -2244,7 +2247,7 @@ struct SketchCanvasOverlay: View {
 
             // ---- Retícula ligera del plano de trabajo (solo si no es el suelo) ----
             // 11×11 líneas locales, paso 0.5, extensión ±2.5 alrededor del origen.
-            if sketch.plane != .floor {
+            if plane != .floor {
                 let ext: Float = 2.5, step: Float = 0.5
                 var grid = Path()
                 var k: Float = -ext
