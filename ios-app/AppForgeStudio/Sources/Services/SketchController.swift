@@ -275,7 +275,6 @@ final class SketchController: ObservableObject {
             pts[pointIndex] = newPos
             entities[entityIndex] = .spline(points: pts)
         }
-        isDirty = true
     }
 
     /// Todos los puntos notables (snap): endpoints, esquinas, centros.
@@ -865,7 +864,7 @@ final class SketchController: ObservableObject {
                 let dirA = simd_normalize(a2 - a1)
                 let dirB = simd_normalize(b2 - b1)
                 let dot = abs(simd_dot(dirA, dirB))
-                let angle = acos(clamp(dot, -1, 1))
+                let angle = acos(min(max(dot, -1), 1))
 
                 let lenA = simd_distance(a1, a2)
                 let lenB = simd_distance(b1, b2)
