@@ -112,7 +112,7 @@ final class SectionPlaneManager: ObservableObject {
     func addPlane(origin: SIMD3<Float> = .zero,
                   normal: SIMD3<Float> = SIMD3<Float>(0, 1, 0)) -> SectionPlane? {
         guard planes.count < maxPlanes else {
-            logger.warning("SectionPlane: máximo \(maxPlanes) planos alcanzado")
+            logger.warning("SectionPlane: máximo \(self.maxPlanes) planos alcanzado")
             return nil
         }
         let plane = SectionPlane(origin: origin, normal: normal)
