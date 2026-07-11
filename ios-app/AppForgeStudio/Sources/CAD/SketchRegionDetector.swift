@@ -228,6 +228,22 @@ struct SketchRegionDetector {
         return sum / Float(vertices.count)
     }
 
+    /// ¿El punto `p` está dentro del polígono? (ray-casting par/impar).
+    static func polygonContains(_ vertices: [SIMD2<Float>], _ p: SIMD2<Float>) -> Bool {
+        guard vertices.count >= 3 else { return false }
+        var inside = false
+        var j = vertices.count - 1
+        for i in 0..<vertices.count {
+            let vi = vertices[i], vj = vertices[j]
+            if (vi.y > p.y) != (vj.y > p.y) {
+                let t = (p.y - vi.y) / (vj.y - vi.y)
+                if p.x < vi.x + t * (vj.x - vi.x) { inside.toggle() }
+            }
+            j = i
+        }
+        return inside
+    }
+
     /// Discretiza un círculo en segmentos de línea
     static func discretizeCircle(center: SIMD2<Float>, radius: Float,
                                   segments: Int = 32) -> [(SIMD2<Float>, SIMD2<Float>)] {

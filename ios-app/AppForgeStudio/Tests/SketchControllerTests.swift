@@ -263,4 +263,39 @@ final class SketchControllerTests: XCTestCase {
                        "tocar el vacío interior no debe seleccionar")
         XCTAssertNil(s.selectedEntityIndex)
     }
+
+    // MARK: - F4: regiones → 3D (issue #15)
+
+    func testDetectRegionFindsClosedArea() {
+        let s = SketchController()
+        s.activeTool = .rectangle
+        s.tap(at: SIMD2<Float>(0, 0))
+        s.tap(at: SIMD2<Float>(2, 2))   // rect 2×2
+
+        // Agnóstico al winding: existe una región de área |4| (2×2).
+        let regions = SketchRegionDetector.detectRegions(in: s.entities, chain: s.chain)
+        XCTAssertTrue(regions.contains { abs($0.area) == 4 || abs(abs($0.area) - 4) < 0.1 },
+                      "el rect 2×2 debe encerrar una región de área 4")
+    }
+
+    func testExtrudeRegionFromVerticesHasExactVolume() throws {
+        // Una región cuadrada 2×2 extruida h=3 → prisma volumen 12.
+        let s = SketchController()
+        let square: [SIMD2<Float>] = [SIMD2(0, 0), SIMD2(2, 0), SIMD2(2, 2), SIMD2(0, 2)]
+        let model = try XCTUnwrap(s.extrudeRegion(vertices: square, height: 3),
+                                  "una región cerrada debe extruirse a sólido")
+        XCTAssertEqual(try volume(model), 2 * 2 * 3, accuracy: 0.05,
+                       "región 2×2 × altura 3 = 12")
+    }
+
+    func testExtrudeRegionAtTappedPointFindsAndExtrudes() throws {
+        // Dibujar un rect y "tocar" su interior → extruir esa región.
+        let s = SketchController()
+        s.activeTool = .rectangle
+        s.tap(at: SIMD2<Float>(0, 0))
+        s.tap(at: SIMD2<Float>(2, 2))
+        let model = try XCTUnwrap(s.extrudeRegion(at: SIMD2<Float>(1, 1), height: 1),
+                                  "tocar dentro de una región cerrada debe extruirla")
+        XCTAssertEqual(try volume(model), 4, accuracy: 0.05)
+    }
 }

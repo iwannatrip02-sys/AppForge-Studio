@@ -736,6 +736,47 @@ final class SketchController: ObservableObject {
         return model
     }
 
+    // MARK: - Regiones → 3D (F4, issue #15)
+
+    /// Extruye una REGIÓN cerrada (área formada por la intersección de varios
+    /// segmentos, no un perfil de una sola entidad) a partir de sus vértices 2D
+    /// en el plano de trabajo. Mismo constructor de wire que `extrudeProfile`.
+    func extrudeRegion(vertices: [SIMD2<Float>], height: Double) -> Model? {
+        guard height > 1e-9, vertices.count >= 3 else {
+            statusMessage = "Región inválida para extruir"
+            return nil
+        }
+        let p3 = vertices.map { world3($0, height: 0) }
+        let dir = SIMD3<Double>(Double(plane.normal.x), Double(plane.normal.y), Double(plane.normal.z))
+        guard let w = Wire.polygon3D(p3, closed: true),
+              let shape = OCCTSwift.Shape.extrude(profile: w, direction: dir, length: height),
+              let mesh = OCCTBridge.toMesh(shape, quality: .medium) else {
+            statusMessage = "No se pudo extruir la región"
+            return nil
+        }
+        let model = Model(name: "Región_\(UUID().uuidString.prefix(6))")
+        model.cadShape = shape
+        model.meshes = [mesh]
+        model.edgesMesh = OCCTBridge.edgesMesh(shape)
+        return model
+    }
+
+    /// Extruye la región cerrada que contiene el punto tocado — para tocar un
+    /// área sombreada (formada por líneas que se cruzan) y volverla 3D.
+    func extrudeRegion(at point: SIMD2<Float>, height: Double) -> Model? {
+        // Agnóstico al sentido de trazado (winding): la región válida es la que
+        // CONTIENE el punto; si varias, la de mayor área (el contorno exterior).
+        let regions = SketchRegionDetector.detectRegions(in: entities, chain: chain)
+        let containing = regions.filter { SketchRegionDetector.polygonContains($0.vertices, point) }
+        let hit = containing.max { abs($0.area) < abs($1.area) }
+            ?? regions.min { simd_distance($0.centroid, point) < simd_distance($1.centroid, point) }
+        guard let region = hit else {
+            statusMessage = "No hay región cerrada bajo el toque"
+            return nil
+        }
+        return extrudeRegion(vertices: region.vertices, height: height)
+    }
+
     /// Revoluciona el primer perfil cerrado. En el piso: eje Z del mundo (la línea
     /// x=0 del plano — dibuja el perfil a un lado del eje). En un plano sobre cara:
     /// el eje es la línea que pasa por el origen del plano con dirección `plane.v`
