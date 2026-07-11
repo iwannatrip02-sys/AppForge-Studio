@@ -242,7 +242,9 @@ class SatinRenderer: NSObject, ObservableObject {
         mtkView.enableSetNeedsDisplay = true
         mtkView.isPaused = false
         mtkView.depthStencilPixelFormat = .depth32Float
-        mtkView.clearColor = MTLClearColor(red: 0.09, green: 0.10, blue: 0.12, alpha: 1.0)
+        // Carbón profundo coherente (unificado con MetalView) — base del glow
+        // cálido ember→steel que llega en el ticket de estética A2.
+        mtkView.clearColor = MTLClearColor(red: 0.055, green: 0.060, blue: 0.075, alpha: 1.0)
         setup()
     }
 
@@ -980,15 +982,16 @@ class SatinRenderer: NSObject, ObservableObject {
             opaqueInXray: model.name.hasPrefix("__")
         ))
 
-        // Aristas del B-rep (tubos oscuros, look Shapr3D) — renderable propio,
-        // siempre opaco (también en rayos X, como el screenshot del usuario).
+        // Aristas del B-rep: líneas CLARAS y nítidas sobre fondo oscuro (look
+        // Shapr3D), no tubos negros. Steel claro casi-blanco = precisión + calma.
+        // Siempre opaco (también en rayos X, como el screenshot del usuario).
         if let em = model.edgesMesh {
             let (evb, eib, eic) = createBuffersFromMeshes([em])
             if let evb, let eib, eic > 0 {
                 edgeRenderables.append(BasicRenderable(
                     vertexBuffer: evb, indexBuffer: eib, indexCount: eic,
                     modelMatrix: modelMatrix,
-                    color: SIMD4<Float>(0.07, 0.08, 0.11, 1.0),
+                    color: SIMD4<Float>(0.82, 0.88, 0.96, 1.0),
                     modelId: model.id.uuidString + "#edges",
                     center: bboxCenter, opaqueInXray: true
                 ))
