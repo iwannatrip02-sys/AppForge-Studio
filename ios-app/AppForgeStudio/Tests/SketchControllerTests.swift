@@ -319,4 +319,23 @@ final class SketchControllerTests: XCTestCase {
         XCTAssertEqual(abs(b.x - a.x), 3, accuracy: 0.02, "ancho reformado a 3")
         XCTAssertEqual(abs(b.y - a.y), 1, accuracy: 0.02, "alto reformado a 1")
     }
+
+    // MARK: - Bug device: la línea nueva no debe continuar la anterior
+
+    func testBeginToolDiscardsInProgressChain() {
+        let s = SketchController()
+        s.activeTool = .line
+        s.tap(at: SIMD2<Float>(0, 0))
+        s.tap(at: SIMD2<Float>(1, 0))   // cadena en curso, sin cerrar
+        XCTAssertFalse(s.chain.isEmpty, "hay una cadena en curso")
+
+        // Re-seleccionar la herramienta debe EMPEZAR LIMPIO.
+        s.beginTool(.line)
+        XCTAssertTrue(s.chain.isEmpty, "beginTool descarta la cadena en curso")
+
+        // El siguiente tap arranca una cadena nueva desde ese punto, no continúa.
+        s.tap(at: SIMD2<Float>(5, 5))
+        XCTAssertEqual(s.chain.count, 1, "la nueva línea empieza con 1 punto")
+        XCTAssertEqual(s.chain.first?.x ?? -99, 5, accuracy: 0.01)
+    }
 }

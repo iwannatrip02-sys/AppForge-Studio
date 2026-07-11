@@ -149,7 +149,7 @@ final class SketchController: ObservableObject {
     /// Punto vivo bajo el dedo/pencil (preview).
     @Published var preview: SIMD2<Float>? = nil
     @Published private(set) var statusMessage = ""
-    var activeTool: Tool = .line
+    @Published var activeTool: Tool = .line
     /// Número de lados del polígono (editable en sketchBar, rango 3-12).
     @Published var polygonSides: Int = 6
 
@@ -349,6 +349,20 @@ final class SketchController: ObservableObject {
     }
 
     // MARK: - Entrada por taps (dedo Y pencil)
+
+    /// Selecciona una herramienta de dibujo EMPEZANDO LIMPIO: descarta cualquier
+    /// dibujo en curso (cadena/anchor/spline sin cerrar) y la selección. Sin esto,
+    /// una nueva línea continuaba desde el punto anterior (bug reportado en device).
+    func beginTool(_ tool: Tool) {
+        chain = []
+        anchor = nil
+        splineChain = []
+        preview = nil
+        selectedEntityIndex = nil
+        dragState = .inactive
+        activeTool = tool
+        statusMessage = ""
+    }
 
     func tap(at raw: SIMD2<Float>) {
         let p = snap(raw)

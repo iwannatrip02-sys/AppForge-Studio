@@ -519,12 +519,14 @@ struct CADModeView: View {
             }
             if newTool != .measure { measurePointA = nil; measurePointB = nil; dimensionManager.removeActive() }
             // Herramienta de dibujo → configurar el sketch en viewport
+            // beginTool descarta el dibujo en curso → una nueva línea empieza
+            // LIMPIA, no continúa la cadena anterior (bug reportado en device).
             switch newTool {
-            case .line: sketch.activeTool = .line
-            case .rectangle: sketch.activeTool = .rectangle
-            case .circle: sketch.activeTool = .circle
-            case .spline: sketch.activeTool = .spline
-            case .polygon: sketch.activeTool = .polygon
+            case .line: sketch.beginTool(.line)
+            case .rectangle: sketch.beginTool(.rectangle)
+            case .circle: sketch.beginTool(.circle)
+            case .spline: sketch.beginTool(.spline)
+            case .polygon: sketch.beginTool(.polygon)
             default: break
             }
             executeCADTool(newTool, canvasVM: canvasVM, toolVM: toolVM)
