@@ -84,6 +84,39 @@ final class SketchController: ObservableObject {
             }
         }
 
+        /// Distancia mínima del punto `p` al CONTORNO de la entidad (anillo del
+        /// círculo, lados del rect/polígono, segmentos de la cadena/spline). Es
+        /// lo que permite seleccionar tocando la figura, no solo su centro.
+        func distanceToOutline(_ p: SIMD2<Float>) -> Float {
+            func segDist(_ a: SIMD2<Float>, _ b: SIMD2<Float>) -> Float {
+                let ab = b - a
+                let len2 = simd_dot(ab, ab)
+                if len2 < 1e-12 { return simd_distance(p, a) }
+                let t = max(0, min(1, simd_dot(p - a, ab) / len2))
+                return simd_distance(p, a + ab * t)
+            }
+            func polyDist(_ pts: [SIMD2<Float>], closed: Bool) -> Float {
+                guard pts.count >= 2 else { return pts.first.map { simd_distance(p, $0) } ?? .greatestFiniteMagnitude }
+                var best = Float.greatestFiniteMagnitude
+                for i in 0..<(pts.count - 1) { best = min(best, segDist(pts[i], pts[i + 1])) }
+                if closed { best = min(best, segDist(pts[pts.count - 1], pts[0])) }
+                return best
+            }
+            switch self {
+            case .circle(let c, let r):
+                return abs(simd_distance(p, c) - r)   // distancia al anillo
+            case .rect(let a, let b):
+                let corners = [a, SIMD2(b.x, a.y), b, SIMD2(a.x, b.y)]
+                return polyDist(corners, closed: true)
+            case .polygonEnt(let c, let r, let s):
+                return polyDist(Entity.polygonVerts(center: c, radius: r, sides: s), closed: true)
+            case .polyline(let pts, let closed):
+                return polyDist(pts, closed: closed)
+            case .spline(let pts):
+                return polyDist(pts, closed: false)
+            }
+        }
+
         /// Nombre legible por tipo para el panel de Elementos (TAREA 4).
         var displayName: String {
             switch self {
@@ -463,18 +496,27 @@ final class SketchController: ObservableObject {
 
     // MARK: - Selección y edición de entidades (TAREA 3)
 
-    /// Selecciona la entidad cuyo centro/vértice está a < snapRadius·1.5 de `p`.
+    /// Selecciona la entidad tocando su CONTORNO (anillo del círculo, lados,
+    /// segmentos) o su centro/vértices, a < tolerancia de `p`. Con `centersOnly`
+    /// (mientras se dibuja) solo mira el centro, para no secuestrar el inicio de
+    /// una figura nueva sobre un vértice existente (fix del loft).
     /// Si ninguna, deselecciona y devuelve false (el tap sigue su curso normal).
     @discardableResult
     func selectEntity(near p: SIMD2<Float>, centersOnly: Bool = false) -> Bool {
         let radius = Self.snapRadius * 1.5
         var best: (idx: Int, dist: Float)?
         for (i, e) in entities.enumerated() {
-            for pt in (centersOnly ? [e.center] : e.pickPoints) {
-                let d = simd_distance(pt, p)
-                if d < radius, d < (best?.dist ?? .greatestFiniteMagnitude) {
-                    best = (i, d)
-                }
+            let d: Float
+            if centersOnly {
+                d = simd_distance(e.center, p)
+            } else {
+                // Contorno O centro O vértices: lo que esté más cerca.
+                let dOutline = e.distanceToOutline(p)
+                let dPoints = e.pickPoints.map { simd_distance($0, p) }.min() ?? .greatestFiniteMagnitude
+                d = min(dOutline, dPoints)
+            }
+            if d < radius, d < (best?.dist ?? .greatestFiniteMagnitude) {
+                best = (i, d)
             }
         }
         if let hit = best {

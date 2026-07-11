@@ -225,4 +225,42 @@ final class SketchControllerTests: XCTestCase {
                            "copia circular \(i+1) conserva el volumen exacto")
         }
     }
+
+    // MARK: - F2: selección por contorno (issue #13)
+
+    func testSelectCircleByTappingItsRing() {
+        let s = SketchController()
+        s.activeTool = .circle
+        s.tap(at: SIMD2<Float>(0, 0))   // centro
+        s.tap(at: SIMD2<Float>(2, 0))   // radio 2 → círculo r=2 en (0,0)
+
+        // Tocar el ANILLO (lejos del centro) selecciona el círculo.
+        XCTAssertTrue(s.selectEntity(near: SIMD2<Float>(0, 2)),
+                      "tocar el anillo del círculo debe seleccionarlo")
+        XCTAssertEqual(s.selectedEntityIndex, 0)
+    }
+
+    func testSelectRectByTappingAnEdge() {
+        let s = SketchController()
+        s.activeTool = .rectangle
+        s.tap(at: SIMD2<Float>(0, 0))
+        s.tap(at: SIMD2<Float>(4, 2))   // rect (0,0)-(4,2)
+
+        // Tocar el punto medio del lado superior (2, 2) selecciona el rect.
+        XCTAssertTrue(s.selectEntity(near: SIMD2<Float>(2, 2)),
+                      "tocar un lado del rectángulo debe seleccionarlo")
+        XCTAssertEqual(s.selectedEntityIndex, 0)
+    }
+
+    func testTappingFarFromAnyOutlineSelectsNothing() {
+        let s = SketchController()
+        s.activeTool = .circle
+        s.tap(at: SIMD2<Float>(0, 0))
+        s.tap(at: SIMD2<Float>(2, 0))   // círculo r=2
+
+        // Un punto interior lejos del anillo y del centro no selecciona.
+        XCTAssertFalse(s.selectEntity(near: SIMD2<Float>(1, 0)),
+                       "tocar el vacío interior no debe seleccionar")
+        XCTAssertNil(s.selectedEntityIndex)
+    }
 }
