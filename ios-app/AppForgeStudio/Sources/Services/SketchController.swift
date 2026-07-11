@@ -161,6 +161,13 @@ final class SketchController: ObservableObject {
     var hasClosedProfile: Bool { entities.contains { $0.isClosedProfile } }
     /// ¿Hay ruta abierta (spline/cadena) para Tubo/Barrido?
     var hasOpenPath: Bool { entities.contains { $0.isOpenPath } || chain.count >= 2 }
+    /// ¿Hay un área cerrada (perfil de una entidad, O región por intersección de
+    /// segmentos) que se pueda extruir? El botón Extruir se guía por esto.
+    var hasExtrudableArea: Bool {
+        if hasClosedProfile { return true }
+        return SketchRegionDetector.detectRegions(in: entities, chain: chain)
+            .contains { abs($0.area) > 1e-4 }
+    }
     /// ¿Hay DOS perfiles cerrados? (Transición/loft)
     var hasTwoProfiles: Bool { entities.filter { $0.isClosedProfile }.count >= 2 }
     /// Cadena de spline en curso (puntos de control tocados).
@@ -776,6 +783,20 @@ final class SketchController: ObservableObject {
             ?? regions.min { simd_distance($0.centroid, point) < simd_distance($1.centroid, point) }
         guard let region = hit else {
             statusMessage = "No hay región cerrada bajo el toque"
+            return nil
+        }
+        return extrudeRegion(vertices: region.vertices, height: height)
+    }
+
+    /// Extruye el área cerrada disponible: primero un perfil de entidad; si no
+    /// hay, la región de mayor área formada por intersección de segmentos. Es lo
+    /// que usa el botón «Extruir» para que las áreas de dibujos funcionen.
+    func extrudeClosedArea(height: Double) -> Model? {
+        if let m = extrudeProfile(height: height) { return m }
+        let regions = SketchRegionDetector.detectRegions(in: entities, chain: chain)
+        guard let region = regions.max(by: { abs($0.area) < abs($1.area) }),
+              abs(region.area) > 1e-4 else {
+            statusMessage = "No hay área cerrada para extruir"
             return nil
         }
         return extrudeRegion(vertices: region.vertices, height: height)

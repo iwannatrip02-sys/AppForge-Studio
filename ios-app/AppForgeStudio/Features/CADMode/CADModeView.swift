@@ -792,7 +792,7 @@ struct CADModeView: View {
                 }
                 .font(.caption.bold())
             }
-            if sketch.hasClosedProfile {
+            if sketch.hasExtrudableArea {
                 NumericField(value: $sketchExtrudeHeight, range: 0.05...20)
                 Button("Extruir") { performSketchExtrude() }
                     .font(.caption.bold())
@@ -901,7 +901,7 @@ struct CADModeView: View {
 
     private func performSketchExtrude() {
         HapticService.shared.medium()
-        guard let model = sketch.extrudeProfile(height: sketchExtrudeHeight) else { return }
+        guard let model = sketch.extrudeClosedArea(height: sketchExtrudeHeight) else { return }
         canvasVM.saveState()
         canvasVM.scene.addModel(model)
         sketch.clear()
@@ -1298,12 +1298,12 @@ struct CADModeView: View {
         if [.booleanUnion, .booleanSubtract, .booleanIntersect].contains(tool) {
             startCSGOperation(tool)
         } else if tool == .extrude {
-            // Extruir desde el flyout Formar: si ya hay perfil cerrado lo extruye;
-            // si no, el usuario llega al sketchBar que pedirá el perfil primero.
-            if sketch.hasClosedProfile {
+            // Extruir desde el flyout Formar: si hay área cerrada (perfil o
+            // región por intersección) la extruye; si no, guía al usuario.
+            if sketch.hasExtrudableArea {
                 performSketchExtrude()
             } else {
-                sketch.hint("Dibuja un perfil cerrado y toca «Extruir»")
+                sketch.hint("Dibuja un perfil o área cerrada y toca «Extruir»")
             }
         } else if ![.select, .move, .rotate, .scale, .pushPull, .hole, .shell, .extrude].contains(tool),
                   !tool.isSketchTool, tool != .measure {
