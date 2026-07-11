@@ -298,4 +298,25 @@ final class SketchControllerTests: XCTestCase {
                                   "tocar dentro de una región cerrada debe extruirla")
         XCTAssertEqual(try volume(model), 4, accuracy: 0.05)
     }
+
+    // MARK: - F3: arrastre completo de vértices (issue #14)
+
+    func testDragRectThirdCornerReshapes() {
+        let s = SketchController()
+        s.autoConstrain = false   // aislar el arrastre del re-solve de constraints
+        s.activeTool = .rectangle
+        s.tap(at: SIMD2<Float>(0, 0))
+        s.tap(at: SIMD2<Float>(2, 2))   // rect (0,0)-(2,2)
+
+        // Esquina 2 = (b.x, a.y) = (2, 0). Antes caía en default:break y NO se movía.
+        XCTAssertTrue(s.beginDrag(near: SIMD2<Float>(2, 0)), "debe agarrar la esquina (2,0)")
+        s.drag(to: SIMD2<Float>(3, 1))
+        s.endDrag()
+
+        guard case .rect(let a, let b) = s.entities[0] else {
+            return XCTFail("la entidad 0 debe seguir siendo un rect")
+        }
+        XCTAssertEqual(abs(b.x - a.x), 3, accuracy: 0.02, "ancho reformado a 3")
+        XCTAssertEqual(abs(b.y - a.y), 1, accuracy: 0.02, "alto reformado a 1")
+    }
 }

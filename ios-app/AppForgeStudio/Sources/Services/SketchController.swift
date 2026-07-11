@@ -286,9 +286,13 @@ final class SketchController: ObservableObject {
             entities[entityIndex] = .polyline(points: pts, closed: closed)
 
         case .rect(let a, let b):
+            // Las 4 esquinas (orden de entityPoints): 0=a, 1=b, 2=(b.x,a.y), 3=(a.x,b.y).
+            // Mover cualquiera reforma el rect ajustando solo los ejes de esa esquina.
             switch pointIndex {
             case 0: entities[entityIndex] = .rect(a: newPos, b: b)
             case 1: entities[entityIndex] = .rect(a: a, b: newPos)
+            case 2: entities[entityIndex] = .rect(a: SIMD2(a.x, newPos.y), b: SIMD2(newPos.x, b.y))
+            case 3: entities[entityIndex] = .rect(a: SIMD2(newPos.x, a.y), b: SIMD2(b.x, newPos.y))
             default: break
             }
 
