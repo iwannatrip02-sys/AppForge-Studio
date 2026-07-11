@@ -30,6 +30,42 @@
 | Medir | ✅ nuevo | Dos toques sobre el modelo → distancia mm exacta | Medir arista (longitud), cara (área), ángulos, cotas persistentes en pantalla |
 | Primitivas (5) | ✅ | B-rep reales, colocadas en fila | Tamaño/posición al crear (drag para dimensionar como Shapr3D), más primitivas (tubo, cuña, prisma) |
 
+## 1-bis. VERIFICACIÓN EN DEVICE — 2026-07-11 (barrido tool-por-tool, iPad Pro M1)
+> Revisión 2 del método "dos revisiones por herramienta": se tocó cada ✅ EN DEVICE
+> con el usuario. Resultado: de 7 "✅" del catálogo, **solo 1 es real; 4 son 🟡 y 2
+> son ❌**. Los ✅ del catálogo eran optimistas — esta tabla manda.
+
+| Herramienta | Cat. decía | Device 07-11 | Causa raíz (código) / qué falta |
+|---|---|---|---|
+| Primitivas (5) | ✅ | ✅ **real** | Caja/Esfera/Cilindro/Cono/Toro = B-rep reales, cada una entra al árbol. Único ✅ confirmado del barrido. |
+| Push/Pull | ✅ | 🟡 parcial | Funciona en caras de sólido (boss/pocket B-rep). NO sobre regiones de sketch (el Rect quedó plano). Falta preview vivo + arrastre gizmo (hoy slider) + sketch→sólido + editar sketch tras crear. |
+| Redondear (fillet) | ✅ | 🟡 parcial | 1 arista OK. **Multi-arista bug**: L1042 usa `selectionController.lastItem` → solo redondea la última. Debe iterar `items` y filetear todas en una op (OCCT MakeFillet acepta varias). Falta drag Pencil + nº de segmentos. |
+| Chaflán | 🟡 | ❌ **placebo** | L2557 opera sobre `indices[0]`/`[1]` (hardcode), no arista elegida → achaflana micro-triángulo invisible. Label "Radio" es erróneo (chaflán = distancia). No deja seleccionar aristas. Retirar o rehacer por-arista. |
+| Vaciar (shell) | ✅ | 🟡 parcial | Vacía, pero engrosa hacia AFUERA (L214 thickness positivo; fix negativo + elegible) y auto-redondea esquinas (join type Arc; debe ser recto/elegible). Sin drag. |
+| Unir/Restar/Intersecar | ✅ | ❌ **inutilizable** | Motor OCCT existe (L1971) pero selección A/B es por chevrones ‹›  en barra minúscula arriba, NO por tocar cuerpos → el usuario no puede seleccionar. Fix: seleccionar tocando cuerpos. Innovar: booleana por gesto (arrastrar dentro) + preview coloreado + mantener originales + multi-cuerpo. |
+| Medir | ✅ | 🟡 parcial | Da una distancia pero SIN snap (vértices/aristas/medios/grilla), SIN feedback visual de los puntos tocados (invisibles), solo líneas rectas, imprecisa, valor no editable. |
+
+**HUECO FUNDAMENTAL detectado (raíz común, prioridad):** los **vértices / puntos de
+arista no son entidades reales** en los sólidos (las aristas se pintan como "tubos").
+Esto bloquea a la vez: snap de Medir, selección de vértices, y mover sub-elementos.
+Es la "lógica del modelo 3D" que el usuario pide ordenar. Atacar antes que pulir tools.
+
+**DIRECTRIZ TRANSVERSAL (aplica a TODA herramienta, repetida por el usuario):** cada
+tool debe exponer **todas sus variables** de forma real, intuitiva y **arrastrable con
+Pencil** (no sliders escondidos), con **números editables** y **elección de divisiones/
+segmentos** — nivel Shapr3D. Falta preview vivo en TODAS. "Control profundo de todas
+las variables" = criterio de aceptación, no extra.
+
+**Mover sub-elementos (bug reportado 07-11):** seleccionar 3 aristas y mover → mueve el
+CUERPO, no las aristas. No es regresión: mover aristas/caras/vértices **no existe**
+(L391 `onTransformBegan` agarra `hit.modelIndex`, ignora `items`). Es feature por construir.
+
+**Inconsistencia resuelta:** la tabla §1 marca Barrer(Sweep) y Loft como ✅, pero el
+código los tiene RETIRADOS del rail (`cadTools`, L239-244) junto a Corte(loopCut) y
+Bisel por placebo (índices/paths hardcodeados; Loft además `TODO(F3)` sin puente Wire,
+L2570). Verdad vigente: **Sweep/Loft/Corte/Bisel = ❌ no expuestos / no funcionales.**
+No se probaron en device porque no hay botón. Rehacer sobre selección real antes de reexponer.
+
 ## 2. SKETCH — el corazón, y el más deficiente (P1 absoluto)
 
 | Pieza | Estado | Para nivel Shapr3D falta |

@@ -19,10 +19,11 @@ final class SelectionController: ObservableObject {
     enum Item: Equatable, Hashable {
         case face(modelIndex: Int, faceIndex: Int)
         case edge(modelIndex: Int, edgeIndex: Int)
+        case vertex(modelIndex: Int, vertexIndex: Int)
 
         var modelIndex: Int {
             switch self {
-            case .face(let m, _), .edge(let m, _): return m
+            case .face(let m, _), .edge(let m, _), .vertex(let m, _): return m
             }
         }
     }
@@ -56,7 +57,9 @@ final class SelectionController: ObservableObject {
         }
 
         let item: Item
-        if let e = BRepEdgePicker.edgeIndex(of: shape, nearest: hit.position, maxDistance: 0.05) {
+        if let v = BRepVertexPicker.vertexIndex(of: shape, nearest: hit.position, maxDistance: 0.03) {
+            item = .vertex(modelIndex: hit.modelIndex, vertexIndex: v)
+        } else if let e = BRepEdgePicker.edgeIndex(of: shape, nearest: hit.position, maxDistance: 0.05) {
             item = .edge(modelIndex: hit.modelIndex, edgeIndex: e)
         } else if let f = BRepFacePicker.faceIndex(of: shape, nearest: hit.position) {
             item = .face(modelIndex: hit.modelIndex, faceIndex: f)
@@ -127,6 +130,13 @@ final class SelectionController: ObservableObject {
                     v.append(contentsOf: tube.vertices)
                     i.append(contentsOf: tube.indices.map { $0 + base })
                 }
+            case .vertex(_, let vi):
+                if let pos = BRepVertexPicker.position(of: shape, vertexIndex: vi) {
+                    let dot = BRepVertexPicker.highlightDot(at: pos)
+                    let base = UInt32(v.count)
+                    v.append(contentsOf: dot.vertices)
+                    i.append(contentsOf: dot.indices.map { $0 + base })
+                }
             }
         }
         highlightMesh = v.isEmpty ? nil : Mesh(vertices: v, indices: i)
@@ -137,6 +147,7 @@ final class SelectionController: ObservableObject {
     private func updateStatus(models: [Model]) {
         let faces = items.filter { if case .face = $0 { return true }; return false }
         let edges = items.filter { if case .edge = $0 { return true }; return false }
+        let verts = items.filter { if case .vertex = $0 { return true }; return false }
         if items.isEmpty { statusMessage = ""; return }
 
         var parts: [String] = []
@@ -163,6 +174,15 @@ final class SelectionController: ObservableObject {
             parts.append(edges.count == 1
                 ? String(format: "Arista · %.2f mm", len)
                 : String(format: "%d aristas · %.2f mm", edges.count, len))
+        }
+        if !verts.isEmpty {
+            if verts.count == 1, case .vertex(let m, let vi) = verts[0], m < models.count,
+               let shape = models[m].cadShape,
+               let p = BRepVertexPicker.position(of: shape, vertexIndex: vi) {
+                parts.append(String(format: "Punto · (%.2f, %.2f, %.2f)", p.x, p.y, p.z))
+            } else {
+                parts.append("\(verts.count) puntos")
+            }
         }
         statusMessage = parts.joined(separator: " · ")
     }

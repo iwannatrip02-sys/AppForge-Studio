@@ -1084,6 +1084,7 @@ struct CADModeView: View {
         switch selectionController.lastItem {
         case .face?: return "square.fill.on.square"
         case .edge?: return "angle"
+        case .vertex?: return "circle.fill"
         case nil: return "hand.tap"
         }
     }

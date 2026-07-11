@@ -222,3 +222,75 @@ enum BRepEdgePicker {
         return Mesh(vertices: vertices, indices: indices)
     }
 }
+
+// MARK: - Picker de vértices B-rep
+
+/// Del punto de impacto al VÉRTICE B-rep más cercano: los "puntos reales" donde
+/// confluyen las aristas. Base de la selección de puntos, el snap de medición y el
+/// mover sub-elementos. OCCTSwift @v1.8.8 NO expone `Shape.vertices()` verificado,
+/// así que los vértices se derivan de los ENDPOINTS de las aristas (API `points`
+/// ya verificada), deduplicados por proximidad: dos aristas que se encuentran
+/// comparten exactamente un punto → una esquina.
+enum BRepVertexPicker {
+
+    /// Vértices únicos del shape = endpoints de todas las aristas, deduplicados.
+    /// Orden estable (primer avistamiento) para que los índices sean reproducibles.
+    static func vertices(of shape: CADShape, tolerance: Float = 1e-4) -> [SIMD3<Float>] {
+        var result: [SIMD3<Float>] = []
+        for edge in shape.edges() {
+            for p in edge.points(count: 2) {
+                let v = SIMD3<Float>(Float(p.x), Float(p.y), Float(p.z))
+                if !result.contains(where: { simd_distance($0, v) <= tolerance }) {
+                    result.append(v)
+                }
+            }
+        }
+        return result
+    }
+
+    /// Índice del vértice más cercano al punto. `maxDistance` MÁS apretado que el de
+    /// arista: un punto es el objetivo más fino y solo gana con un toque claramente
+    /// sobre la esquina.
+    static func vertexIndex(of shape: CADShape, nearest point: SIMD3<Float>,
+                            maxDistance: Float = 0.03) -> Int? {
+        let verts = vertices(of: shape)
+        var bestIndex: Int?
+        var bestDistance = Float.greatestFiniteMagnitude
+        for (i, v) in verts.enumerated() {
+            let d = simd_distance(v, point)
+            if d < bestDistance {
+                bestDistance = d
+                bestIndex = i
+            }
+        }
+        return bestDistance <= maxDistance ? bestIndex : nil
+    }
+
+    /// Posición del vértice `index` (o nil si fuera de rango).
+    static func position(of shape: CADShape, vertexIndex index: Int) -> SIMD3<Float>? {
+        let verts = vertices(of: shape)
+        guard index >= 0, index < verts.count else { return nil }
+        return verts[index]
+    }
+
+    /// Malla de highlight de un punto: octaedro pequeño centrado en el vértice, para
+    /// que el render (que dibuja mallas, no puntos) lo muestre como un punto visible.
+    static func highlightDot(at position: SIMD3<Float>, size: Float = 0.03) -> Mesh {
+        let s = size
+        let p = position
+        // 6 vértices del octaedro: 0=+x 1=-x 2=+y 3=-y 4=+z 5=-z
+        let offsets: [SIMD3<Float>] = [
+            SIMD3(s, 0, 0), SIMD3(-s, 0, 0),
+            SIMD3(0, s, 0), SIMD3(0, -s, 0),
+            SIMD3(0, 0, s), SIMD3(0, 0, -s)
+        ]
+        let verts = offsets.map { off in
+            Vertex(position: p + off, normal: simd_normalize(off), uv: .zero)
+        }
+        let idx: [UInt32] = [
+            0, 2, 4, 2, 1, 4, 1, 3, 4, 3, 0, 4,   // tapa +z
+            2, 0, 5, 1, 2, 5, 3, 1, 5, 0, 3, 5    // tapa -z
+        ]
+        return Mesh(vertices: verts, indices: idx)
+    }
+}
