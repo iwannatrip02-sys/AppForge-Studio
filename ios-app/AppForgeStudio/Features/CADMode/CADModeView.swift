@@ -94,6 +94,8 @@ struct CADModeView: View {
     @State private var loftHeight: Double = 1.5
     /// Grosor del Vaciado por cara tocada.
     @State private var shellThicknessTap: Double = 0.08
+    /// Dirección de la pared del Vaciado: false = hacia adentro (default CAD).
+    @State private var shellOutward = false
     /// Altura de extrusión del perfil de sketch (editable).
     @State private var sketchExtrudeHeight: Double = 1.0
     /// Panel de Elementos visible (anatomía Shapr3D).
@@ -298,20 +300,31 @@ struct CADModeView: View {
                                 pushPullController.selectFace(from: hit, in: canvasVM.scene.models)
                             } else if selectedTool == .measure {
                                 // Medición sobre geometría real: primer toque = A,
-                                // segundo = B, crea cota 3D persistente.
-                                HapticService.shared.light()
+                                // segundo = B, crea cota 3D persistente. Con SNAP a
+                                // vértices/puntos medios y puntos VISIBLES donde tocas
+                                // (barrido 2026-07-11: "todo es invisible, sin imán").
+                                let snap = MeasureSnapService.snap(
+                                    hit: hit, models: canvasVM.scene.models)
+                                if snap.kind == .free {
+                                    HapticService.shared.light()
+                                } else {
+                                    HapticService.shared.medium()  // imán capturó
+                                }
                                 if measurePointA == nil || measurePointB != nil {
-                                    measurePointA = hit.position
+                                    measurePointA = snap.position
                                     measurePointB = nil
                                     dimensionManager.removeActive()
+                                    showMeasureDot(snap.position, name: "__measureDotA")
+                                    clearMeasureDot(named: "__measureDotB")
                                 } else {
-                                    measurePointB = hit.position
+                                    measurePointB = snap.position
+                                    showMeasureDot(snap.position, name: "__measureDotB")
                                     if let a = measurePointA {
-                                        let dist = simd_distance(a, hit.position)
+                                        let dist = simd_distance(a, snap.position)
                                         toolVM.measurementDistance = dist
                                         // Crear cota 3D persistente
                                         dimensionManager.addLinear(
-                                            from: a, to: hit.position,
+                                            from: a, to: snap.position,
                                             label: projectSettings.config.format(Double(dist))
                                         )
                                         canvasVM.scene.cadHistory.beginOperation(
@@ -354,12 +367,31 @@ struct CADModeView: View {
                                 let model = canvasVM.scene.models[hit.modelIndex]
                                 BRepHistory.shared.recordChange(of: model)
                                 if BRepModeling.shell(model, thickness: shellThicknessTap,
-                                                      openFaceIndex: faceIdx) {
+                                                      openFaceIndex: faceIdx,
+                                                      outward: shellOutward) {
                                     HapticService.shared.medium()
                                     temperTick += 1
                                     canvasVM.objectWillChange.send()
                                 } else {
                                     BRepHistory.shared.discardLast()
+                                }
+                            } else if [.booleanUnion, .booleanSubtract, .booleanIntersect].contains(selectedTool) {
+                                // Booleana por TOQUE (barrido 2026-07-11: los chevrones
+                                // A/B eran inusables): tocar un cuerpo = pieza A, tocar
+                                // otro = pieza B; Ejecutar queda habilitado en la barra.
+                                HapticService.shared.light()
+                                guard hit.modelIndex < canvasVM.scene.models.count else { return }
+                                let name = canvasVM.scene.models[hit.modelIndex].name
+                                if toolVM.csgShapeAIndex == nil {
+                                    toolVM.csgShapeAIndex = hit.modelIndex
+                                    selectionController.selectBodyFromPanel(
+                                        index: hit.modelIndex, models: canvasVM.scene.models)
+                                    csgStatusMessage = "A: \(name) — toca la pieza B"
+                                } else if hit.modelIndex != toolVM.csgShapeAIndex {
+                                    toolVM.csgShapeBIndex = hit.modelIndex
+                                    selectionController.selectBodyFromPanel(
+                                        index: hit.modelIndex, models: canvasVM.scene.models)
+                                    csgStatusMessage = "A + B listas — pulsa Ejecutar"
                                 }
                             } else if selectedTool == .select {
                                 // Selección unificada (ÁREA 1): cuerpo → cara/arista
@@ -517,7 +549,11 @@ struct CADModeView: View {
             if newTool != .select && ![.move, .rotate, .scale].contains(newTool) {
                 selectionController.deselect()
             }
-            if newTool != .measure { measurePointA = nil; measurePointB = nil; dimensionManager.removeActive() }
+            if newTool != .measure {
+                measurePointA = nil; measurePointB = nil
+                dimensionManager.removeActive()
+                clearMeasureDots()
+            }
             // Herramienta de dibujo → configurar el sketch en viewport
             // beginTool descarta el dibujo en curso → una nueva línea empieza
             // LIMPIA, no continúa la cadena anterior (bug reportado en device).
@@ -732,6 +768,14 @@ struct CADModeView: View {
                 .foregroundColor(theme.textSecondary)
                 .lineLimit(1)
             Spacer()
+            // Dirección de la pared (device 2026-07-11: siempre crecía hacia afuera;
+            // en CAD el vaciado conserva el contorno exterior por defecto)
+            Picker("", selection: $shellOutward) {
+                Text("Adentro").tag(false)
+                Text("Afuera").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 150)
             Text("Grosor").font(.caption2).foregroundColor(theme.textSecondary)
             NumericField(value: $shellThicknessTap, range: 0.01...2)
         }
@@ -958,6 +1002,52 @@ struct CADModeView: View {
     /// Barra contextual por SELECCIÓN (menú adaptativo, BLUEPRINT S2): ofrece
     /// exactamente lo que aplica a lo seleccionado — cuerpo/cara/arista.
     @ViewBuilder
+    /// Punto de medición VISIBLE en el viewport (naranja acento): sabes exactamente
+    /// dónde quedó el toque y si el imán capturó una esquina/punto medio.
+    private func showMeasureDot(_ p: SIMD3<Float>, name: String) {
+        canvasVM.scene.models.removeAll { $0.name == name }
+        let dot = Model(name: name)
+        dot.meshes = [BRepVertexPicker.highlightDot(at: p, size: 0.035)]
+        dot.color = SIMD4<Float>(1.0, 0.48, 0.27, 1.0)
+        canvasVM.scene.addModel(dot)
+        canvasVM.objectWillChange.send()
+    }
+
+    private func clearMeasureDot(named name: String) {
+        canvasVM.scene.models.removeAll { $0.name == name }
+    }
+
+    private func clearMeasureDots() {
+        canvasVM.scene.models.removeAll { $0.name.hasPrefix("__measureDot") }
+    }
+
+    /// Aplica una operación de aristas (fillet/chamfer) a TODAS las aristas
+    /// seleccionadas, agrupadas por modelo — una sola op OCCT por modelo para que
+    /// las esquinas compartidas se resuelvan juntas (multi-selección real).
+    private func applyToSelectedEdges(_ op: (Model, [Int]) -> Bool) {
+        HapticService.shared.medium()
+        var grouped: [Int: [Int]] = [:]
+        for case .edge(let m, let e) in selectionController.items {
+            grouped[m, default: []].append(e)
+        }
+        var anyOK = false
+        for (modelIndex, edges) in grouped {
+            guard modelIndex < canvasVM.scene.models.count else { continue }
+            let model = canvasVM.scene.models[modelIndex]
+            BRepHistory.shared.recordChange(of: model)
+            if op(model, edges) {
+                anyOK = true
+            } else {
+                BRepHistory.shared.discardLast()
+            }
+        }
+        if anyOK {
+            selectionController.deselect()
+            canvasVM.objectWillChange.send()
+            temperTick += 1
+        }
+    }
+
     private var selectionBar: some View {
         HStack(spacing: 10) {
             Image(systemName: selectionIcon)
@@ -1039,22 +1129,23 @@ struct CADModeView: View {
                     }
                     .font(.caption.bold())
                 }
-                if case .edge(let modelIndex, let edgeIndex)? = selectionController.lastItem {
+                if case .edge? = selectionController.lastItem {
                     Slider(value: $edgeFilletRadius, in: 0.01...0.5)
                         .frame(width: 110)
                     NumericField(value: $edgeFilletRadius, range: 0.01...0.5)
+                    // Multi-arista REAL (barrido 2026-07-11: antes solo operaba la
+                    // última): ambas acciones toman TODAS las aristas seleccionadas.
                     Button("Redondear") {
-                        HapticService.shared.medium()
-                        guard modelIndex < canvasVM.scene.models.count else { return }
-                        let model = canvasVM.scene.models[modelIndex]
-                        BRepHistory.shared.recordChange(of: model)
-                        if BRepModeling.filletEdge(model, edgeIndex: edgeIndex,
-                                                   radius: edgeFilletRadius) {
-                            selectionController.deselect()
-                            canvasVM.objectWillChange.send()
-                            temperTick += 1
-                        } else {
-                            BRepHistory.shared.discardLast()
+                        applyToSelectedEdges { model, edges in
+                            BRepModeling.filletEdges(model, edgeIndices: edges,
+                                                     radius: edgeFilletRadius)
+                        }
+                    }
+                    .font(.caption.bold())
+                    Button("Chaflán") {
+                        applyToSelectedEdges { model, edges in
+                            BRepModeling.chamferEdges(model, edgeIndices: edges,
+                                                      distance: Double(edgeFilletRadius))
                         }
                     }
                     .font(.caption.bold())
@@ -1371,7 +1462,8 @@ struct CADModeView: View {
                 .background(theme.surfaceSecondary)
             case .chamfer:
                 HStack {
-                    Text("Radio:").font(.caption).foregroundColor(theme.textPrimary)
+                    // Chaflán = corte plano por DISTANCIA (no radio — eso es Redondear)
+                    Text("Distancia:").font(.caption).foregroundColor(theme.textPrimary)
                     Slider(value: $toolVM.chamferRadius, in: 0.01...0.5)
                         .frame(width: 120)
                     Text(String(format: "%.2f", toolVM.chamferRadius))
@@ -2545,24 +2637,13 @@ private func executeCADTool(_ tool: CADTool, canvasVM: CanvasViewModel, toolVM: 
     }
 
     switch tool {
-    case .fillet:
-        // Mesh-based fillet ≈ bevel with segments (FilletEngine works on B-rep CADShape, not Mesh)
-        let engine = BevelEngine()
-        if mutableMesh.indices.count >= 6 {
-            let e0 = Int(mutableMesh.indices[0])
-            let e1 = Int(mutableMesh.indices[1])
-            let radius = toolVM.filletRadius
-            _ = engine.bevel(mesh: &mutableMesh, edgeIndices: [(e0, e1)], bevelSize: radius, segments: 4)
-        }
-
-    case .chamfer:
-        let engine = ChamferEngine()
-        if mutableMesh.indices.count >= 6 {
-            let e0 = Int(mutableMesh.indices[0])
-            let e1 = Int(mutableMesh.indices[1])
-            let dist = toolVM.chamferRadius
-            _ = engine.computeChamfer(edges: [(e0, e1)], distance: dist, mesh: &mutableMesh)
-        }
+    case .fillet, .chamfer:
+        // PLACEBO RETIRADO (barrido device 2026-07-11): operaba sobre indices[0]/[1]
+        // de la malla — una arista arbitraria e invisible. Sin B-rep no hay
+        // fillet/chamfer honesto; el flujo real es seleccionar aristas →
+        // Redondear/Chaflán de la barra de selección.
+        logger.warning("fillet/chamfer sin B-rep: sin efecto (placebo retirado)")
+        return
 
     case .shell:
         let engine = ShellEngine()

@@ -78,10 +78,33 @@ enum BRepModeling {
     /// API verificada @v1.8.8: `Shape.filleted(edges: [Edge], radius:) -> Shape?`.
     @discardableResult
     static func filletEdge(_ model: Model, edgeIndex: Int, radius: Double) -> Bool {
+        filletEdges(model, edgeIndices: [edgeIndex], radius: radius)
+    }
+
+    /// Fillet de VARIAS aristas seleccionadas en UNA sola operación OCCT
+    /// (barrido device 2026-07-11: con multi-selección solo se redondeaba la
+    /// última). Una op conjunta también resuelve bien las esquinas compartidas.
+    @discardableResult
+    static func filletEdges(_ model: Model, edgeIndices: [Int], radius: Double) -> Bool {
         applyFeature(to: model) { shape in
-            let edges = shape.edges()
-            guard edgeIndex >= 0, edgeIndex < edges.count else { return nil }
-            return shape.filleted(edges: [edges[edgeIndex]], radius: radius)
+            let all = shape.edges()
+            guard !edgeIndices.isEmpty,
+                  edgeIndices.allSatisfy({ $0 >= 0 && $0 < all.count }) else { return nil }
+            return shape.filleted(edges: edgeIndices.map { all[$0] }, radius: radius)
+        }
+    }
+
+    /// Chaflán de aristas seleccionadas (corte plano, distancia uniforme).
+    /// Reemplaza el placebo de índices de malla hardcodeados (barrido 2026-07-11).
+    /// API verificada @v1.8.8: `chamferedWithFullHistory(distance:, edges: [Int])`.
+    @discardableResult
+    static func chamferEdges(_ model: Model, edgeIndices: [Int], distance: Double) -> Bool {
+        applyFeature(to: model) { shape in
+            let count = shape.edges().count
+            guard !edgeIndices.isEmpty,
+                  edgeIndices.allSatisfy({ $0 >= 0 && $0 < count }) else { return nil }
+            return shape.chamferedWithFullHistory(distance: distance,
+                                                  edges: edgeIndices)?.result
         }
     }
 
@@ -211,8 +234,14 @@ enum BRepModeling {
     /// Un shell necesita al menos una cara abierta (igual que en Shapr3D);
     /// sin `openFaceIndex` explícito se abre la cara de mayor área.
     @discardableResult
-    static func shell(_ model: Model, thickness: Double, openFaceIndex: Int? = nil) -> Bool {
-        applyFeature(to: model) { shape in
+    /// Vaciado con dirección: `outward: false` (default) quita material HACIA ADENTRO
+    /// conservando el contorno exterior — lo esperado en CAD. La semántica OCCT es
+    /// offset positivo = crece hacia afuera (bug device 2026-07-11: engrosaba afuera),
+    /// así que adentro = thickness negativo.
+    static func shell(_ model: Model, thickness: Double, openFaceIndex: Int? = nil,
+                      outward: Bool = false) -> Bool {
+        let signed = outward ? abs(thickness) : -abs(thickness)
+        return applyFeature(to: model) { shape in
             let faces = shape.faces()
             let openFace: Face?
             if let idx = openFaceIndex, idx >= 0, idx < faces.count {
@@ -220,8 +249,8 @@ enum BRepModeling {
             } else {
                 openFace = faces.max(by: { $0.area() < $1.area() })
             }
-            guard let face = openFace else { return shape.shelled(thickness: thickness) }
-            return shape.shelled(thickness: thickness, openFaces: [face])
+            guard let face = openFace else { return shape.shelled(thickness: signed) }
+            return shape.shelled(thickness: signed, openFaces: [face])
         }
     }
 

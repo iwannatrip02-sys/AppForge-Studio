@@ -998,6 +998,22 @@ class SatinRenderer: NSObject, ObservableObject {
             }
         }
 
+        // Puntos de vértice SIEMPRE visibles: las esquinas del B-rep son entidades
+        // reales tocables (base de selección de puntos y snap — device 2026-07-11).
+        // Mismo pipeline que las aristas, un tono más brillante.
+        if let dots = model.vertexDotsMesh() {
+            let (dvb, dib, dic) = createBuffersFromMeshes([dots])
+            if let dvb, let dib, dic > 0 {
+                edgeRenderables.append(BasicRenderable(
+                    vertexBuffer: dvb, indexBuffer: dib, indexCount: dic,
+                    modelMatrix: modelMatrix,
+                    color: SIMD4<Float>(0.95, 0.97, 1.0, 1.0),
+                    modelId: model.id.uuidString + "#dots",
+                    center: bboxCenter, opaqueInXray: true
+                ))
+            }
+        }
+
         // Build Satin Mesh for scene-graph operations (modelIdToObject, applyTransformsToScene, refreshNonPBRObjectGeometry)
         // Evidence: vendor/Satin/Sources/Satin/Core/Geometry.swift:185 — addAttribute(_:for:)
         // Evidence: vendor/Satin/Sources/Satin/Materials/BasicColorMaterial.swift:22 — BasicColorMaterial(color:blending:)

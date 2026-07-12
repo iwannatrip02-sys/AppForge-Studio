@@ -38,6 +38,30 @@ class Model: ObservableObject {
     /// OCCTBridge.edgesMesh en cada applyFeature/creación; el renderer la dibuja
     /// oscura y opaca (también en rayos X).
     var edgesMesh: Mesh?
+    /// Puntos de vértice del B-rep SIEMPRE visibles (la "lógica del modelo":
+    /// las esquinas son entidades reales y se ven — feedback device 2026-07-11).
+    /// Cacheado por geometryVersion; se recalcula solo cuando la geometría cambia.
+    private var vertexDotsCache: Mesh?
+    private var vertexDotsCacheVersion: Int = -1
+    func vertexDotsMesh() -> Mesh? {
+        if vertexDotsCacheVersion == geometryVersion { return vertexDotsCache }
+        vertexDotsCacheVersion = geometryVersion
+        guard let shape = cadShape else { vertexDotsCache = nil; return nil }
+        let verts = BRepVertexPicker.vertices(of: shape)
+        // Tope de seguridad: un sólido orgánico con cientos de esquinas no
+        // necesita puntos (y los octaedros saturarían el draw).
+        guard !verts.isEmpty, verts.count <= 512 else { vertexDotsCache = nil; return nil }
+        var v: [Vertex] = []
+        var i: [UInt32] = []
+        for p in verts {
+            let dot = BRepVertexPicker.highlightDot(at: p, size: 0.02)
+            let base = UInt32(v.count)
+            v.append(contentsOf: dot.vertices)
+            i.append(contentsOf: dot.indices.map { $0 + base })
+        }
+        vertexDotsCache = Mesh(vertices: v, indices: i)
+        return vertexDotsCache
+    }
     @Published var color: SIMD4<Float>
     @Published var cadHistoryID: UUID?
     @Published var originOp: String?
