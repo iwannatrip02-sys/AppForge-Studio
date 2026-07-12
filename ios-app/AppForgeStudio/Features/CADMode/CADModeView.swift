@@ -999,9 +999,6 @@ struct CADModeView: View {
         canvasVM.objectWillChange.send()
     }
 
-    /// Barra contextual por SELECCIÓN (menú adaptativo, BLUEPRINT S2): ofrece
-    /// exactamente lo que aplica a lo seleccionado — cuerpo/cara/arista.
-    @ViewBuilder
     /// Punto de medición VISIBLE en el viewport (naranja acento): sabes exactamente
     /// dónde quedó el toque y si el imán capturó una esquina/punto medio.
     private func showMeasureDot(_ p: SIMD3<Float>, name: String) {
@@ -1048,6 +1045,9 @@ struct CADModeView: View {
         }
     }
 
+    /// Barra contextual por SELECCIÓN (menú adaptativo, BLUEPRINT S2): ofrece
+    /// exactamente lo que aplica a lo seleccionado — cuerpo/cara/arista.
+    @ViewBuilder
     private var selectionBar: some View {
         HStack(spacing: 10) {
             Image(systemName: selectionIcon)
