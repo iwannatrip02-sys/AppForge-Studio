@@ -64,12 +64,17 @@ final class ProjectRoundtripTests: XCTestCase {
 
         let copy = try svc.duplicateProject(at: url)
         defer { try? svc.deleteProject(at: copy) }
-        let copyMeta = svc.listProjects().first { $0.url == copy }?.metadata
+        // Comparar por PATH estandarizado: contentsOfDirectory devuelve URLs de
+        // directorio con slash final y URL == las considera distintas.
+        let copyPath = copy.standardizedFileURL.path
+        let copyMeta = svc.listProjects()
+            .first { $0.url.standardizedFileURL.path == copyPath }?.metadata
         XCTAssertNotNil(copyMeta, "el duplicado aparece en la galería")
         XCTAssertNotEqual(copyMeta?.name, name, "el duplicado tiene nombre propio")
 
         try svc.deleteProject(at: copy)
-        XCTAssertFalse(svc.listProjects().contains { $0.url == copy },
-                       "eliminar lo quita de la galería y del disco")
+        XCTAssertFalse(svc.listProjects().contains {
+            $0.url.standardizedFileURL.path == copyPath
+        }, "eliminar lo quita de la galería y del disco")
     }
 }

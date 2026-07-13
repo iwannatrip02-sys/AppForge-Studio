@@ -1,4 +1,5 @@
 import XCTest
+import OCCTSwift
 @testable import AppForgeStudio
 
 final class ExportServiceTests: XCTestCase {
@@ -44,14 +45,31 @@ final class ExportServiceTests: XCTestCase {
         XCTAssertGreaterThan(data.count, 0)
     }
     
-    func testExportToSTEP() throws {
+    func testExportToSTEPWithoutBRepThrowsHonestError() {
+        // Contrato nuevo (2026-07-13): sin B-rep NO hay STEP falso. El generador
+        // anterior escribía un pseudo-STEP (POLYLOOP a mano) que ningún CAD
+        // abría como sólido — placebo retirado.
         let url = tempDir.appendingPathComponent("test.step")
-        try exportService.exportToSTEP(model: testModel, url: url)
+        XCTAssertThrowsError(try exportService.exportToSTEP(model: testModel, url: url),
+                             "malla sin B-rep debe fallar honesto, no escribir basura")
+    }
+
+    func testExportToSTEPWithBRepWritesRealAP214() throws {
+        let shape = try XCTUnwrap(OCCTSwift.Shape.box(width: 2, height: 2, depth: 2))
+        let mesh = try XCTUnwrap(OCCTBridge.toMesh(shape, quality: .medium))
+        let brepModel = Model(name: "BrepCube")
+        brepModel.cadShape = shape
+        brepModel.meshes = [mesh]
+
+        let url = tempDir.appendingPathComponent("real.step")
+        try exportService.exportToSTEP(model: brepModel, url: url)
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
         let content = try String(contentsOf: url, encoding: .utf8)
-        XCTAssertTrue(content.contains("ISO-10303-21"))
-        XCTAssertTrue(content.contains("CARTESIAN_POINT"))
-        XCTAssertTrue(content.contains("POLYLOOP"))
+        XCTAssertTrue(content.contains("ISO-10303-21"), "cabecera STEP estándar")
+        XCTAssertFalse(content.contains("POLYLOOP"),
+                       "sin rastro del pseudo-STEP triangulado")
+        XCTAssertGreaterThan(content.count, 1000,
+                             "un AP214 real de un sólido tiene entidades B-rep")
     }
     
     func testExportToGLTF() throws {
