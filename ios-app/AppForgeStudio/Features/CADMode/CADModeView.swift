@@ -96,6 +96,9 @@ struct CADModeView: View {
     @State private var shellThicknessTap: Double = 0.08
     /// Dirección de la pared del Vaciado: false = hacia adentro (default CAD).
     @State private var shellOutward = false
+    /// Drag de CARA activo (Mover + cara seleccionada): la cara viaja por su
+    /// normal — push/pull directo estilo Shapr3D (Incremento 4 v1).
+    @State private var dragFace: (modelIndex: Int, faceIndex: Int, normal: SIMD3<Float>)? = nil
     /// Altura de extrusión del perfil de sketch (editable).
     @State private var sketchExtrudeHeight: Double = 1.0
     /// Panel de Elementos visible (anatomía Shapr3D).
@@ -422,8 +425,29 @@ struct CADModeView: View {
                         transformEnabled: [.move, .rotate, .scale].contains(selectedTool),
                         onTransformBegan: { hit in
                             HapticService.shared.light()
-                            dragModelIndex = hit.modelIndex
                             dragAccum = .zero
+                            dragFace = nil
+                            // MOVER con sub-selección (Incremento 4): con una CARA
+                            // seleccionada el drag mueve LA CARA (push/pull directo);
+                            // con aristas/puntos NO se mueve el cuerpo en silencio
+                            // (bug device 2026-07-11) — aviso honesto.
+                            if selectedTool == .move, selectionController.hasSelection,
+                               selectionController.bodyIndex == nil {
+                                if case .face(let m, let f)? = selectionController.lastItem,
+                                   m == hit.modelIndex, m < canvasVM.scene.models.count,
+                                   let shape = canvasVM.scene.models[m].cadShape,
+                                   f < shape.faces().count,
+                                   let n = shape.faces()[f].normal {
+                                    dragFace = (m, f, SIMD3<Float>(Float(n.x), Float(n.y), Float(n.z)))
+                                    dragModelIndex = nil
+                                    return
+                                }
+                                selectionController.showHint(
+                                    "Mover aristas/puntos: próximamente — usa «Cuerpo» para mover el sólido")
+                                dragModelIndex = nil
+                                return
+                            }
+                            dragModelIndex = hit.modelIndex
                         },
                         onTransformChanged: { dx, dy in
                             dragAccum += SIMD2<Float>(dx, dy)
@@ -1840,6 +1864,19 @@ struct CADModeView: View {
     /// por frame). Al soltar, bakeTransform lo hornea al B-rep y resetea el TRS.
     /// Pivote en el centro c: T(c)·Op·T(−c) ⇒ position compensada.
     private func applyTransformPreview() {
+        // Drag de CARA: ghost del highlight viajando por la normal + distancia viva
+        // en la barra (preview honesto sin recomputar OCCT por frame).
+        if let df = dragFace, selectedTool == .move,
+           df.modelIndex < canvasVM.scene.models.count {
+            let model = canvasVM.scene.models[df.modelIndex]
+            let d = simd_dot(transformParams(for: model).delta, df.normal)
+            if let overlay = canvasVM.scene.models.first(where: { $0.name == Self.edgeHighlightName }) {
+                overlay.position = df.normal * d
+            }
+            selectionController.showHint(String(format: "Mover cara · %+.2f", d))
+            canvasVM.objectWillChange.send()
+            return
+        }
         guard let idx = dragModelIndex, idx < canvasVM.scene.models.count else { return }
         let model = canvasVM.scene.models[idx]
         let p = transformParams(for: model)
@@ -1877,6 +1914,33 @@ struct CADModeView: View {
     /// Hornea la transformación al B-rep (fuente de verdad: picking y booleanas
     /// siguen exactos) o, si el modelo no tiene B-rep, a los vértices de la malla.
     private func bakeTransform() {
+        // Drag de CARA: hornear el push/pull real (BRepFeat prism) con la distancia
+        // proyectada del gesto sobre la normal capturada al empezar.
+        if let df = dragFace, selectedTool == .move {
+            dragFace = nil
+            canvasVM.scene.models.first(where: { $0.name == Self.edgeHighlightName })?.position = .zero
+            guard df.modelIndex < canvasVM.scene.models.count else { return }
+            let model = canvasVM.scene.models[df.modelIndex]
+            let d = Double(simd_dot(transformParams(for: model).delta, df.normal))
+            guard abs(d) > 1e-4 else {
+                selectionController.showHint("Sin desplazamiento")
+                return
+            }
+            BRepHistory.shared.recordChange(of: model)
+            let ok = BRepModeling.applyFeature(to: model) { shape in
+                BRepModeling.pushPullFace(shape, faceIndex: df.faceIndex, distance: d)
+            }
+            if ok {
+                HapticService.shared.medium()
+                selectionController.deselect()
+                temperTick += 1
+            } else {
+                BRepHistory.shared.discardLast()
+                selectionController.showHint("La cara no se pudo mover (geometría no compatible)")
+            }
+            canvasVM.objectWillChange.send()
+            return
+        }
         guard let idx = dragModelIndex, idx < canvasVM.scene.models.count else { return }
         let model = canvasVM.scene.models[idx]
         let p = transformParams(for: model)

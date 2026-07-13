@@ -98,6 +98,10 @@ final class SelectionController: ObservableObject {
         statusMessage = "\(models[m].name)\(bodyMetrics(models[m]))"
     }
 
+    /// Mensaje contextual desde la UI (drag de cara, avisos honestos) — se muestra
+    /// en la misma barra de estado de la selección.
+    func showHint(_ text: String) { statusMessage = text }
+
     func deselect() {
         items = []
         bodyIndex = nil
