@@ -5,6 +5,7 @@ import MetalKit
 import SceneKit
 import SceneKit.ModelIO
 import UIKit
+import OCCTSwift
 import OSLog
 
 enum ExportFormat: String, CaseIterable {
@@ -354,34 +355,18 @@ class ExportService {
         guard !model.meshes.isEmpty else {
             throw ExportError.invalidModel("Model has no meshes for STEP export")
         }
-        // Export via OCCTSwiftIO for B-rep fidelity STEP (AP214)
-        // For now, uses the first mesh triangulated from any OCCT-native shape.
-        // Future: track CADShape alongside Model for native B-rep STEP export.
-        try exportSTEPAsText(model: model, to: url)
-    }
-
-    private func exportSTEPAsText(model: Model, to url: URL) throws {
-        var stepContent = "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('View exchange'),'1');\n"
-        stepContent += "FILE_NAME('\(url.lastPathComponent)','\(ISO8601DateFormatter().string(from: Date()))',('AppForgeStudio'),(''),'','','');\n"
-        stepContent += "FILE_SCHEMA(('AP214'));\nENDSEC;\nDATA;\n"
-        var vertexId = 1
-        var faceId = 1
-        for mesh in model.meshes {
-            for v in mesh.vertices {
-                stepContent += "#\(vertexId)=CARTESIAN_POINT('',(\(v.position.x),\(v.position.y),\(v.position.z)));\n"
-                vertexId += 1
-            }
-            for i in stride(from: 0, to: mesh.indices.count, by: 3) {
-                guard i + 2 < mesh.indices.count else { break }
-                let i1 = Int(mesh.indices[i]) + 1
-                let i2 = Int(mesh.indices[i+1]) + 1
-                let i3 = Int(mesh.indices[i+2]) + 1
-                stepContent += "#\(faceId)=POLYLOOP('',(#\(i1),#\(i2),#\(i3)));\n"
-                faceId += 1
-            }
+        // STEP REAL (AP214) vía kernel OCCT: B-rep exacto con NURBS y topología —
+        // lo que Fusion/SolidWorks esperan abrir. El generador anterior volcaba la
+        // malla triangulada como pseudo-STEP (CARTESIAN_POINT/POLYLOOP inventados)
+        // que ningún CAD abría como sólido: placebo de exportación, retirado.
+        guard let shape = model.cadShape else {
+            throw ExportError.invalidModel(
+                "\(model.name) no tiene B-rep (malla esculpida/importada) — usa STL/OBJ/USDZ")
         }
-        stepContent += "ENDSEC;\nEND-ISO-10303-21;"
-        try stepContent.write(to: url, atomically: true, encoding: .utf8)
+        try Exporter.writeSTEP(shape: shape, to: url)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw ExportError.writeFailed("STEP export failed - file was not written to disk")
+        }
     }
 
     func exportToGLTF(model: Model, url: URL) throws {

@@ -37,6 +37,7 @@ targets:
       - path: Core/UI
       - path: Core/Managers
       - path: Core/Services/ExportService
+      - path: Features/Home
       - path: Features/CADMode
       - path: Features/SculptMode
       - path: Features/PaintMode
