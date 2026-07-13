@@ -1481,11 +1481,42 @@ struct CADModeView: View {
     //  único camino de activación — activate(_:).)
 
     private func executeSelectedTool() {
-        guard let firstMesh = canvasVM.scene.models.first?.meshes.first else { return }
-        var mutableMesh = firstMesh
+        // Objetivo: el CUERPO seleccionado; sin selección, el primero (legacy).
+        // Antes las barras "Aplicar" pegaban SIEMPRE a models[0] — con varios
+        // cuerpos en escena la operación caía en uno que no estabas mirando.
+        let idx = selectionController.bodyIndex ?? 0
+        guard idx < canvasVM.scene.models.count else { return }
+        let model = canvasVM.scene.models[idx]
+
+        // Ruta B-rep REAL para las barras globales (fillet/chamfer/shell).
+        if model.cadShape != nil, [.fillet, .chamfer, .shell].contains(selectedTool) {
+            BRepHistory.shared.recordChange(of: model)
+            let ok: Bool
+            switch selectedTool {
+            case .fillet:
+                ok = BRepModeling.fillet(model, radius: Double(toolVM.filletRadius))
+            case .chamfer:
+                ok = BRepModeling.chamfer(model, distance: Double(toolVM.chamferRadius))
+            default:
+                ok = BRepModeling.shell(model, thickness: Double(toolVM.shellThickness),
+                                        outward: shellOutward)
+            }
+            if ok {
+                HapticService.shared.medium()
+                temperTick += 1
+            } else {
+                BRepHistory.shared.discardLast()
+                selectionController.showHint("La operación falló en \(model.name)")
+            }
+            canvasVM.objectWillChange.send()
+            return
+        }
+
+        // Legacy malla (modelos sin B-rep)
+        guard var mutableMesh = model.meshes.first else { return }
         toolVM.executeTool(mesh: &mutableMesh)
-        if !canvasVM.scene.models.isEmpty {
-            canvasVM.scene.models[0].meshes[0] = mutableMesh
+        if !model.meshes.isEmpty {
+            model.meshes[0] = mutableMesh
         }
         canvasVM.objectWillChange.send()
     }
