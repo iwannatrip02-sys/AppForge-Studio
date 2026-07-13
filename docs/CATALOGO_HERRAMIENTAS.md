@@ -66,6 +66,28 @@ Bisel por placebo (índices/paths hardcodeados; Loft además `TODO(F3)` sin puen
 L2570). Verdad vigente: **Sweep/Loft/Corte/Bisel = ❌ no expuestos / no funcionales.**
 No se probaron en device porque no hay botón. Rehacer sobre selección real antes de reexponer.
 
+## 1-ter. SESIÓN AUTÓNOMA 2026-07-13 — nivel sobre Shapr3D+Fusion (pendiente device)
+> Construido con CI verde + tests de oráculo real; TODO pendiente de verificación
+> en device cuando el usuario vuelva del viaje.
+
+**Nuevo (no existía):**
+- **INICIO/galería** (§5 era ❌): HomeView con Nuevo/Abrir/Duplicar/Eliminar; volver
+  a Inicio GUARDA; background = autosave. Formato .appforge (B-rep sin pérdida).
+- **Mover CARA por drag** (Inc. 4 v1): cara seleccionada + Mover = push/pull directo
+  con ghost + distancia viva; aristas/puntos ya no mueven el cuerpo en silencio.
+- **Fillet VARIABLE** (radio inicial→final, campo "→" en barra de aristas).
+- **DEFEATURE** ("Quitar" en barra de caras): elimina agujeros/fillets/bolsillos y
+  OCCT sana el sólido — Shapr3D no lo tiene.
+- **AR de escena completa** con materiales PBR reales (antes: material nil = gris).
+
+**Placebos/bugs adicionales retirados:**
+- STEP era pseudo-STEP de texto (POLYLOOP a mano, ilegible por CAD) → ahora AP214
+  REAL vía kernel (Exporter.writeSTEP). Sin B-rep = error honesto.
+- Las barras "Aplicar" (fillet/chamfer/shell global) pegaban SIEMPRE a models[0]
+  → ahora al cuerpo seleccionado, por ruta B-rep real.
+- Persistencia: archivos con huecos por overlays (proyectos cargaban VACÍOS),
+  nombres/colores se perdían → arreglado + tests de roundtrip.
+
 ## 2. SKETCH — el corazón, y el más deficiente (P1 absoluto)
 
 | Pieza | Estado | Para nivel Shapr3D falta |
