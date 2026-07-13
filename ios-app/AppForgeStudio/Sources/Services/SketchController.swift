@@ -269,6 +269,49 @@ final class SketchController: ObservableObject {
             : ""
     }
 
+    // MARK: - Región seleccionada (LA mecánica Shapr3D: tap dentro → seleccionar,
+    // drag → extruir). Feedback device 2026-07-13: "no puedo seleccionar las
+    // figuras para extruirlas, el drag no funciona en nada".
+
+    /// Vértices de la región cerrada seleccionada por tap (nil = ninguna).
+    @Published private(set) var selectedRegion: [SIMD2<Float>]? = nil
+
+    /// Distancia al punto editable más cercano (vértices de entidades + cadena).
+    /// Decide la PRIORIDAD del gesto: solo un toque MUY cerca de un punto debe
+    /// ajustar fino; antes el centro del círculo robaba el drag de toda el área
+    /// ("picarlo adentro lo deforma").
+    func nearestEditablePointDistance(to p: SIMD2<Float>) -> Float? {
+        var best = Float.greatestFiniteMagnitude
+        for entity in entities {
+            for pt in entityPoints(for: entity) {
+                best = min(best, simd_distance(pt, p))
+            }
+        }
+        for pt in chain { best = min(best, simd_distance(pt, p)) }
+        return best == .greatestFiniteMagnitude ? nil : best
+    }
+
+    /// Región cerrada (perfil o intersección de segmentos) que contiene el punto.
+    func region(at p: SIMD2<Float>) -> [SIMD2<Float>]? {
+        SketchRegionDetector.detectRegions(in: entities, chain: chain)
+            .first { abs($0.area) > 1e-4 && SketchRegionDetector.polygonContains($0.vertices, p) }?
+            .vertices
+    }
+
+    /// Tap dentro de una región cerrada → la selecciona (sin añadir geometría).
+    @discardableResult
+    func selectRegion(at p: SIMD2<Float>) -> Bool {
+        guard let verts = region(at: p) else {
+            selectedRegion = nil
+            return false
+        }
+        selectedRegion = verts
+        statusMessage = "Región seleccionada — arrastra desde adentro para extruir"
+        return true
+    }
+
+    func deselectRegion() { selectedRegion = nil }
+
     /// Extrae todos los puntos editables de una entidad
     private func entityPoints(for entity: Entity) -> [SIMD2<Float>] {
         switch entity {

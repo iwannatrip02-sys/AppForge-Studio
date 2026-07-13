@@ -101,6 +101,9 @@ struct CADModeView: View {
     @State private var dragFace: (modelIndex: Int, faceIndex: Int, normal: SIMD3<Float>)? = nil
     /// Radio FINAL del fillet variable (0 = uniforme, usa solo el radio inicial).
     @State private var edgeFilletRadiusEnd: Double = 0
+    /// Drag de REGIÓN de sketch activo (extruir por arrastre — LA mecánica).
+    @State private var regionDrag: (verts: [SIMD2<Float>], start: SIMD2<Float>)? = nil
+    @State private var regionDragHeight: Double = 0
     /// Altura de extrusión del perfil de sketch (editable).
     @State private var sketchExtrudeHeight: Double = 1.0
     /// Panel de Elementos visible (anatomía Shapr3D).
@@ -474,11 +477,39 @@ struct CADModeView: View {
                         sketchInputEnabled: isSketchTool,
                         onSketchTap: { p in
                             HapticService.shared.light()
+                            // LA mecánica Shapr3D (device 2026-07-13): tap DENTRO
+                            // de una región cerrada la SELECCIONA — antes seguía
+                            // encadenando geometría encima de la figura.
+                            let dPoint = sketch.nearestEditablePointDistance(to: p)
+                                ?? .greatestFiniteMagnitude
+                            if dPoint > SketchController.snapRadius * 0.8,
+                               sketch.selectRegion(at: p) {
+                                HapticService.shared.medium()
+                                return
+                            }
                             sketch.tap(at: p)
                         },
                         onSketchDragBegan: { p in
-                            // Primero intenta AGARRAR un punto/vértice existente
-                            // para moverlo; si no hay ninguno cerca, es trazo libre.
+                            regionDrag = nil
+                            let dPoint = sketch.nearestEditablePointDistance(to: p)
+                                ?? .greatestFiniteMagnitude
+                            // 1) Punto MUY cerca → ajuste fino (radio estrecho: antes
+                            //    el centro del círculo robaba el drag de toda el área
+                            //    y "picarlo adentro lo deformaba").
+                            if dPoint < SketchController.snapRadius * 0.8,
+                               sketch.beginDrag(near: p) {
+                                HapticService.shared.medium()
+                                return
+                            }
+                            // 2) Dentro de una región cerrada → EXTRUIR POR ARRASTRE
+                            if let verts = sketch.region(at: p) {
+                                regionDrag = (verts: verts, start: p)
+                                regionDragHeight = 0
+                                sketch.selectRegion(at: p)
+                                HapticService.shared.medium()
+                                return
+                            }
+                            // 3) Punto cercano (radio normal) o trazo libre
                             if sketch.beginDrag(near: p) {
                                 HapticService.shared.medium()
                             } else {
@@ -486,6 +517,15 @@ struct CADModeView: View {
                             }
                         },
                         onSketchDragChanged: { p in
+                            if let rd = regionDrag {
+                                // Altura = avance sobre el eje v del plano (arrastrar
+                                // hacia arriba en pantalla = crecer). Preview fantasma.
+                                let h = Double(max(0, p.y - rd.start.y))
+                                regionDragHeight = h
+                                updateRegionGhost(verts: rd.verts, height: Float(h))
+                                sketch.hint(String(format: "Altura %.2f — suelta para crear", h))
+                                return
+                            }
                             if sketch.isDraggingPoint {
                                 sketch.drag(to: p)
                             } else {
@@ -494,6 +534,10 @@ struct CADModeView: View {
                         },
                         onSketchDragEnded: { p in
                             HapticService.shared.light()
+                            if regionDrag != nil {
+                                finishRegionDragExtrude()
+                                return
+                            }
                             if sketch.isDraggingPoint {
                                 sketch.endDrag()
                             } else {
@@ -1022,6 +1066,74 @@ struct CADModeView: View {
             CADOperation(type: .sketchRevolve, description: "Revolución desde boceto",
                          parameters: [:]))
         temperTick += 1
+        canvasVM.objectWillChange.send()
+    }
+
+    // MARK: - Extrusión de región por ARRASTRE (LA mecánica Shapr3D)
+
+    /// Fantasma del prisma mientras arrastras: abanico desde el centroide para la
+    /// tapa (regiones convexas/estrelladas — suficiente para preview; el bake usa
+    /// el B-rep exacto) + paredes. Naranja translúcido como los live previews.
+    private func updateRegionGhost(verts: [SIMD2<Float>], height: Float) {
+        guard verts.count >= 3, height > 0.005 else { return }
+        let o = sketch.plane.origin, u = sketch.plane.u
+        let v = sketch.plane.v, n = sketch.plane.normal
+        func world(_ p: SIMD2<Float>, _ h: Float) -> SIMD3<Float> {
+            o + u * p.x + v * p.y + n * h
+        }
+        let c2 = verts.reduce(SIMD2<Float>(0, 0), +) / Float(verts.count)
+        var vx: [Vertex] = []
+        var ix: [UInt32] = []
+        func add(_ p: SIMD3<Float>, _ normal: SIMD3<Float>) -> UInt32 {
+            vx.append(Vertex(position: p, normal: normal, uv: .zero))
+            return UInt32(vx.count - 1)
+        }
+        // Tapa superior (abanico centroide) + paredes por segmento
+        let topC = add(world(c2, height), n)
+        for i in 0..<verts.count {
+            let a = verts[i], b = verts[(i + 1) % verts.count]
+            let ta = add(world(a, height), n)
+            let tb = add(world(b, height), n)
+            ix.append(contentsOf: [topC, ta, tb])
+            // Pared del segmento a-b
+            let wall = simd_normalize(simd_cross(world(b, 0) - world(a, 0), n))
+            let ba = add(world(a, 0), wall), bb = add(world(b, 0), wall)
+            let wta = add(world(a, height), wall), wtb = add(world(b, height), wall)
+            ix.append(contentsOf: [ba, bb, wta, bb, wtb, wta])
+        }
+        canvasVM.scene.models.removeAll { $0.name == "__regionPreview" }
+        let ghost = Model(name: "__regionPreview")
+        ghost.meshes = [Mesh(vertices: vx, indices: ix)]
+        ghost.color = SIMD4<Float>(1.0, 0.48, 0.27, 0.45)
+        canvasVM.scene.addModel(ghost)
+        canvasVM.objectWillChange.send()
+    }
+
+    /// Suelta el drag de región: crea el sólido B-rep REAL con la altura arrastrada.
+    private func finishRegionDragExtrude() {
+        defer {
+            regionDrag = nil
+            canvasVM.scene.models.removeAll { $0.name == "__regionPreview" }
+            canvasVM.objectWillChange.send()
+        }
+        guard let rd = regionDrag, regionDragHeight > 0.02 else {
+            sketch.hint("Región lista — arrastra desde adentro para extruir")
+            return
+        }
+        guard let model = sketch.extrudeRegion(vertices: rd.verts,
+                                               height: regionDragHeight) else {
+            sketch.hint("No se pudo extruir esta región")
+            return
+        }
+        canvasVM.saveState()
+        canvasVM.scene.addModel(model)
+        canvasVM.scene.cadHistory.pushOperation(
+            CADOperation(type: .sketchExtrude, description: "Extrusión por arrastre",
+                         parameters: ["altura": regionDragHeight]))
+        HapticService.shared.medium()
+        temperTick += 1
+        sketch.deselectRegion()
+        sketch.hint("Sólido creado ✓ — la región sigue ahí para repetir")
         canvasVM.objectWillChange.send()
     }
 
