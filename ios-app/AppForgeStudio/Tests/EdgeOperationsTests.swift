@@ -63,6 +63,42 @@ final class EdgeOperationsTests: XCTestCase {
         XCTAssertGreaterThan(maxX, 1.05, "hacia AFUERA (opción): la pared crece el grosor")
     }
 
+    func testVariableFilletVolumeBetweenUniformBounds() throws {
+        // Oráculo: el fillet variable 0.05→0.3 quita MÁS material que el uniforme
+        // de 0.05 y MENOS que el uniforme de 0.3.
+        let small = try makeBoxModel()
+        XCTAssertTrue(BRepModeling.filletEdges(small, edgeIndices: [0], radius: 0.05))
+        let volSmall = try XCTUnwrap(small.cadShape?.volume)
+
+        let big = try makeBoxModel()
+        XCTAssertTrue(BRepModeling.filletEdges(big, edgeIndices: [0], radius: 0.3))
+        let volBig = try XCTUnwrap(big.cadShape?.volume)
+
+        let variable = try makeBoxModel()
+        XCTAssertTrue(BRepModeling.filletEdgesVariable(variable, edgeIndices: [0],
+                                                       startRadius: 0.05, endRadius: 0.3))
+        let volVar = try XCTUnwrap(variable.cadShape?.volume)
+
+        XCTAssertLessThan(volVar, volSmall, "variable quita más que el uniforme chico")
+        XCTAssertGreaterThan(volVar, volBig, "variable quita menos que el uniforme grande")
+    }
+
+    func testDefeatureRemovesFilletRestoringVolume() throws {
+        let model = try makeBoxModel()
+        let volBox = try XCTUnwrap(model.cadShape?.volume)
+        XCTAssertTrue(BRepModeling.filletEdges(model, edgeIndices: [0], radius: 0.2))
+        XCTAssertLessThan(try XCTUnwrap(model.cadShape?.volume), volBox)
+
+        // La cara del fillet es la única NO plana de la caja fileteada
+        let faces = try XCTUnwrap(model.cadShape?.faces())
+        let filletIdx = try XCTUnwrap(faces.firstIndex { !$0.isPlanar },
+                                      "tras el fillet existe una cara curva")
+        XCTAssertTrue(BRepModeling.removeFaces(model, faceIndices: [filletIdx]))
+        let volRestored = try XCTUnwrap(model.cadShape?.volume)
+        XCTAssertEqual(volRestored, volBox, accuracy: volBox * 0.001,
+                       "defeature elimina el fillet y reconstruye la esquina viva")
+    }
+
     func testVertexDotsMeshIsCachedPerGeometryVersion() throws {
         let model = try makeBoxModel()
         let dots = try XCTUnwrap(model.vertexDotsMesh(), "una caja B-rep muestra sus 8 puntos")

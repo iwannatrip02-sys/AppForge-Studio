@@ -99,6 +99,8 @@ struct CADModeView: View {
     /// Drag de CARA activo (Mover + cara seleccionada): la cara viaja por su
     /// normal — push/pull directo estilo Shapr3D (Incremento 4 v1).
     @State private var dragFace: (modelIndex: Int, faceIndex: Int, normal: SIMD3<Float>)? = nil
+    /// Radio FINAL del fillet variable (0 = uniforme, usa solo el radio inicial).
+    @State private var edgeFilletRadiusEnd: Double = 0
     /// Altura de extrusión del perfil de sketch (editable).
     @State private var sketchExtrudeHeight: Double = 1.0
     /// Panel de Elementos visible (anatomía Shapr3D).
@@ -1042,6 +1044,32 @@ struct CADModeView: View {
         canvasVM.scene.models.removeAll { $0.name.hasPrefix("__measureDot") }
     }
 
+    /// Aplica una operación de caras (defeature, etc.) a TODAS las caras
+    /// seleccionadas, agrupadas por modelo (espejo de applyToSelectedEdges).
+    private func applyToSelectedFaces(_ op: (Model, [Int]) -> Bool) {
+        HapticService.shared.medium()
+        var grouped: [Int: [Int]] = [:]
+        for case .face(let m, let f) in selectionController.items {
+            grouped[m, default: []].append(f)
+        }
+        var anyOK = false
+        for (modelIndex, faces) in grouped {
+            guard modelIndex < canvasVM.scene.models.count else { continue }
+            let model = canvasVM.scene.models[modelIndex]
+            BRepHistory.shared.recordChange(of: model)
+            if op(model, faces) {
+                anyOK = true
+            } else {
+                BRepHistory.shared.discardLast()
+            }
+        }
+        if anyOK {
+            selectionController.deselect()
+            canvasVM.objectWillChange.send()
+            temperTick += 1
+        }
+    }
+
     /// Aplica una operación de aristas (fillet/chamfer) a TODAS las aristas
     /// seleccionadas, agrupadas por modelo — una sola op OCCT por modelo para que
     /// las esquinas compartidas se resuelvan juntas (multi-selección real).
@@ -1152,17 +1180,36 @@ struct CADModeView: View {
                         }
                     }
                     .font(.caption.bold())
+                    // DEFEATURE (ingeniería inversa — Shapr3D no lo tiene): elimina
+                    // las caras seleccionadas (agujero/fillet/bolsillo) y OCCT sana
+                    // el sólido reconectando la topología.
+                    Button("Quitar") {
+                        applyToSelectedFaces { model, faces in
+                            BRepModeling.removeFaces(model, faceIndices: faces)
+                        }
+                    }
+                    .font(.caption.bold())
                 }
                 if case .edge? = selectionController.lastItem {
                     Slider(value: $edgeFilletRadius, in: 0.01...0.5)
                         .frame(width: 110)
                     NumericField(value: $edgeFilletRadius, range: 0.01...0.5)
+                    // Radio FINAL opcional → fillet VARIABLE a lo largo de la arista
+                    // (transición suave inicial→final, nivel Fusion). 0 = uniforme.
+                    Text("→").font(.caption2).foregroundColor(theme.textSecondary)
+                    NumericField(value: $edgeFilletRadiusEnd, range: 0...0.5)
                     // Multi-arista REAL (barrido 2026-07-11: antes solo operaba la
                     // última): ambas acciones toman TODAS las aristas seleccionadas.
                     Button("Redondear") {
+                        let end = edgeFilletRadiusEnd
                         applyToSelectedEdges { model, edges in
-                            BRepModeling.filletEdges(model, edgeIndices: edges,
-                                                     radius: edgeFilletRadius)
+                            if end > 0.009, abs(end - edgeFilletRadius) > 1e-4 {
+                                return BRepModeling.filletEdgesVariable(
+                                    model, edgeIndices: edges,
+                                    startRadius: edgeFilletRadius, endRadius: end)
+                            }
+                            return BRepModeling.filletEdges(model, edgeIndices: edges,
+                                                            radius: edgeFilletRadius)
                         }
                     }
                     .font(.caption.bold())

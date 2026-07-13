@@ -94,6 +94,37 @@ enum BRepModeling {
         }
     }
 
+    /// Fillet VARIABLE: el radio transiciona de `startRadius` a `endRadius` a lo
+    /// largo de cada arista seleccionada (nivel pro — Fusion lo tiene, Shapr3D
+    /// solo en Pro). API verificada @v1.8.8: `filleted(edges:startRadius:endRadius:)`.
+    @discardableResult
+    static func filletEdgesVariable(_ model: Model, edgeIndices: [Int],
+                                    startRadius: Double, endRadius: Double) -> Bool {
+        applyFeature(to: model) { shape in
+            let all = shape.edges()
+            guard !edgeIndices.isEmpty,
+                  edgeIndices.allSatisfy({ $0 >= 0 && $0 < all.count }) else { return nil }
+            return shape.filleted(edges: edgeIndices.map { all[$0] },
+                                  startRadius: startRadius, endRadius: endRadius)
+        }
+    }
+
+    /// DEFEATURE: elimina caras (agujeros, fillets, bolsillos) y OCCT sana el
+    /// sólido reconectando la topología (BOPAlgo_RemoveFeatures) — herramienta
+    /// de ingeniería inversa que Shapr3D NO tiene. API verificada @v1.8.8:
+    /// `subShape(type:.face,index:)` + `removeFeatures(faces:[Shape])`.
+    @discardableResult
+    static func removeFaces(_ model: Model, faceIndices: [Int]) -> Bool {
+        applyFeature(to: model) { shape in
+            let count = shape.faces().count
+            guard !faceIndices.isEmpty,
+                  faceIndices.allSatisfy({ $0 >= 0 && $0 < count }) else { return nil }
+            let faceShapes = faceIndices.compactMap { shape.subShape(type: .face, index: $0) }
+            guard faceShapes.count == faceIndices.count else { return nil }
+            return shape.removeFeatures(faces: faceShapes)
+        }
+    }
+
     /// Chaflán de aristas seleccionadas (corte plano, distancia uniforme).
     /// Reemplaza el placebo de índices de malla hardcodeados (barrido 2026-07-11).
     /// API verificada @v1.8.8: `chamferedWithFullHistory(distance:, edges: [Int])`.
