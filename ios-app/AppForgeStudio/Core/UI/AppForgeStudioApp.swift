@@ -6,19 +6,48 @@ import Satin
 struct AppForgeStudioApp: App {
     @StateObject private var appState = AppState()
     @State private var showOnboarding = !UserDefaults.standard.bool(forKey: "onboardingComplete")
+    /// Inicio (galería de proyectos) — la puerta de entrada tras el onboarding.
+    @State private var showHome = true
+    @Environment(\.scenePhase) private var scenePhase
+
     var body: some SwiftUI.Scene {
         WindowGroup {
-            if showOnboarding {
-                OnboardingFlow(showOnboarding: $showOnboarding)
+            Group {
+                if showOnboarding {
+                    OnboardingFlow(showOnboarding: $showOnboarding)
+                        .environmentObject(appState.themeManager)
+                        .tint(AppTheme.accentColor)
+                } else if showHome {
+                    HomeView { url in
+                        if let url { appState.openProject(at: url) } else { appState.newProject() }
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                            showHome = false
+                        }
+                    }
                     .environmentObject(appState.themeManager)
+                    .preferredColorScheme(.dark)
                     .tint(AppTheme.accentColor)
-            } else {
-                WorkspaceView(appState: appState)
+                } else {
+                    WorkspaceView(appState: appState, onHome: {
+                        // Volver al Inicio GUARDA el documento (no hay "perder trabajo")
+                        appState.saveCurrentProject()
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                            showHome = true
+                        }
+                    })
                     .environmentObject(appState.themeManager)
                     .preferredColorScheme(.dark)
                     // Tint global: TODOS los controles del sistema (sliders, toggles,
                     // borderedProminent) hablan brasa, no el azul de iOS.
                     .tint(AppTheme.accentColor)
+                }
+            }
+            .onChange(of: scenePhase) { phase in
+                // App al fondo con documento abierto → guardar (nivel Shapr3D:
+                // jamás se pierde trabajo, sin diálogos).
+                if phase == .background, !showHome, !showOnboarding {
+                    appState.saveCurrentProject()
+                }
             }
         }
     }
@@ -72,6 +101,8 @@ struct OnboardingFlow: View {
 
 struct WorkspaceView: View {
     @ObservedObject var appState: AppState
+    /// Volver al Inicio (galería). nil = sin botón (compatibilidad).
+    var onHome: (() -> Void)? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -84,7 +115,7 @@ struct WorkspaceView: View {
                         .padding(.trailing, AppTheme.space2)
                         .opacity(0.85)
                 }
-            BottomModeBar(appState: appState)
+            BottomModeBar(appState: appState, onHome: onHome)
         }
         .background(AppTheme.bgCanvas)
         .onChange(of: appState.selectedMode) { newMode in
@@ -163,6 +194,7 @@ struct ViewCubeControl: View {
 
 struct BottomModeBar: View {
     @ObservedObject var appState: AppState
+    var onHome: (() -> Void)? = nil
 
     let modes: [(AppState.AppMode, String, String)] = [
         (.cad, "cube.transparent", "CAD"),
@@ -175,6 +207,20 @@ struct BottomModeBar: View {
 
     var body: some View {
         HStack(spacing: 0) {
+            // Inicio: guarda el documento y vuelve a la galería de proyectos
+            if let onHome {
+                Button(action: { HapticService.shared.light(); onHome() }) {
+                    VStack(spacing: 2) {
+                        Image(systemName: "square.grid.2x2").font(.system(size: 17))
+                        Text(appState.currentProjectName)
+                            .font(.system(size: 8))
+                            .lineLimit(1)
+                    }
+                    .foregroundColor(AppTheme.textTertiary)
+                    .frame(width: 72, height: 44)
+                }
+                .accessibilityLabel("Volver a proyectos (guarda)")
+            }
             Spacer()
             ForEach(modes, id: \.0) { mode, icon, label in
                 Button(action: {

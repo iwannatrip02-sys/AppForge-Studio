@@ -92,4 +92,48 @@ class AppState: ObservableObject {
 
     var scene: Scene3D { canvasVM.scene }
     var strokes: [BrushStroke] { canvasVM.scene.strokes }
+
+    // MARK: - Proyecto actual (Inicio/galería — catálogo §5)
+
+    @Published var currentProjectURL: URL?
+    @Published var currentProjectName: String = "Proyecto"
+
+    /// Documento nuevo: escena limpia con nombre libre ("Proyecto", "Proyecto 2"…).
+    func newProject() {
+        var scene = canvasVM.scene
+        scene.models.removeAll()
+        canvasVM.scene = scene
+        currentProjectName = ProjectPersistenceService.shared.availableProjectName()
+        currentProjectURL = nil
+        canvasVM.objectWillChange.send()
+    }
+
+    /// Abre un .appforge de la galería: modelos B-rep + cámara + nombre.
+    func openProject(at url: URL) {
+        guard let loaded = try? ProjectPersistenceService.shared.loadProject(from: url) else {
+            logger.error("No se pudo abrir el proyecto en \(url.path)")
+            return
+        }
+        var scene = canvasVM.scene
+        scene.models = loaded.models
+        scene.camera = loaded.camera
+        canvasVM.scene = scene
+        currentProjectName = loaded.metadata.name
+        currentProjectURL = url
+        ProjectPersistenceService.shared.markProjectOpened(url)
+        canvasVM.objectWillChange.send()
+    }
+
+    /// Guarda el documento actual en la carpeta canónica de proyectos.
+    func saveCurrentProject() {
+        let dir = ProjectPersistenceService.shared.projectsDirectory
+        do {
+            let url = try ProjectPersistenceService.shared.saveProject(
+                name: currentProjectName, scene: canvasVM.scene, to: dir)
+            currentProjectURL = url
+            ProjectPersistenceService.shared.markProjectOpened(url)
+        } catch {
+            logger.error("Guardado falló: \(error.localizedDescription)")
+        }
+    }
 }

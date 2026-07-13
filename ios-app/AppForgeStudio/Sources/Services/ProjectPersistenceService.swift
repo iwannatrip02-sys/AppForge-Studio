@@ -21,6 +21,10 @@ struct ProjectMetadata: Codable {
     var operationCount: Int
     var appVersion: String
     var buildNumber: String
+    /// Nombres y colores RGBA por modelo (v2.1) — opcionales para poder abrir
+    /// proyectos guardados antes de este campo.
+    var modelNames: [String]? = nil
+    var modelColors: [[Double]]? = nil
 
     init(name: String,
          config: ProjectConfig,
@@ -48,6 +52,7 @@ struct LoadedProject {
     let models: [Model]
     let config: ProjectConfig
     let camera: Scene3D.Camera
+    var sourceURL: URL? = nil
 }
 
 // MARK: - Servicio de persistencia
@@ -92,28 +97,38 @@ final class ProjectPersistenceService {
         try fileManager.createDirectory(at: projectURL,
                                         withIntermediateDirectories: true)
 
-        // Guardar cada modelo como .brep
+        // Guardar cada modelo como .brep. El nombre de archivo usa un contador
+        // PROPIO (no el índice de escena): con overlays "__" en medio, el índice
+        // de escena dejaba huecos (model_0, model_3, ...) y la carga secuencial
+        // devolvía proyectos VACÍOS.
         var modelCount = 0
-        for (i, model) in scene.models.enumerated() {
+        var names: [String] = []
+        var colors: [[Double]] = []
+        for model in scene.models {
             guard !model.name.hasPrefix("__") else { continue }  // skip overlays
             guard let shape = model.cadShape else { continue }
 
-            let brepURL = projectURL.appendingPathComponent("model_\(i).brep")
+            let brepURL = projectURL.appendingPathComponent("model_\(modelCount).brep")
             let brepData = try shape.brepData()
             try brepData.write(to: brepURL)
+            names.append(model.name)
+            colors.append([Double(model.color.x), Double(model.color.y),
+                           Double(model.color.z), Double(model.color.w)])
             modelCount += 1
 
-            logger.debug("Saved model \(i) (\(model.name)): \(brepData.count) bytes BREP")
+            logger.debug("Saved model \(modelCount - 1) (\(model.name)): \(brepData.count) bytes BREP")
         }
 
         // Guardar metadatos
-        let meta = ProjectMetadata(
+        var meta = ProjectMetadata(
             name: name,
             config: config,
             camera: scene.camera,
             modelCount: modelCount,
             operationCount: scene.cadHistory.operationCount
         )
+        meta.modelNames = names
+        meta.modelColors = colors
         let metaURL = projectURL.appendingPathComponent("project.json")
         let metaData = try JSONEncoder.pretty.encode(meta)
         try metaData.write(to: metaURL)
@@ -157,17 +172,21 @@ final class ProjectPersistenceService {
                 logger.warning("model_\(i).brep not found, skipping")
                 continue
             }
-            let brepData = try Data(contentsOf: brepURL)
             guard let shape = try? CADShape.loadBREP(from: brepURL),
-                  var mesh = OCCTBridge.toMesh(shape, quality: .medium) else {
+                  let mesh = OCCTBridge.toMesh(shape, quality: .medium) else {
                 logger.warning("Failed to load BREP for model \(i)")
                 continue
             }
 
-            let model = Model(name: "Model_\(i)")
+            // Nombre y color originales (v2.1); fallback para proyectos viejos.
+            let name = metadata.modelNames?[safe: i] ?? "Model_\(i)"
+            let model = Model(name: name)
             model.cadShape = shape
             model.meshes = [mesh]
             model.edgesMesh = OCCTBridge.edgesMesh(shape)
+            if let c = metadata.modelColors?[safe: i], c.count == 4 {
+                model.color = SIMD4<Float>(Float(c[0]), Float(c[1]), Float(c[2]), Float(c[3]))
+            }
             models.append(model)
         }
 
@@ -187,8 +206,72 @@ final class ProjectPersistenceService {
             metadata: metadata,
             models: models,
             config: config,
-            camera: camera
+            camera: camera,
+            sourceURL: projectURL
         )
+    }
+
+    // MARK: - Gestión de proyectos (galería de Inicio)
+
+    /// Carpeta canónica de proyectos del usuario: Documents/Projects
+    /// (visible en la app Archivos vía UIFileSharingEnabled si se habilita).
+    var projectsDirectory: URL {
+        let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let dir = docs.appendingPathComponent("Projects", isDirectory: true)
+        try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// Todos los paquetes .appforge de la carpeta de proyectos, con sus
+    /// metadatos, ordenados por fecha de modificación (recientes primero).
+    func listProjects() -> [(url: URL, metadata: ProjectMetadata)] {
+        guard let items = try? fileManager.contentsOfDirectory(
+            at: projectsDirectory, includingPropertiesForKeys: nil) else { return [] }
+        var result: [(URL, ProjectMetadata)] = []
+        for url in items where url.pathExtension == Self.packageExtension {
+            let metaURL = url.appendingPathComponent("project.json")
+            guard let data = try? Data(contentsOf: metaURL),
+                  let meta = try? JSONDecoder().decode(ProjectMetadata.self, from: data) else { continue }
+            result.append((url, meta))
+        }
+        return result.sorted { $0.1.modifiedAt > $1.1.modifiedAt }
+    }
+
+    /// Nombre libre para "Proyecto", "Proyecto 2", ... sin pisar existentes.
+    func availableProjectName(base: String = "Proyecto") -> String {
+        let existing = Set(listProjects().map { $0.metadata.name })
+        if !existing.contains(base) { return base }
+        var n = 2
+        while existing.contains("\(base) \(n)") { n += 1 }
+        return "\(base) \(n)"
+    }
+
+    func deleteProject(at url: URL) throws {
+        try fileManager.removeItem(at: url)
+        var urls = recentProjects()
+        urls.removeAll { $0 == url }
+        if let data = try? JSONEncoder().encode(urls.map { $0.absoluteString }) {
+            try? data.write(to: recentProjectsURL)
+        }
+    }
+
+    /// Duplica el paquete con nombre "<nombre> copia" (metadata renombrada).
+    @discardableResult
+    func duplicateProject(at url: URL) throws -> URL {
+        let newName = availableProjectName(base: url.deletingPathExtension().lastPathComponent + " copia")
+        let newURL = projectsDirectory
+            .appendingPathComponent(newName)
+            .appendingPathExtension(Self.packageExtension)
+        try fileManager.copyItem(at: url, to: newURL)
+        // Renombrar dentro de los metadatos para que la galería muestre el nuevo nombre
+        let metaURL = newURL.appendingPathComponent("project.json")
+        if let data = try? Data(contentsOf: metaURL),
+           var meta = try? JSONDecoder().decode(ProjectMetadata.self, from: data) {
+            meta.name = newName
+            meta.modifiedAt = Date()
+            if let out = try? JSONEncoder.pretty.encode(meta) { try? out.write(to: metaURL) }
+        }
+        return newURL
     }
 
     // MARK: - Auto-save
@@ -200,12 +283,15 @@ final class ProjectPersistenceService {
             .appendingPathExtension(Self.packageExtension)
     }
 
-    /// Guarda auto-save (sin bloquear UI)
+    /// Guarda auto-save. El servicio es @MainActor (la escena vive en main):
+    /// se agenda como Task de prioridad utility en el MISMO actor — antes se
+    /// despachaba a un hilo global, saltándose el aislamiento de actor.
     func autoSave(name: String, scene: Scene3D, config: ProjectConfig = .default) {
         let url = autoSaveURL()
-        DispatchQueue.global(qos: .utility).async {
+        Task(priority: .utility) { @MainActor in
             do {
-                _ = try self.saveProject(name: name, scene: scene, config: config, to: url.deletingLastPathComponent())
+                _ = try self.saveProject(name: name, scene: scene, config: config,
+                                         to: url.deletingLastPathComponent())
                 logger.info("Auto-save completed")
             } catch {
                 logger.error("Auto-save failed: \(error.localizedDescription)")
@@ -269,6 +355,15 @@ enum ProjectError: LocalizedError {
         case .missingBrepData(let index):
             return "Falta geometría del modelo \(index)"
         }
+    }
+}
+
+// MARK: - Helpers
+
+extension Array {
+    /// Acceso sin crash para metadatos opcionales de proyectos viejos.
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }
 
