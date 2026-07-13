@@ -503,11 +503,19 @@ struct ExportView: View {
 
     private var arButtonSection: some View {
         Button(action: {
-            if let model = exportVM.selectedModel {
-                if let url = exportVM.prepareUSDZForAR(model: model, exportService: exportVM.exportService) {
-                    arUSDZURL = url
-                    showARPreview = true
-                }
+            // AR de ESCENA COMPLETA cuando hay canvas (todos los cuerpos visibles
+            // con su material real); si no, el modelo seleccionado.
+            let sceneModels = canvasVM?.scene.models.filter {
+                !$0.name.hasPrefix("__") && !$0.meshes.isEmpty && $0.isVisible
+            } ?? []
+            let candidates = sceneModels.isEmpty
+                ? [exportVM.selectedModel].compactMap { $0 }
+                : sceneModels
+            guard !candidates.isEmpty else { return }
+            if let url = exportVM.prepareUSDZForAR(models: candidates,
+                                                   exportService: exportVM.exportService) {
+                arUSDZURL = url
+                showARPreview = true
             }
         }) {
             Label("Ver en AR", systemImage: "arkit")

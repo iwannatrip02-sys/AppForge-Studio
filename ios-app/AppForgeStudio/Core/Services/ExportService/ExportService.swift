@@ -4,6 +4,7 @@ import ModelIO
 import MetalKit
 import SceneKit
 import SceneKit.ModelIO
+import UIKit
 import OSLog
 
 enum ExportFormat: String, CaseIterable {
@@ -289,15 +290,64 @@ class ExportService {
     }
 
     func exportToUSDZ(model: Model, url: URL) throws {
-        guard let asset = buildMDLAsset(from: model) else {
+        try exportUSDZScene(models: [model], to: url)
+    }
+
+    /// USDZ de VARIOS cuerpos con su material PBR real (AR de escena completa).
+    /// Antes: material nil → AR Quick Look mostraba plástico gris; el color y
+    /// el PBR del modelo se perdían (catálogo §5: "AR realista" pendiente).
+    func exportUSDZScene(models: [Model], to url: URL) throws {
+        let exportables = models.filter { !$0.name.hasPrefix("__") && !$0.meshes.isEmpty }
+        guard !exportables.isEmpty else {
+            throw ExportError.invalidModel("No hay cuerpos exportables para AR")
+        }
+        let master = SCNScene()
+        for model in exportables {
+            guard let asset = buildMDLAsset(from: model) else { continue }
+            // ModelIO no escribe .usdz en iOS ("Unknown extension") — SceneKit sí.
+            let scene = SCNScene(mdlAsset: asset)
+            let material = scnMaterial(for: model)
+            for child in scene.rootNode.childNodes {
+                child.enumerateHierarchy { node, _ in
+                    node.geometry?.materials = [material]
+                }
+                master.rootNode.addChildNode(child)
+            }
+        }
+        guard !master.rootNode.childNodes.isEmpty else {
             throw ExportError.invalidModel("No se pudo construir el asset USDZ")
         }
-        // ModelIO no escribe .usdz en iOS ("Unknown extension") — SceneKit sí.
-        let scene = SCNScene(mdlAsset: asset)
-        let success = scene.write(to: url, options: nil, delegate: nil, progressHandler: nil)
+        let success = master.write(to: url, options: nil, delegate: nil, progressHandler: nil)
         guard success, FileManager.default.fileExists(atPath: url.path) else {
             throw ExportError.writeFailed("USDZ export failed - file was not written to disk")
         }
+    }
+
+    /// Material SceneKit PBR desde el estado real del modelo: albedo/metalness/
+    /// roughness del editor PBR si está activo, si no el color base del cuerpo.
+    private func scnMaterial(for model: Model) -> SCNMaterial {
+        let material = SCNMaterial()
+        material.lightingModel = .physicallyBased
+        if model.usesPBR {
+            let a = model.pbrMaterial.albedo
+            material.diffuse.contents = UIColor(red: CGFloat(a.x), green: CGFloat(a.y),
+                                                blue: CGFloat(a.z), alpha: 1)
+            material.metalness.contents = NSNumber(value: model.pbrMaterial.metalness)
+            material.roughness.contents = NSNumber(value: model.pbrMaterial.roughness)
+            let e = model.pbrMaterial.emission
+            if model.pbrMaterial.emissionIntensity > 0.01 {
+                material.emission.contents = UIColor(red: CGFloat(e.x), green: CGFloat(e.y),
+                                                     blue: CGFloat(e.z), alpha: 1)
+            }
+        } else {
+            let c = model.color
+            material.diffuse.contents = UIColor(red: CGFloat(c.x), green: CGFloat(c.y),
+                                                blue: CGFloat(c.z), alpha: CGFloat(c.w))
+            // Look de sólido CAD: apenas metálico, semi-mate (coincide con el visor)
+            material.metalness.contents = NSNumber(value: 0.1)
+            material.roughness.contents = NSNumber(value: 0.55)
+        }
+        return material
     }
 
     func exportToSTEP(model: Model, url: URL) throws {
