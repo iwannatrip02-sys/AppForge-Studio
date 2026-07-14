@@ -30,6 +30,18 @@ enum TransformTarget: Equatable {
         return true
     }
 
+    /// ¿El objetivo es una ARISTA?
+    var isEdge: Bool {
+        if case .edge = self { return true }
+        return false
+    }
+
+    /// ¿El objetivo es un VÉRTICE?
+    var isVertex: Bool {
+        if case .vertex = self { return true }
+        return false
+    }
+
     /// ¿Hay hoy una op de kernel OCCT verificada que deforme ESTE objetivo?
     /// - cuerpo: sí (translate/rotate/scaleUniform verificados).
     /// - cara: sí (push/pull vía `BRepModeling.pushPullFace`).

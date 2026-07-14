@@ -2301,7 +2301,9 @@ struct CADModeView: View {
         let isFaceScale = (selectedTool == .scale && { if case .face = target { return true }; return false }())
         let isEdgeVertexMove = (selectedTool == .move && (target.isEdge || target.isVertex))
         if isFaceScale || isEdgeVertexMove {
-            subObjectDrag = true
+            // Sub-objeto: NO se arma dragFace/dragModelIndex (no se toca el cuerpo);
+            // la edición local (scaleFaceWire/moveEdge/moveVertex) se hornea al soltar
+            // en bakeTransform → bakeSubObjectEdit, que ramifica por `target.isSubObject`.
             return
         }
 
