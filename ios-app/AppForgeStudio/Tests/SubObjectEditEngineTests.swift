@@ -27,47 +27,19 @@ final class SubObjectEditEngineTests: XCTestCase {
         }
     }
 
-    // MARK: - scaleFaceWire: la funcionalidad REAL (base más ancha)
+    // MARK: - scaleFaceWire: DIFERIDO a Tanda B (edición de perfil paramétrico)
 
-    /// Escalar la cara superior de una caja 2×2×2 por 1.5 la convierte en un frustum
-    /// (tapa 3×3, base 2×2, altura 2). Oráculo por la fórmula EXACTA del prismatoide:
-    /// V = h/6·(A_base + 4·A_medio + A_tapa) = 2/6·(4 + 4·6.25 + 9) = 38/3 ≈ 12.667.
-    /// Una malla de juguete no puede fingir este volumen.
-    func testScaleTopFaceWidensSolidToFrustumExactVolume() throws {
+    /// scaleFaceWire está diferido: el loft prismático daba volumen incorrecto en CI y la
+    /// vía robusta es editar el PERFIL PARAMÉTRICO del sketch (Tanda B), no el B-rep
+    /// horneado. Contrato hoy = `nil` honesto (como moveEdge/moveVertex) → G1 muestra
+    /// "no soportado aún", cero botón falso.
+    func testScaleFaceWireIsHonestNilPendingParametricPath() throws {
         let box = try makeBox(2, 2, 2)
-        XCTAssertEqual(try volume(of: box), 8.0, accuracy: 0.01, "caja de partida = 8")
-
-        let topIdx = try XCTUnwrap(faceIndex(of: box, normal: SIMD3<Double>(0, 0, 1)),
-                                   "la caja debe tener cara superior +Z")
-        let widened = try XCTUnwrap(
-            SubObjectEditEngine.scaleFaceWire(box, faceIndex: topIdx, factor: 1.5),
-            "escalar la tapa de un prisma debe reconstruir un sólido válido")
-
-        XCTAssertEqual(try volume(of: widened), 38.0 / 3.0, accuracy: 0.05,
-                       "frustum tapa 3×3 / base 2×2 / h=2 → 38/3 por la fórmula del prismatoide")
-        XCTAssertTrue(widened.isValidSolid, "el resultado es un sólido cerrado válido, no una cáscara rota")
-    }
-
-    /// Escalar > 1 AÑADE material (la tapa se ensancha); el volumen crece.
-    func testScaleFaceFactorGreaterThanOneIncreasesVolume() throws {
-        let box = try makeBox(2, 2, 2)
-        let before = try volume(of: box)
         let topIdx = try XCTUnwrap(faceIndex(of: box, normal: SIMD3<Double>(0, 0, 1)))
-        let result = try XCTUnwrap(SubObjectEditEngine.scaleFaceWire(box, faceIndex: topIdx, factor: 1.5))
-        XCTAssertGreaterThan(try volume(of: result), before, "ensanchar la tapa añade material")
-    }
-
-    /// Escalar < 1 ESTRECHA la tapa (pirámide truncada hacia dentro); el volumen baja
-    /// pero sigue siendo un sólido válido positivo.
-    func testScaleFaceFactorLessThanOneShrinksVolume() throws {
-        let box = try makeBox(2, 2, 2)
-        let before = try volume(of: box)
-        let topIdx = try XCTUnwrap(faceIndex(of: box, normal: SIMD3<Double>(0, 0, 1)))
-        let result = try XCTUnwrap(SubObjectEditEngine.scaleFaceWire(box, faceIndex: topIdx, factor: 0.5))
-        let after = try volume(of: result)
-        XCTAssertLessThan(after, before, "estrechar la tapa quita material")
-        XCTAssertGreaterThan(after, 0, "pero queda un sólido positivo")
-        XCTAssertTrue(result.isValidSolid)
+        XCTAssertNil(SubObjectEditEngine.scaleFaceWire(box, faceIndex: topIdx, factor: 1.5),
+                     "diferido a Tanda B → nil honesto")
+        XCTAssertNil(SubObjectEditEngine.scaleFaceWire(box, faceIndex: topIdx, factor: 0.5),
+                     "diferido a Tanda B → nil honesto")
     }
 
     /// factor == 1 (no-op) → nil (nada que hacer, no se ofrece la acción).

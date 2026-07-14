@@ -41,8 +41,8 @@ final class GizmoAndMetricsTests: XCTestCase {
         let shape = try XCTUnwrap(OCCTSwift.Shape.box(width: 2, height: 2, depth: 2))
         let edges = try XCTUnwrap(OCCTBridge.edgesMesh(shape),
                                   "una caja tiene 12 aristas → malla de aristas")
-        // 12 aristas × 1 segmento × 8 vértices = 96 mínimo
-        XCTAssertGreaterThanOrEqual(edges.vertices.count, 96)
+        // 12 aristas × 1 segmento × 4 vértices (ribbon de línea nítida) = 48
+        XCTAssertGreaterThanOrEqual(edges.vertices.count, 48)
         XCTAssertEqual(edges.indices.count % 3, 0)
         // Las aristas viven en el contorno: toda posición tiene al menos 2
         // coordenadas en ±1 (los bordes del cubo), con holgura del radio del tubo

@@ -41,8 +41,8 @@ final class BRepVertexPickerTests: XCTestCase {
 
     func testHighlightDotIsRenderableTriangleMesh() {
         let dot = BRepVertexPicker.highlightDot(at: SIMD3<Float>(1, 1, 1))
-        XCTAssertEqual(dot.vertices.count, 6, "octaedro = 6 vértices")
-        XCTAssertEqual(dot.indices.count, 24, "octaedro = 8 triángulos")
+        XCTAssertEqual(dot.vertices.count, 4, "disco billboard del punto = 4 vértices (quad)")
+        XCTAssertEqual(dot.indices.count, 6, "2 triángulos = 6 índices")
         XCTAssertEqual(dot.indices.count % 3, 0, "triángulos completos")
         // Centrado en el vértice: el promedio de posiciones ≈ (1,1,1).
         let sum = dot.vertices.reduce(SIMD3<Float>(0, 0, 0)) { $0 + $1.position }

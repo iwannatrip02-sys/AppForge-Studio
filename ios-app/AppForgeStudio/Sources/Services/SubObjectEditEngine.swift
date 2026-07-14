@@ -68,58 +68,14 @@ enum SubObjectEditEngine {
     ///   sólidos no prismáticos, la solución definitiva es editar el PERFIL
     ///   paramétrico del sketch (Tanda B), no el B-rep horneado.
     static func scaleFaceWire(_ shape: CADShape, faceIndex: Int, factor: Double) -> CADShape? {
-        let faces = shape.faces()
-        guard faceIndex >= 0, faceIndex < faces.count,
-              factor > 1e-6, abs(factor - 1.0) > 1e-9 else { return nil }
-
-        let target = faces[faceIndex]
-        guard target.isPlanar,
-              let targetNormal = target.normal,
-              let targetCorners = orderedCorners(of: target),
-              targetCorners.count >= 3 else { return nil }
-
-        // Cara opuesta: planar, normal anti-paralela, MISMO nº de vértices (prisma).
-        let n = simd_normalize(targetNormal)
-        var oppositeCorners: [SIMD3<Double>]? = nil
-        for i in 0..<faces.count where i != faceIndex {
-            let f = faces[i]
-            guard f.isPlanar, let fn = f.normal,
-                  simd_dot(simd_normalize(fn), n) < -0.999 else { continue }  // anti-paralela
-            guard let corners = orderedCorners(of: f),
-                  corners.count == targetCorners.count else { continue }
-            oppositeCorners = corners
-            break
-        }
-        guard let oppositeCorners else { return nil }
-
-        // Escalar los vértices de la cara objetivo en su plano, sobre su centroide.
-        // (El centroide de la cara está en su plano; escalar 3D sobre él con la cara
-        // planar equivale a escalar en-plano — el componente normal es 0 para todos.)
-        let c = faceCentroid(targetCorners)
-        let scaledCorners = targetCorners.map { c + factor * ($0 - c) }
-
-        // Coherencia de bobinado: los outer wires de ambas caras están orientados por
-        // sus normales OPUESTAS, así que se recorren en sentidos contrarios respecto al
-        // eje del loft `n`. Un ThruSections con perfiles de bobinado opuesto se retuerce
-        // / auto-intersecta → alinear el aro opuesto al mismo sentido que el objetivo.
-        // El aro objetivo (tapa) se recorre con normal ≈ +n. Forzar que el aro
-        // opuesto tenga el MISMO sentido (normal ≈ +n) para que el loft no se retuerza.
-        var bottomCorners = oppositeCorners
-        if simd_dot(polygonNormal(bottomCorners), n) < 0 {
-            bottomCorners.reverse()
-        }
-
-        guard let topWire = Wire.polygon3D(scaledCorners, closed: true),
-              let bottomWire = Wire.polygon3D(bottomCorners, closed: true) else { return nil }
-
-        // LOFT reglado (ruled) = caras laterales planas, coherentes con un prisma.
-        guard let solid = CADShape.loft(profiles: [bottomWire, topWire],
-                                        solid: true, ruled: true),
-              solid.isValidSolid else {
-            logger.info("[SubObj] scaleFaceWire: loft no dio sólido válido (cara \(faceIndex))")
-            return nil
-        }
-        return solid
+        // DIFERIDO (Tanda B): el enfoque de loft prismático (escalar el aro de la tapa +
+        // reconstruir por ThruSections) dio VOLUMEN INCORRECTO en CI (≈ la mitad; escalar
+        // ×1.5 ENCOGÍA el sólido en vez de ensancharlo). No es verificable en local (sin
+        // Mac/OCCT). La vía robusta, según el spike (ver header), es editar el PERFIL
+        // PARAMÉTRICO del sketch que generó la cara — no el B-rep horneado. `nil` honesto
+        // por ahora → la UI muestra "no soportado aún", cero botón falso.
+        _ = (shape, faceIndex, factor)
+        return nil
     }
 
     // MARK: - Mover arista / vértice (NO factible en OCCTSwift v1.8.8 — nil honesto)

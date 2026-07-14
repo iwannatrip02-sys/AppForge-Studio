@@ -102,7 +102,7 @@ final class EdgeOperationsTests: XCTestCase {
     func testVertexDotsMeshIsCachedPerGeometryVersion() throws {
         let model = try makeBoxModel()
         let dots = try XCTUnwrap(model.vertexDotsMesh(), "una caja B-rep muestra sus 8 puntos")
-        XCTAssertEqual(dots.vertices.count, 8 * 6, "8 esquinas × octaedro de 6 vértices")
+        XCTAssertEqual(dots.vertices.count, 8 * 4, "8 esquinas × disco billboard de 4 vértices")
         // Misma versión → mismo objeto cacheado (sin recomputar por frame)
         let again = try XCTUnwrap(model.vertexDotsMesh())
         XCTAssertEqual(again.vertices.count, dots.vertices.count)
