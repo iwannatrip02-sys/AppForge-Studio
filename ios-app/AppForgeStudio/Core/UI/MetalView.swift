@@ -345,10 +345,12 @@ struct MetalView: UIViewRepresentable {
                 // Router del contrato de gestos: 1 dedo sobre geometría = herramienta
                 // (sculpt), sobre vacío = orbitar. El hitTest usa ScenePicker (único
                 // camino de picking; ignora overlays "__" como el highlight de cara).
-                if singleFinger && sketchInputEnabled && lastTouchWasPencil,
+                if singleFinger && sketchInputEnabled,
                    let view = gesture.view, let p = planePoint(at: location, in: view) {
-                    // Pencil = instrumento: dibuja EN VIVO sobre el plano.
-                    // (El dedo arrastrado sigue orbitando — contrato intacto.)
+                    // Con una herramienta de sketch ACTIVA, el dedo dibuja en vivo
+                    // sobre el plano igual que el Pencil (feedback device: el dedo
+                    // no debe quedar bloqueado). Sin herramienta de sketch, este
+                    // rama no aplica y el dedo en vacío sigue orbitando (abajo).
                     isSketchDragging = true
                     onSketchDragBegan?(p)
                 } else if singleFinger && transformEnabled, let view = gesture.view {

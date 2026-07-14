@@ -3,6 +3,68 @@ import CoreGraphics
 import simd
 import OCCTSwift
 
+// MARK: - Constructor de CINTAS de línea (líneas nítidas AA, look Shapr3D)
+
+/// Genera geometría de LÍNEA plana (no tubos 3D). Cada segmento es una cinta de 2
+/// triángulos; el shader `edge_line_vertex` la expande en espacio de pantalla a un
+/// grosor CONSTANTE en píxeles y `edge_line_fragment` la dibuja con núcleo oscuro +
+/// halo claro anti-aliased. Sustituye a `appendTube`/octaedro (los "tubos 3D" feos).
+///
+/// Encoding en el `Vertex` estándar (sin tocar el vertex descriptor del pipeline):
+///   position = P (punto de la espina) · normal = Q (otro punto del segmento) ·
+///   uv.x = lado con signo [-1,+1] · uv.y = 0 línea / 1 punto.
+enum LineRibbonBuilder {
+
+    /// Añade una polilínea como cintas de línea. `closed` cierra el lazo P_last→P_0.
+    static func appendPolyline(_ pts: [SIMD3<Float>], closed: Bool = false,
+                               to vertices: inout [Vertex], indices: inout [UInt32]) {
+        guard pts.count >= 2 else { return }
+        let count = closed ? pts.count : pts.count - 1
+        for i in 0..<count {
+            let p = pts[i]
+            let q = pts[(i + 1) % pts.count]
+            if simd_distance(p, q) < 1e-7 { continue }
+            appendSegment(p, q, to: &vertices, indices: &indices)
+        }
+    }
+
+    /// Un solo segmento P→Q como cinta (P y Q se guardan mutuamente en normal).
+    static func appendSegment(_ p: SIMD3<Float>, _ q: SIMD3<Float>,
+                              to vertices: inout [Vertex], indices: inout [UInt32]) {
+        let base = UInt32(vertices.count)
+        // 4 vértices: (P,-1) (P,+1) (Q,-1) (Q,+1). normal = el OTRO extremo.
+        vertices.append(Vertex(position: p, normal: q, uv: SIMD2(-1, 0)))
+        vertices.append(Vertex(position: p, normal: q, uv: SIMD2( 1, 0)))
+        vertices.append(Vertex(position: q, normal: p, uv: SIMD2(-1, 0)))
+        vertices.append(Vertex(position: q, normal: p, uv: SIMD2( 1, 0)))
+        indices.append(contentsOf: [
+            base, base + 1, base + 2,
+            base + 1, base + 3, base + 2
+        ])
+    }
+
+    /// Punto/vértice como pequeño DISCO encarado a cámara (2 triángulos). El shader
+    /// lo recorta a círculo AA de tamaño constante en píxeles. Codificación para
+    /// puntos (independiente de la cámara, siempre un cuadrado sólido):
+    ///   position = p · normal.x = esquina en Y [-1,+1] · uv.x = esquina en X [-1,+1]
+    ///   · uv.y = 1 (marca de punto). El shader expande en los ejes de PANTALLA.
+    static func appendPointDisc(at p: SIMD3<Float>,
+                                to vertices: inout [Vertex], indices: inout [UInt32]) {
+        let base = UInt32(vertices.count)
+        // 4 esquinas de un quad: (X,Y) ∈ {-1,+1}². normal.x lleva la esquina en Y.
+        let corners: [(Float, Float)] = [(-1, -1), (1, -1), (-1, 1), (1, 1)]
+        for (cx, cy) in corners {
+            vertices.append(Vertex(position: p,
+                                   normal: SIMD3<Float>(cy, 0, 0),
+                                   uv: SIMD2<Float>(cx, 1)))
+        }
+        indices.append(contentsOf: [
+            base, base + 1, base + 2,
+            base + 1, base + 3, base + 2
+        ])
+    }
+}
+
 // MARK: - Rayo de cámara
 
 /// Rayo perspectiva en coordenadas de mundo.
@@ -185,8 +247,11 @@ enum BRepEdgePicker {
         return pts.map { SIMD3<Float>(Float($0.x), Float($0.y), Float($0.z)) }
     }
 
-    /// Malla de highlight para una arista: tubo cuadrado delgado a lo largo de la
-    /// curva (el render dibuja mallas, no líneas). Feedback visual de selección.
+    /// Malla de highlight para una arista: LÍNEA nítida (cinta plana AA) a lo largo
+    /// de la curva, NO un tubo 3D. El render la dibuja con el pipeline de línea en
+    /// BRASA (selección activa, Acero & Brasa). El grosor es en píxeles (shader), un
+    /// poco mayor que el de las aristas en reposo para que la selección resalte.
+    /// `radius` se conserva por compatibilidad de firma; ya no define geometría.
     static func highlightTube(shape: CADShape, edgeIndex: Int,
                               radius: Float = 0.012) -> Mesh? {
         guard let pts = polyline(of: shape, edgeIndex: edgeIndex), pts.count >= 2 else {
@@ -194,32 +259,8 @@ enum BRepEdgePicker {
         }
         var vertices: [Vertex] = []
         var indices: [UInt32] = []
-
-        for i in 0..<(pts.count - 1) {
-            let p0 = pts[i], p1 = pts[i + 1]
-            let dir = simd_normalize(p1 - p0)
-            // Perpendiculares estables: elegir el eje mundial menos alineado con dir
-            let ref: SIMD3<Float> = abs(dir.x) < 0.9 ? SIMD3<Float>(1, 0, 0) : SIMD3<Float>(0, 1, 0)
-            let u = simd_normalize(simd_cross(dir, ref)) * radius
-            let v = simd_normalize(simd_cross(dir, u)) * radius
-
-            let base = UInt32(vertices.count)
-            for p in [p0, p1] {
-                for offset in [u, v, -u, -v] {
-                    vertices.append(Vertex(position: p + offset,
-                                           normal: simd_normalize(offset), uv: .zero))
-                }
-            }
-            // 4 caras laterales del prisma (anillo p0: base+0..3, anillo p1: base+4..7)
-            for k in 0..<4 {
-                let a = base + UInt32(k)
-                let b = base + UInt32((k + 1) % 4)
-                let c = a + 4
-                let d = b + 4
-                indices.append(contentsOf: [a, b, c, b, d, c])
-            }
-        }
-        return Mesh(vertices: vertices, indices: indices)
+        LineRibbonBuilder.appendPolyline(pts, to: &vertices, indices: &indices)
+        return vertices.isEmpty ? nil : Mesh(vertices: vertices, indices: indices)
     }
 }
 
@@ -273,24 +314,14 @@ enum BRepVertexPicker {
         return verts[index]
     }
 
-    /// Malla de highlight de un punto: octaedro pequeño centrado en el vértice, para
-    /// que el render (que dibuja mallas, no puntos) lo muestre como un punto visible.
+    /// Malla de highlight de un punto: DISCO plano encarado a cámara (2 triángulos),
+    /// NO un octaedro/blob 3D gordo. El render lo dibuja con el pipeline de línea que
+    /// lo recorta a un círculo AA nítido de tamaño constante en píxeles. `size` se
+    /// conserva por compatibilidad; el tamaño real lo fija el shader.
     static func highlightDot(at position: SIMD3<Float>, size: Float = 0.03) -> Mesh {
-        let s = size
-        let p = position
-        // 6 vértices del octaedro: 0=+x 1=-x 2=+y 3=-y 4=+z 5=-z
-        let offsets: [SIMD3<Float>] = [
-            SIMD3(s, 0, 0), SIMD3(-s, 0, 0),
-            SIMD3(0, s, 0), SIMD3(0, -s, 0),
-            SIMD3(0, 0, s), SIMD3(0, 0, -s)
-        ]
-        let verts = offsets.map { off in
-            Vertex(position: p + off, normal: simd_normalize(off), uv: .zero)
-        }
-        let idx: [UInt32] = [
-            0, 2, 4, 2, 1, 4, 1, 3, 4, 3, 0, 4,   // tapa +z
-            2, 0, 5, 1, 2, 5, 3, 1, 5, 0, 3, 5    // tapa -z
-        ]
-        return Mesh(vertices: verts, indices: idx)
+        var vertices: [Vertex] = []
+        var indices: [UInt32] = []
+        LineRibbonBuilder.appendPointDisc(at: position, to: &vertices, indices: &indices)
+        return Mesh(vertices: vertices, indices: indices)
     }
 }

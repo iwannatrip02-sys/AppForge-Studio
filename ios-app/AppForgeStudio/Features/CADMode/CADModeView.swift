@@ -67,12 +67,26 @@ struct CADModeView: View {
     @State private var showSnapOverlay: Bool = false
     @State private var showExtrudeSheet: Bool = false
     @State private var extrudeDistance: Float = 0.1
+    /// Modo de la extrusión: false = añadir material (cuerpo nuevo o unión con el
+    /// cuerpo objetivo), true = cortar material (resta booleana) — toggle Añadir/Cortar.
+    @State private var extrudeCut: Bool = false
     @State private var isExtruding: Bool = false
     @State private var showCADTimeline: Bool = false
     @State private var csgStatusMessage: String = ""
     @State private var showDrawingExportBar: Bool = false
     @State private var showFeatureReport: Bool = false
     @State private var showShareSheet: Bool = false
+    /// Presenta el panel de exportación multi-formato (`ExportView`) como sheet
+    /// desde el chrome de CAD — antes solo se abría desde RenderMode.
+    @State private var showExport: Bool = false
+    /// Parámetros del patrón (antes hardcodeados count=3 / count=6): cantidad de
+    /// copias del patrón LINEAL, factor de espaciado (× la diagonal del cuerpo) y
+    /// cantidad del patrón CIRCULAR. NOTA de honestidad: `BRepModeling.circularPattern`
+    /// reparte SIEMPRE sobre 360° completos (no acepta ángulo de arco parcial), así
+    /// que no se expone un control de «ángulo» que el motor no honraría.
+    @State private var patternLinearCount: Int = 3
+    @State private var patternLinearSpacing: Double = 1.6
+    @State private var patternCircularCount: Int = 6
     /// Dispara el flash "templado" (IDENTIDAD_FORGE §6) al confirmar push/pull.
     @State private var temperTick: Int = 0
     /// Medición por toques sobre el modelo REAL (A → B → distancia exacta).
@@ -141,15 +155,39 @@ struct CADModeView: View {
     @State private var dragAccum: SIMD2<Float> = .zero
     /// Eje restringido del gizmo durante el drag (nil = drag libre sobre el cuerpo).
     @State private var gizmoAxis: SIMD3<Float>? = nil
+    /// Espacio de coordenadas del transform: false = ejes de MUNDO (global),
+    /// true = ejes LOCALES del cuerpo (los ejes rotan con `model.rotation`).
+    /// Cambia la matemática del gizmo y del drag (spec §Alcance / tarea 3).
+    @State private var transformSpaceLocal: Bool = false
+    /// Empujón numérico ADITIVO (en unidades de mundo) que el campo de la barra de
+    /// transform añade al valor derivado del arrastre. El arrastre y el número son
+    /// EL MISMO estado: el número edita este nudge, `transformParams` lo suma al
+    /// escalar del drag, y `applyTransformPreview` refresca en vivo.
+    @State private var transformNudge: Double = 0
+    /// Último detente de snap emitido durante el drag (para disparar el tick háptico
+    /// solo al CRUZAR a un nuevo incremento, no cada frame — tarea 2).
+    @State private var lastSnapDetent: Double? = nil
+    /// Lectura viva de la medida del transform en curso (distancia/ángulo/factor),
+    /// mostrada en la guía de la barra durante el arrastre (tarea 4).
+    @State private var transformReadout: String = ""
 
     private static let gizmoNames = ["__gizmoX", "__gizmoY", "__gizmoZ"]
 
-    /// Centro del gizmo: cuerpo escalado + herramienta de transformación activa.
+    /// Objetivo activo de transformación (sub-objeto tocado > cuerpo escalado).
+    /// Fuente única: resuelve la selección vía `TransformTargetResolver` para que
+    /// el gizmo y el drag operen sobre cara/arista/vértice, no solo el cuerpo.
+    private var activeTransformTarget: TransformTarget? {
+        TransformTargetResolver.target(lastItem: selectionController.lastItem,
+                                       bodyIndex: selectionController.bodyIndex)
+    }
+
+    /// Centro del gizmo: se ancla al CENTROIDE del objetivo activo (sub-objeto o
+    /// cuerpo), no siempre al centro del cuerpo. Solo con una herramienta de
+    /// transformación activa.
     private var activeGizmoCenter: SIMD3<Float>? {
         guard [.move, .rotate, .scale].contains(selectedTool),
-              let idx = selectionController.bodyIndex,
-              idx < canvasVM.scene.models.count else { return nil }
-        return bboxCenter(of: canvasVM.scene.models[idx])
+              let target = activeTransformTarget else { return nil }
+        return TransformTargetResolver.center(for: target, in: canvasVM.scene.models)
     }
 
     private var gizmoLength: Float {
@@ -430,29 +468,20 @@ struct CADModeView: View {
                         transformEnabled: [.move, .rotate, .scale].contains(selectedTool),
                         onTransformBegan: { hit in
                             HapticService.shared.light()
-                            dragAccum = .zero
-                            dragFace = nil
-                            // MOVER con sub-selección (Incremento 4): con una CARA
-                            // seleccionada el drag mueve LA CARA (push/pull directo);
-                            // con aristas/puntos NO se mueve el cuerpo en silencio
-                            // (bug device 2026-07-11) — aviso honesto.
-                            if selectedTool == .move, selectionController.hasSelection,
-                               selectionController.bodyIndex == nil {
-                                if case .face(let m, let f)? = selectionController.lastItem,
-                                   m == hit.modelIndex, m < canvasVM.scene.models.count,
-                                   let shape = canvasVM.scene.models[m].cadShape,
-                                   f < shape.faces().count,
-                                   let n = shape.faces()[f].normal {
-                                    dragFace = (m, f, SIMD3<Float>(Float(n.x), Float(n.y), Float(n.z)))
-                                    dragModelIndex = nil
-                                    return
-                                }
-                                selectionController.showHint(
-                                    "Mover aristas/puntos: próximamente — usa «Cuerpo» para mover el sólido")
-                                dragModelIndex = nil
+                            // Objetivo unificado (cara → push/pull, cuerpo → transform,
+                            // arista/vértice → aviso honesto). El toque cae sobre un
+                            // cuerpo concreto: restringe el drag de cara a ESE cuerpo.
+                            // Sin sub-selección, resuelve al cuerpo tocado.
+                            if activeTransformTarget == nil, selectionController.bodyIndex == nil {
+                                dragAccum = .zero
+                                dragFace = nil
+                                dragModelIndex = hit.modelIndex
+                                transformNudge = 0
+                                lastSnapDetent = nil
+                                transformReadout = ""
                                 return
                             }
-                            dragModelIndex = hit.modelIndex
+                            beginTransformDrag(hitModelIndex: hit.modelIndex)
                         },
                         onTransformChanged: { dx, dy in
                             dragAccum += SIMD2<Float>(dx, dy)
@@ -470,8 +499,11 @@ struct CADModeView: View {
                         onGizmoDragBegan: { axis in
                             HapticService.shared.light()
                             gizmoAxis = axis
-                            dragModelIndex = selectionController.bodyIndex
-                            dragAccum = .zero
+                            // El gizmo opera sobre el OBJETIVO resuelto (cara → push/pull
+                            // por la normal, cuerpo → transform, arista/vértice → aviso
+                            // honesto), no solo el cuerpo. Sin restricción de toque: el
+                            // gizmo ya está anclado al sub-objeto activo.
+                            beginTransformDrag(hitModelIndex: nil)
                         },
                         // Sketch en viewport: taps = puntos; drag de PENCIL = trazo vivo
                         sketchInputEnabled: isSketchTool,
@@ -700,6 +732,14 @@ struct CADModeView: View {
         .sheet(isPresented: $showFeatureReport) {
             FeatureReportView(controller: featureReportController)
                 .environmentObject(themeManager)
+        }
+        .sheet(isPresented: $showExport) {
+            // Panel de exportación multi-formato reutilizado tal cual de RenderMode.
+            ExportView(
+                exportVM: ExportViewModel(exportService: ExportService(device: renderer.device)),
+                canvasVM: canvasVM
+            )
+            .environmentObject(themeManager)
         }
         .sheet(isPresented: $showShareSheet) {
             if let url = drawingExportController.exportURL {
@@ -1209,6 +1249,39 @@ struct CADModeView: View {
         }
     }
 
+    /// Aplica el patrón LINEAL con los parámetros vivos (cantidad + espaciado).
+    /// El espaciado es `patternLinearSpacing` × la diagonal del cuerpo + holgura,
+    /// a lo largo de X — mismo eje que el default histórico.
+    private func applyLinearPattern(modelIndex: Int) {
+        HapticService.shared.medium()
+        guard modelIndex < canvasVM.scene.models.count else { return }
+        let model = canvasVM.scene.models[modelIndex]
+        let width = Double(bboxHalfDiagonal(of: model)) * patternLinearSpacing + 0.4
+        let copies = BRepModeling.linearPattern(of: model, count: patternLinearCount,
+                                                spacing: SIMD3<Double>(width, 0, 0))
+        guard !copies.isEmpty else { return }
+        canvasVM.saveState()
+        copies.forEach { canvasVM.scene.addModel($0) }
+        temperTick += 1
+        canvasVM.objectWillChange.send()
+    }
+
+    /// Aplica el patrón CIRCULAR con la cantidad viva, alrededor del eje Y por el
+    /// origen (mismo default que antes). El motor reparte sobre 360° completos.
+    private func applyCircularPattern(modelIndex: Int) {
+        HapticService.shared.medium()
+        guard modelIndex < canvasVM.scene.models.count else { return }
+        let model = canvasVM.scene.models[modelIndex]
+        let copies = BRepModeling.circularPattern(of: model, count: patternCircularCount,
+                                                  axisOrigin: .zero,
+                                                  axisDirection: SIMD3<Double>(0, 1, 0))
+        guard !copies.isEmpty else { return }
+        canvasVM.saveState()
+        copies.forEach { canvasVM.scene.addModel($0) }
+        temperTick += 1
+        canvasVM.objectWillChange.send()
+    }
+
     /// Barra contextual por SELECCIÓN (menú adaptativo, BLUEPRINT S2): ofrece
     /// exactamente lo que aplica a lo seleccionado — cuerpo/cara/arista.
     @ViewBuilder
@@ -1236,37 +1309,28 @@ struct CADModeView: View {
                 }
                 .font(.caption)
 
-                Button("Patrón ×3") {
-                    HapticService.shared.medium()
-                    guard modelIndex < canvasVM.scene.models.count else { return }
-                    let model = canvasVM.scene.models[modelIndex]
-                    let width = Double(bboxHalfDiagonal(of: model)) * 1.6 + 0.4
-                    let copies = BRepModeling.linearPattern(of: model, count: 3,
-                                                            spacing: SIMD3<Double>(width, 0, 0))
-                    if !copies.isEmpty {
-                        canvasVM.saveState()
-                        copies.forEach { canvasVM.scene.addModel($0) }
-                        temperTick += 1
-                        canvasVM.objectWillChange.send()
-                    }
+                // Patrón LINEAL con parámetros (cantidad + espaciado) en un popover
+                // compacto — antes ×3 y espaciado fijos.
+                Menu {
+                    Stepper("Copias: \(patternLinearCount)",
+                            value: $patternLinearCount, in: 2...24)
+                    Stepper(String(format: "Espaciado: %.1f×", patternLinearSpacing),
+                            value: $patternLinearSpacing, in: 0.5...5.0, step: 0.1)
+                    Button("Aplicar patrón lineal") { applyLinearPattern(modelIndex: modelIndex) }
+                } label: {
+                    Label("Patrón ↹", systemImage: "rectangle.grid.1x2")
+                        .font(.caption)
                 }
-                .font(.caption)
 
-                Button("Patrón ○×6") {
-                    HapticService.shared.medium()
-                    guard modelIndex < canvasVM.scene.models.count else { return }
-                    let model = canvasVM.scene.models[modelIndex]
-                    let copies = BRepModeling.circularPattern(of: model, count: 6,
-                                                              axisOrigin: .zero,
-                                                              axisDirection: SIMD3<Double>(0, 1, 0))
-                    if !copies.isEmpty {
-                        canvasVM.saveState()
-                        copies.forEach { canvasVM.scene.addModel($0) }
-                        temperTick += 1
-                        canvasVM.objectWillChange.send()
-                    }
+                // Patrón CIRCULAR con cantidad configurable (arco: siempre 360°).
+                Menu {
+                    Stepper("Copias: \(patternCircularCount)",
+                            value: $patternCircularCount, in: 2...36)
+                    Button("Aplicar patrón circular") { applyCircularPattern(modelIndex: modelIndex) }
+                } label: {
+                    Label("Patrón ○", systemImage: "circle.grid.cross")
+                        .font(.caption)
                 }
-                .font(.caption)
 
                 Button(role: .destructive) {
                     HapticService.shared.heavy()
@@ -1644,6 +1708,15 @@ struct CADModeView: View {
                         .frame(width: 120)
                     Text(String(format: "%.2f", extrudeDistance))
                         .font(.caption).foregroundColor(theme.textPrimary).frame(width: 35)
+                    // Añadir vs Cortar: solo relevante con un cuerpo objetivo seleccionado
+                    // (booleano). Sin objetivo, la extrusión siempre AÑADE (cuerpo nuevo).
+                    Picker("", selection: $extrudeCut) {
+                        Text("Añadir").tag(false)
+                        Text("Cortar").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 130)
+                    .disabled(selectionController.bodyIndex == nil)
                     Spacer()
                     if isExtruding {
                         ProgressView().controlSize(.small)
@@ -1654,7 +1727,7 @@ struct CADModeView: View {
                         .font(.caption)
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
-                        .disabled(sketchEngine.entities.isEmpty)
+                        .disabled(sketch.entities.isEmpty)
                     }
                 }
                 .padding(.horizontal, 10).padding(.vertical, 3)
@@ -1781,6 +1854,10 @@ struct CADModeView: View {
                 .disabled(canvasVM.scene.models.isEmpty)
                 Button(action: { exportToSTEP() }) {
                     Label("Exportar STEP", systemImage: "square.and.arrow.up")
+                }
+                .disabled(canvasVM.scene.models.isEmpty)
+                Button(action: { showExport = true }) {
+                    Label("Exportar...", systemImage: "square.and.arrow.up.on.square")
                 }
                 .disabled(canvasVM.scene.models.isEmpty)
                 Divider()
@@ -1966,27 +2043,67 @@ struct CADModeView: View {
         }
     }
 
+    /// Extruye la región cerrada ACTIVA del sketch vivo (`SketchController`) a un
+    /// sólido B-rep REAL y lo commitea a la escena. Reemplaza el no-op muerto que
+    /// pasaba por `CADSketchEngine`. Sigue el contrato puro Agente 2→1:
+    /// `extrudedShapeForActiveRegion` da el prisma; esta capa decide el commit:
+    ///   · sin cuerpo objetivo → cuerpo NUEVO.
+    ///   · con cuerpo seleccionado (`selectionController.bodyIndex`) → booleano
+    ///     Añadir (unión) o Cortar (resta) según el toggle `extrudeCut`.
     private func performExtrusion() {
-        guard !sketchEngine.entities.isEmpty else { return }
-        isExtruding = true
-
-        sketchEngine.closeProfile()
-        sketchEngine.logOperation(type: .extrude, description: "Extrusion de sketch", parameters: ["distance": Double(extrudeDistance)])
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            // TODO(F3): re-wire extrudeSketch — ExtrusionEngine renamed to CADShapeExtrusionEngine
-            // which uses Wire/CADShape API; SketchEntity→Wire bridging needed.
-            // For now, extrusion is a no-op that compiles.
-            let mesh: Mesh? = nil
-
-            DispatchQueue.main.async {
-                isExtruding = false
-                if let mesh = mesh {
-                    extrudedMesh = mesh
-                    selectedTool = .select
-                }
-            }
+        guard !sketch.entities.isEmpty else {
+            sketch.hint("Dibuja una región cerrada para extruir")
+            return
         }
+        let distance = Double(extrudeDistance)
+        guard let shape = sketch.extrudedShapeForActiveRegion(distance: distance),
+              let mesh = OCCTBridge.toMesh(shape, quality: .medium) else {
+            sketch.hint("No hay región cerrada válida para extruir")
+            return
+        }
+
+        // Sólido resultante de la extrusión (el prisma).
+        let solid = Model(name: "Extrusión_\(UUID().uuidString.prefix(6))")
+        solid.cadShape = shape
+        solid.meshes = [mesh]
+        solid.edgesMesh = OCCTBridge.edgesMesh(shape)
+
+        canvasVM.saveState()
+
+        // ¿Hay cuerpo objetivo seleccionado? → booleano Añadir/Cortar contra él.
+        if let bi = selectionController.bodyIndex, bi < canvasVM.scene.models.count,
+           canvasVM.scene.models[bi].cadShape != nil {
+            let target = canvasVM.scene.models[bi]
+            let op: CADOperationType = extrudeCut ? .booleanSubtract : .booleanUnion
+            if let result = BRepModeling.boolean(op, target, solid) {
+                result.color = target.color
+                canvasVM.scene.models[bi] = result
+                selectionController.deselect()
+                finishExtrudeCommit(cut: extrudeCut, distance: distance,
+                                    message: extrudeCut ? "Corte aplicado ✓" : "Material añadido ✓")
+                return
+            }
+            // El booleano falló (geometría degenerada): cae a cuerpo nuevo honesto.
+            sketch.hint("El booleano falló — se creó como cuerpo independiente")
+        }
+
+        // Cuerpo nuevo (sin objetivo o tras fallo del booleano).
+        canvasVM.scene.addModel(solid)
+        finishExtrudeCommit(cut: false, distance: distance, message: "Sólido creado ✓")
+    }
+
+    /// Cierre común del commit de extrusión: historia paramétrica + feedback.
+    private func finishExtrudeCommit(cut: Bool, distance: Double, message: String) {
+        canvasVM.scene.cadHistory.pushOperation(
+            CADOperation(type: .sketchExtrude,
+                         description: cut ? "Extrusión (cortar)" : "Extrusión (añadir)",
+                         parameters: ["altura": distance]))
+        HapticService.shared.medium()
+        temperTick += 1
+        selectedTool = .select
+        sketch.deselectRegion()
+        sketch.hint(message)
+        canvasVM.objectWillChange.send()
     }
 
     private func cycleTool(direction: Int) {
@@ -2005,7 +2122,63 @@ struct CADModeView: View {
 
     /// Parámetros del gesto acumulado, interpretados según herramienta y eje del
     /// gizmo (nil = libre). Fuente única de verdad para preview Y bake.
+    ///
+    /// El escalar activo (distancia / ángulo / factor) = valor derivado del ARRASTRE
+    /// (`transformRawScalar`) + el empujón numérico de la barra (`transformNudge`),
+    /// cuantizado por snap si `toolVM.gridSnapEnabled`. Arrastre y número son el
+    /// mismo estado (tareas 1-2). El `axis` respeta el toggle local/global (tarea 3).
     private func transformParams(for model: Model) -> (delta: SIMD3<Float>, angle: Float, axis: SIMD3<Float>, factor: Float, center: SIMD3<Float>) {
+        let axis = constrainedAxis(for: model)
+        let scalar = transformScalar(for: model)   // ya incluye nudge + snap
+
+        let delta: SIMD3<Float>
+        let angle: Float
+        let factor: Float
+        switch selectedTool {
+        case .move:
+            if let a = axis {
+                delta = a * Float(scalar)
+            } else {
+                // Libre (sin eje): mueve en el plano de cámara con el bruto del gesto.
+                let cam = canvasVM.scene.camera
+                let forward = simd_normalize(cam.target - cam.position)
+                let right = simd_normalize(simd_cross(forward, cam.up))
+                let up = simd_cross(right, forward)
+                let k = simd_length(cam.position - cam.target) * 0.0011
+                delta = right * dragAccum.x * k - up * dragAccum.y * k
+            }
+            angle = 0
+            factor = 1
+        case .rotate:
+            delta = .zero
+            angle = Float(scalar)   // radianes
+            factor = 1
+        case .scale:
+            delta = .zero
+            angle = 0
+            factor = max(0.05, min(20, Float(scalar)))
+        default:
+            delta = .zero; angle = 0; factor = 1
+        }
+        let rotAxis = axis ?? SIMD3<Float>(0, 1, 0)
+        return (delta, angle, rotAxis, factor, bboxCenter(of: model))
+    }
+
+    /// Eje sobre el que opera el transform, YA resuelto a MUNDO. En modo global es
+    /// el eje del gizmo tal cual; en modo LOCAL se rota por `model.rotation` (los
+    /// ejes viajan con el cuerpo — tarea 3). `nil` = drag libre (sin restricción).
+    private func constrainedAxis(for model: Model) -> SIMD3<Float>? {
+        guard let axis = gizmoAxis else { return nil }
+        if transformSpaceLocal {
+            return simd_normalize(model.rotation.act(axis))
+        }
+        return axis
+    }
+
+    /// Valor BRUTO del arrastre (sin nudge, sin snap), en unidades naturales de la
+    /// herramienta: distancia de mundo (mover), radianes (rotar), factor (escalar).
+    /// Es la proyección del gesto en pantalla — idéntica a la matemática histórica.
+    private func transformRawScalar(for model: Model) -> Double {
         let cam = canvasVM.scene.camera
         let forward = simd_normalize(cam.target - cam.position)
         let right = simd_normalize(simd_cross(forward, cam.up))
@@ -2013,41 +2186,153 @@ struct CADModeView: View {
         let dist = simd_length(cam.position - cam.target)
         let k = dist * 0.0011
 
-        let delta: SIMD3<Float>
-        let rotAxis: SIMD3<Float>
-        if let axis = gizmoAxis {
-            // Restringido: el drag se proyecta sobre la dirección del eje EN PANTALLA
-            // (arrastrar a lo largo de la flecha mueve; perpendicular no hace nada).
+        switch selectedTool {
+        case .move:
+            guard let axis = constrainedAxis(for: model) else {
+                return Double(simd_length(dragAccum) * k)
+            }
             var axisScreen = SIMD2<Float>(simd_dot(axis, right), -simd_dot(axis, up))
             let l = simd_length(axisScreen)
             axisScreen = l > 0.15 ? axisScreen / l : SIMD2<Float>(1, 0)
-            let amount = simd_dot(dragAccum, axisScreen) * k
-            delta = axis * amount
-            rotAxis = axis
-        } else {
-            delta = right * dragAccum.x * k - up * dragAccum.y * k
-            rotAxis = SIMD3<Float>(0, 1, 0)
-        }
-        // Rotación: el drag PERPENDICULAR a la proyección del eje gira alrededor
-        // de él (tangente del anillo). Sin gizmo: horizontal = eje Y (natural).
-        let angle: Float
-        if let axis = gizmoAxis {
+            return Double(simd_dot(dragAccum, axisScreen) * k)
+        case .rotate:
+            guard let axis = constrainedAxis(for: model) else {
+                return Double(dragAccum.x * 0.008)
+            }
             var axisScreen = SIMD2<Float>(simd_dot(axis, right), -simd_dot(axis, up))
             let l = simd_length(axisScreen)
             if l > 0.15 {
                 axisScreen /= l
                 let perp = SIMD2<Float>(-axisScreen.y, axisScreen.x)
-                angle = simd_dot(dragAccum, perp) * 0.008
-            } else {
-                // Eje mirando a cámara: el anillo es un círculo en pantalla —
-                // drag horizontal gira (convención estándar).
-                angle = dragAccum.x * 0.008
+                return Double(simd_dot(dragAccum, perp) * 0.008)
             }
-        } else {
-            angle = dragAccum.x * 0.008
+            return Double(dragAccum.x * 0.008)
+        case .scale:
+            return Double(1 + dragAccum.y * -0.004)
+        default:
+            return 0
         }
-        let factor = max(0.05, min(20, 1 + dragAccum.y * -0.004))
-        return (delta, angle, rotAxis, factor, bboxCenter(of: model))
+    }
+
+    /// Escalar EFECTIVO aplicado = bruto del arrastre + nudge numérico, cuantizado
+    /// por snap. Es lo que ve el campo numérico Y lo que se hornea. Un solo estado.
+    private func transformScalar(for model: Model) -> Double {
+        let raw = transformRawScalar(for: model)
+        switch selectedTool {
+        case .scale:
+            // El factor combina multiplicativamente con el nudge (1 = neutro).
+            let f = raw * (1 + transformNudge)
+            return snapTransformScalar(f)
+        default:
+            return snapTransformScalar(raw + transformNudge)
+        }
+    }
+
+    /// Cuantiza el escalar activo a incrementos redondos si el snap está activo
+    /// (tarea 2). Mover → paso de rejilla; rotar → `angleSnapDegrees`; escalar →
+    /// factores de 0.25. Snap REAL: modifica el valor que se aplica, no un placebo.
+    private func snapTransformScalar(_ value: Double) -> Double {
+        guard toolVM.gridSnapEnabled else { return value }
+        switch selectedTool {
+        case .move:
+            let step = max(0.01, projectSettings.config.gridStep)
+            return (value / step).rounded() * step
+        case .rotate:
+            let deg = projectSettings.config.angleSnapDegrees > 0
+                ? projectSettings.config.angleSnapDegrees : 15.0
+            let stepRad = deg * .pi / 180
+            return (value / stepRad).rounded() * stepRad
+        case .scale:
+            let step = 0.25
+            return max(0.05, (value / step).rounded() * step)
+        default:
+            return value
+        }
+    }
+
+    /// Dispara un tick háptico de selección al CRUZAR a un nuevo detente de snap
+    /// durante el arrastre (tarea 2). Solo con el snap activo; no-op si el valor
+    /// no cambió de incremento (evita zumbido continuo).
+    private func fireSnapTickIfCrossed(_ snapped: Double) {
+        guard toolVM.gridSnapEnabled else { lastSnapDetent = nil; return }
+        if lastSnapDetent == nil || abs(snapped - (lastSnapDetent ?? snapped)) > 1e-9 {
+            if lastSnapDetent != nil { HapticService.shared.selection() }
+            lastSnapDetent = snapped
+        }
+    }
+
+    /// Texto de la medida viva del transform (guía de la barra, tarea 4).
+    private func transformReadoutText(for model: Model) -> String {
+        let s = transformScalar(for: model)
+        switch selectedTool {
+        case .move:   return String(format: "%+.2f", s)
+        case .rotate: return String(format: "%+.1f°", s * 180 / .pi)
+        case .scale:  return String(format: "×%.2f", s)
+        default:      return ""
+        }
+    }
+
+    /// Prepara el estado de arrastre de transformación a partir del OBJETIVO
+    /// resuelto (`TransformTargetResolver`), no del `bodyIndex` a secas. Fuente
+    /// única para el drag directo (onTransformBegan) y para el drag del gizmo
+    /// (onGizmoDragBegan):
+    ///   · cara   → arma `dragFace` (push/pull real por la normal al soltar).
+    ///   · cuerpo → arma `dragModelIndex` (transform de cuerpo entero).
+    ///   · arista/vértice → SIN geometría fingida (`supportsRealGeometry==false`):
+    ///     ancla el gizmo/numérico pero avisa honestamente y no mueve el sólido.
+    /// `hitModelIndex` (si lo hay) restringe: solo se arma el drag de cara cuando
+    /// el toque cae sobre el mismo cuerpo de la cara seleccionada.
+    private func beginTransformDrag(hitModelIndex: Int?) {
+        dragAccum = .zero
+        dragFace = nil
+        dragModelIndex = nil
+        transformNudge = 0        // nuevo gesto: parte del número neutro
+        lastSnapDetent = nil
+        transformReadout = ""
+
+        guard selectedTool == .move || selectedTool == .rotate || selectedTool == .scale,
+              let target = activeTransformTarget else { return }
+
+        // Ops de SUB-OBJETO con deformación local propia (tarea 6): escalar una CARA
+        // (ensanchar su contorno) o mover una ARISTA/VÉRTICE. NO se escala/mueve el
+        // cuerpo entero. No hay preview TRS fiel de una edición local (recomputar OCCT
+        // por frame sería caro): se muestra la lectura viva y se hornea al soltar,
+        // igual que el push/pull de cara. `subObjectDrag` evita tocar el cuerpo.
+        let isFaceScale = (selectedTool == .scale && { if case .face = target { return true }; return false }())
+        let isEdgeVertexMove = (selectedTool == .move && (target.isEdge || target.isVertex))
+        if isFaceScale || isEdgeVertexMove {
+            subObjectDrag = true
+            return
+        }
+
+        // ROTAR / ESCALAR el CUERPO padre SÍ es geometría real. Se transforma el
+        // cuerpo entero (comportamiento honesto y útil, no fingido).
+        if selectedTool == .rotate || selectedTool == .scale {
+            dragModelIndex = target.modelIndex
+            return
+        }
+
+        // MOVER: cara → push/pull real; cuerpo → transform; arista/vértice → honesto.
+        switch target {
+        case .body(let m):
+            dragModelIndex = m
+
+        case .face(let m, let f):
+            guard hitModelIndex == nil || hitModelIndex == m,
+                  m < canvasVM.scene.models.count,
+                  let shape = canvasVM.scene.models[m].cadShape,
+                  f < shape.faces().count,
+                  let n = shape.faces()[f].normal else {
+                selectionController.showHint("Esta cara no se puede empujar aquí")
+                return
+            }
+            dragFace = (m, f, SIMD3<Float>(Float(n.x), Float(n.y), Float(n.z)))
+
+        case .edge, .vertex:
+            // supportsRealGeometry == false: estado honesto, cero geometría fingida.
+            selectionController.showHint(
+                "Mover aristas/puntos aún no deforma el sólido — selecciona «Cuerpo» o una cara")
+        }
     }
 
     /// Preview vivo vía TRS del modelo (el renderer sincroniza model.transform
@@ -2063,6 +2348,8 @@ struct CADModeView: View {
             if let overlay = canvasVM.scene.models.first(where: { $0.name == Self.edgeHighlightName }) {
                 overlay.position = df.normal * d
             }
+            fireSnapTickIfCrossed(transformScalar(for: model))
+            transformReadout = String(format: "%+.2f", d)
             selectionController.showHint(String(format: "Mover cara · %+.2f", d))
             canvasVM.objectWillChange.send()
             return
@@ -2070,6 +2357,9 @@ struct CADModeView: View {
         guard let idx = dragModelIndex, idx < canvasVM.scene.models.count else { return }
         let model = canvasVM.scene.models[idx]
         let p = transformParams(for: model)
+        // Snap tick al cruzar detente + lectura viva de la guía (tareas 2 y 4).
+        fireSnapTickIfCrossed(transformScalar(for: model))
+        transformReadout = transformReadoutText(for: model)
         switch selectedTool {
         case .move:
             model.position = p.delta
@@ -2085,7 +2375,10 @@ struct CADModeView: View {
         }
         // El gizmo VIAJA con el cuerpo durante el drag (feedback: 'los gizmos
         // no giran con el elemento') — mismo TRS a los overlays de flechas/anillos.
-        for name in Self.gizmoNames {
+        // Los overlays de resaltado (cara/arista seleccionada) siguen el MISMO TRS
+        // para que no queden puntos/aristas fantasma en la posición vieja (spec §4:
+        // overlays atómicos con el cuerpo durante el drag).
+        for name in Self.gizmoNames + [Self.faceHighlightName, Self.edgeHighlightName] {
             if let g = canvasVM.scene.models.first(where: { $0.name == name }) {
                 g.position = model.position
                 g.rotation = model.rotation
@@ -2109,6 +2402,9 @@ struct CADModeView: View {
         if let df = dragFace, selectedTool == .move {
             dragFace = nil
             canvasVM.scene.models.first(where: { $0.name == Self.edgeHighlightName })?.position = .zero
+            // Limpia el estado de arrastre (eje + acumulador) para que el SIGUIENTE
+            // gesto empiece desde identidad — sin arrastrar el offset del anterior.
+            defer { dragAccum = .zero; gizmoAxis = nil; transformNudge = 0; lastSnapDetent = nil; transformReadout = "" }
             guard df.modelIndex < canvasVM.scene.models.count else { return }
             let model = canvasVM.scene.models[df.modelIndex]
             let d = Double(simd_dot(transformParams(for: model).delta, df.normal))
@@ -2131,6 +2427,16 @@ struct CADModeView: View {
             canvasVM.objectWillChange.send()
             return
         }
+
+        // Sub-objeto con op de deformación propia (tarea 6): cara + ESCALAR →
+        // `SubObjectEditEngine.scaleFaceWire`; arista/vértice + MOVER → moveEdge/
+        // moveVertex. El engine devuelve `nil` cuando OCCT no llega → estado honesto,
+        // cero geometría falsa. Intercepta ANTES del transform de cuerpo entero.
+        if let target = activeTransformTarget, target.isSubObject,
+           bakeSubObjectEdit(target: target) {
+            return
+        }
+
         guard let idx = dragModelIndex, idx < canvasVM.scene.models.count else { return }
         let model = canvasVM.scene.models[idx]
         let p = transformParams(for: model)
@@ -2183,8 +2489,113 @@ struct CADModeView: View {
         }
         dragAccum = .zero
         gizmoAxis = nil
+        transformNudge = 0
+        lastSnapDetent = nil
+        transformReadout = ""
+        // El cuerpo se horneó a una nueva posición: el resaltado construido ANTES
+        // del bake yace en la geometría vieja → sería fantasma. Se retira (spec §4:
+        // sin puntos/aristas fantasma). El usuario re-toca para re-resaltar sobre
+        // la geometría nueva; no se re-arma silenciosamente sobre datos movidos.
+        canvasVM.scene.models.removeAll {
+            $0.name == Self.faceHighlightName || $0.name == Self.edgeHighlightName
+        }
         rebuildGizmoOverlays()  // el centro del cuerpo cambió con el bake
         canvasVM.objectWillChange.send()
+    }
+
+    /// Hornea una edición de SUB-OBJETO vía el contrato `SubObjectEditEngine` (tarea 6):
+    ///   · cara + ESCALAR  → `scaleFaceWire` (ensancha el contorno de la cara — REAL
+    ///     para prismas; `nil` en el resto).
+    ///   · arista + MOVER  → `moveEdge`  (hoy `nil` honesto en OCCTSwift v1.8.8).
+    ///   · vértice + MOVER → `moveVertex` (hoy `nil` honesto).
+    /// Devuelve `true` si CONSUMIÓ el gesto (aplicado o rechazado con aviso honesto);
+    /// `false` si no aplica (deja que el bake de cuerpo tome el relevo).
+    /// `nil` del engine = OCCT no llega → mensaje real, CERO geometría fingida.
+    private func bakeSubObjectEdit(target: TransformTarget) -> Bool {
+        let m = target.modelIndex
+        guard m < canvasVM.scene.models.count else { return false }
+        let model = canvasVM.scene.models[m]
+        // El preview aplicó un TRS de cuerpo entero (beginTransformDrag arma
+        // dragModelIndex); revertirlo antes de la edición local real.
+        resetPreviewTRS(model)
+
+        func cleanup() {
+            dragModelIndex = nil
+            dragAccum = .zero; gizmoAxis = nil
+            transformNudge = 0; lastSnapDetent = nil; transformReadout = ""
+            canvasVM.scene.models.removeAll {
+                $0.name == Self.faceHighlightName || $0.name == Self.edgeHighlightName
+            }
+            rebuildGizmoOverlays()
+            canvasVM.objectWillChange.send()
+        }
+
+        switch target {
+        case .face(_, let faceIndex) where selectedTool == .scale:
+            let factor = Double(transformParams(for: model).factor)
+            guard abs(factor - 1.0) > 1e-3 else { cleanup(); return true }
+            BRepHistory.shared.recordChange(of: model)
+            let ok = BRepModeling.applyFeature(to: model) { shape in
+                SubObjectEditEngine.scaleFaceWire(shape, faceIndex: faceIndex, factor: factor)
+            }
+            if ok {
+                HapticService.shared.medium()
+                temperTick += 1
+                selectionController.deselect()
+            } else {
+                BRepHistory.shared.discardLast()
+                selectionController.showHint(
+                    "Escalar esta cara aún no es posible aquí (solo caras de prismas)")
+            }
+            cleanup()
+            return true
+
+        case .edge(_, let edgeIndex) where selectedTool == .move:
+            let d = transformParams(for: model).delta
+            let delta = SIMD3<Double>(Double(d.x), Double(d.y), Double(d.z))
+            guard simd_length(delta) > 1e-4 else { cleanup(); return true }
+            if let shape = model.cadShape,
+               let newShape = SubObjectEditEngine.moveEdge(shape, edgeIndex: edgeIndex, delta: delta),
+               let mesh = OCCTBridge.toMesh(newShape, quality: .medium) {
+                BRepHistory.shared.recordChange(of: model)
+                model.cadShape = newShape
+                model.meshes = [mesh]
+                model.geometryVersion += 1
+                HapticService.shared.medium(); temperTick += 1
+                selectionController.deselect()
+            } else {
+                // moveEdge devolvió nil: OCCT v1.8.8 no lo soporta — estado honesto.
+                selectionController.showHint(
+                    "Mover aristas aún no deforma el sólido — usa «Cuerpo» o empuja una cara")
+            }
+            cleanup()
+            return true
+
+        case .vertex(_, let vertexIndex) where selectedTool == .move:
+            let d = transformParams(for: model).delta
+            let delta = SIMD3<Double>(Double(d.x), Double(d.y), Double(d.z))
+            guard simd_length(delta) > 1e-4 else { cleanup(); return true }
+            if let shape = model.cadShape,
+               let newShape = SubObjectEditEngine.moveVertex(shape, vertexIndex: vertexIndex, delta: delta),
+               let mesh = OCCTBridge.toMesh(newShape, quality: .medium) {
+                BRepHistory.shared.recordChange(of: model)
+                model.cadShape = newShape
+                model.meshes = [mesh]
+                model.geometryVersion += 1
+                HapticService.shared.medium(); temperTick += 1
+                selectionController.deselect()
+            } else {
+                selectionController.showHint(
+                    "Mover puntos aún no deforma el sólido — usa «Cuerpo» o empuja una cara")
+            }
+            cleanup()
+            return true
+
+        default:
+            // Sub-objeto SIN op de sub-objeto (p.ej. cara + rotar): que el cuerpo
+            // entero tome el relevo (rotar/escalar el cuerpo padre SÍ es real).
+            return false
+        }
     }
 
     // (performBoolean y sus 3 wrappers eliminados 2026-07-08: eran el segundo camino

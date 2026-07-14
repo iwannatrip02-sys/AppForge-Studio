@@ -859,6 +859,51 @@ final class SketchController: ObservableObject {
         return extrudeRegion(vertices: region.vertices, height: height)
     }
 
+    // MARK: - CONTRATO puro (Agente 2 → Agente 1): perfil + prisma de la región activa
+    //
+    // Geometría PURA: NO tocan la escena ni añaden modelos. El commit a la escena
+    // y el booleano (add/cut/newBody) los decide la capa de vista (Agente 1).
+    // Fuente única de verdad de la extrusión de región: reutiliza el detector
+    // `SketchRegionDetector` y el mismo constructor de wire que `extrudeRegion`.
+
+    /// Vértices 2D (coords de plano) de la región cerrada ACTIVA:
+    /// la seleccionada por tap si la hay; si no, la de mayor área detectada.
+    /// nil si no hay ninguna región cerrada válida.
+    private func activeRegionVertices() -> [SIMD2<Float>]? {
+        if let sel = selectedRegion, sel.count >= 3 { return sel }
+        let regions = SketchRegionDetector.detectRegions(in: entities, chain: chain)
+        guard let region = regions.max(by: { abs($0.area) < abs($1.area) }),
+              abs(region.area) > 1e-4, region.vertices.count >= 3 else {
+            return nil
+        }
+        return region.vertices
+    }
+
+    /// Wire cerrado en coords MUNDO (sobre el plano de trabajo) de la región activa.
+    private func activeRegionWire() -> Wire? {
+        guard let verts = activeRegionVertices() else { return nil }
+        let p3 = verts.map { world3($0, height: 0) }
+        return Wire.polygon3D(p3, closed: true)
+    }
+
+    /// El perfil planar (cara B-rep) de la región cerrada activa, en coords mundo.
+    /// nil si no hay región cerrada válida. API OCCT: `Shape.face(from:planar:)`
+    /// (verificada contra el tag v1.8.8: `Shape.swift:1275`).
+    func activeRegionProfile() -> CADShape? {
+        guard let w = activeRegionWire() else { return nil }
+        return OCCTSwift.Shape.face(from: w, planar: true)
+    }
+
+    /// Prisma B-rep de extruir la región activa una `distance` (a lo largo de la
+    /// normal del plano). Puro: NO toca la escena. API OCCT:
+    /// `Shape.extrude(profile:direction:length:)` (verificada @v1.8.8: `Shape.swift:400`),
+    /// el mismo camino que `extrudeRegion`.
+    func extrudedShapeForActiveRegion(distance: Double) -> CADShape? {
+        guard distance > 1e-9, let w = activeRegionWire() else { return nil }
+        let dir = SIMD3<Double>(Double(plane.normal.x), Double(plane.normal.y), Double(plane.normal.z))
+        return OCCTSwift.Shape.extrude(profile: w, direction: dir, length: distance)
+    }
+
     /// Revoluciona el primer perfil cerrado. En el piso: eje Z del mundo (la línea
     /// x=0 del plano — dibuja el perfil a un lado del eje). En un plano sobre cara:
     /// el eje es la línea que pasa por el origen del plano con dirección `plane.v`

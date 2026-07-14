@@ -28,6 +28,21 @@ private struct BasicUniforms {
     var cameraPos: SIMD4<Float>    // posición de cámara (specular/rim)
 }
 
+/// Uniforms del pipeline de LÍNEA (aristas/puntos/dibujos nítidos AA). ESPEJA
+/// exactamente `LineUniforms` en Shaders.metal — el orden y el padding importan.
+/// SIMD3/SIMD2 en Swift + float3/float2 en MSL alinean igual (16/8 bytes) por el
+/// layout estándar de Metal; los escalares finales rellenan hasta múltiplo de 16.
+private struct LineUniforms {
+    var modelMatrix: simd_float4x4
+    var viewMatrix: simd_float4x4
+    var projectionMatrix: simd_float4x4
+    var lineColor: SIMD4<Float>      // núcleo (acero oscuro por defecto, brasa en selección)
+    var haloColor: SIMD4<Float>      // halo claro de contraste
+    var viewportSize: SIMD2<Float>   // px del drawable
+    var halfWidthPx: Float           // media anchura (núcleo+halo) en px
+    var depthBias: Float             // sesgo NDC hacia cámara (line-on-face)
+}
+
 struct GPUPBRMaterial {
     var albedoR: Float; var albedoG: Float; var albedoB: Float; var _pad1: Float = 0
     var metallic: Float
@@ -291,8 +306,21 @@ class SatinRenderer: NSObject, ObservableObject {
     var xrayEnabled = false
     private var basicXrayPipelineState: MTLRenderPipelineState?
     private var xrayDepthState: MTLDepthStencilState?
-    /// Aristas de sólidos (tubos oscuros por modelo con B-rep).
+    /// Aristas de sólidos (LÍNEAS nítidas AA por modelo con B-rep) + puntos de vértice.
     private var edgeRenderables: [BasicRenderable] = []
+    /// Pipeline de LÍNEA: expande cintas planas a grosor constante en píxeles y las
+    /// dibuja con núcleo oscuro + halo claro anti-aliased (look Shapr3D, no tubos 3D).
+    private var edgeLinePipelineState: MTLRenderPipelineState?
+    /// Depth state de líneas: comparan `.lessEqual` (empatan con la cara y ganan por el
+    /// sesgo de profundidad del shader) y NO escriben depth (no ocluyen unas a otras).
+    private var lineDepthState: MTLDepthStencilState?
+    /// IDs de los renderables "__" cuya malla es de LÍNEA (resaltado de arista): se
+    /// saltan en el pase lit (serían invisibles: cintas degeneradas) y se dibujan en
+    /// BRASA con el pipeline de línea. Se reconstruye en cada rebuild de escena.
+    private var lineOverlayModelIds: Set<String> = []
+    /// Ídem para overlays "__" cuya malla es de PUNTO/disco (puntos de medición): brasa,
+    /// pipeline de línea, un poco más gruesos que las líneas.
+    private var dotOverlayModelIds: Set<String> = []
 
     func diagnostics() -> RenderDiagnostics {
         RenderDiagnostics(
@@ -358,6 +386,7 @@ class SatinRenderer: NSObject, ObservableObject {
         libraryLoaded = true
 
         setupBasicPipeline(library: library)
+        setupLinePipeline(library: library)
         setupPBRPipeline(library: library)
         setupPBRIBLPipeline(library: library)
         setupIBLPipeline(library: library)
@@ -516,6 +545,58 @@ class SatinRenderer: NSObject, ObservableObject {
         xd.depthCompareFunction = .less
         xd.isDepthWriteEnabled = false   // translúcido: no ocluye lo de atrás
         xrayDepthState = device.makeDepthStencilState(descriptor: xd)
+    }
+
+    /// Pipeline de LÍNEAS nítidas (aristas/puntos/dibujos): `edge_line_vertex` expande
+    /// cintas planas a grosor CONSTANTE en píxeles; `edge_line_fragment` pinta núcleo
+    /// oscuro + halo claro con AA. Blending activado (el AA vive en el alpha). Mismo
+    /// buffer de 9 floats que el básico (position/normal/uv reinterpretados: P/Q/lado).
+    private func setupLinePipeline(library: MTLLibrary) {
+        guard let vertexFn = library.makeFunction(name: "edge_line_vertex"),
+              let fragmentFn = library.makeFunction(name: "edge_line_fragment") else {
+            logger.info("[Render] shaders de línea no encontrados — aristas sin pipeline")
+            return
+        }
+
+        let vertexDescriptor = MTLVertexDescriptor()
+        vertexDescriptor.attributes[0].format = .float4      // position → P (xyz), w ignorado
+        vertexDescriptor.attributes[0].offset = 0
+        vertexDescriptor.attributes[0].bufferIndex = 0
+        vertexDescriptor.attributes[1].format = .float3      // normal → Q (otro extremo)
+        vertexDescriptor.attributes[1].offset = MemoryLayout<Float>.size * 4
+        vertexDescriptor.attributes[1].bufferIndex = 0
+        vertexDescriptor.attributes[2].format = .float2      // uv → (lado, isPoint)
+        vertexDescriptor.attributes[2].offset = MemoryLayout<Float>.size * 7
+        vertexDescriptor.attributes[2].bufferIndex = 0
+        vertexDescriptor.layouts[0]?.stride = MemoryLayout<Float>.size * 9
+        vertexDescriptor.layouts[0]?.stepRate = 1
+        vertexDescriptor.layouts[0]?.stepFunction = .perVertex
+
+        let d = MTLRenderPipelineDescriptor()
+        d.vertexFunction = vertexFn
+        d.fragmentFunction = fragmentFn
+        d.vertexDescriptor = vertexDescriptor
+        d.colorAttachments[0].pixelFormat = mtkView?.colorPixelFormat ?? .bgra8Unorm
+        d.depthAttachmentPixelFormat = .depth32Float
+        d.colorAttachments[0].isBlendingEnabled = true
+        d.colorAttachments[0].rgbBlendOperation = .add
+        d.colorAttachments[0].alphaBlendOperation = .add
+        d.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+        d.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        d.colorAttachments[0].sourceAlphaBlendFactor = .one
+        d.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        do {
+            edgeLinePipelineState = try device.makeRenderPipelineState(descriptor: d)
+        } catch {
+            logger.info("Failed to create line pipeline state: \(error)")
+        }
+
+        // Líneas: comparan .lessEqual (para empatar con la cara y ganar por el sesgo
+        // NDC del shader) y NO escriben depth (una línea no debe ocluir a otra).
+        let ld = MTLDepthStencilDescriptor()
+        ld.depthCompareFunction = .lessEqual
+        ld.isDepthWriteEnabled = false
+        lineDepthState = device.makeDepthStencilState(descriptor: ld)
     }
 
     private func setupPBRPipeline(library: MTLLibrary) {
@@ -845,6 +926,8 @@ class SatinRenderer: NSObject, ObservableObject {
         pbrRenderables.removeAll()
         basicRenderables.removeAll()
         edgeRenderables.removeAll()
+        lineOverlayModelIds.removeAll()
+        dotOverlayModelIds.removeAll()
         modelIdToObject.removeAll()
 
         for model in scene3D.models where model.isVisible {
@@ -982,8 +1065,20 @@ class SatinRenderer: NSObject, ObservableObject {
             opaqueInXray: model.name.hasPrefix("__")
         ))
 
-        // Aristas del B-rep: líneas CLARAS y nítidas sobre fondo oscuro (look
-        // Shapr3D), no tubos negros. Steel claro casi-blanco = precisión + calma.
+        // Overlays "__" cuya geometría es de LÍNEA/PUNTO (resaltado de arista, puntos
+        // de medición): su malla es cinta/disco → invisible bajo el shader lit. Se
+        // marcan para dibujarse en BRASA con el pipeline de línea. `__faceHighlight`
+        // NO se marca: es una superficie 3D real y se sombrea normal.
+        if model.name == "__edgeHighlight" {
+            lineOverlayModelIds.insert(model.id.uuidString)
+        } else if model.name.hasPrefix("__measureDot") {
+            dotOverlayModelIds.insert(model.id.uuidString)
+        }
+
+        // Aristas del B-rep: LÍNEAS nítidas AA (no tubos 3D). La geometría es una
+        // cinta plana; el pipeline de línea la pinta con NÚCLEO acero OSCURO + HALO
+        // claro de contraste (regla dura: legible sobre fondo oscuro Y sobre caras).
+        // El `color` aquí es el núcleo (acero grafito); el halo lo fija el draw loop.
         // Siempre opaco (también en rayos X, como el screenshot del usuario).
         if let em = model.edgesMesh {
             let (evb, eib, eic) = createBuffersFromMeshes([em])
@@ -991,7 +1086,7 @@ class SatinRenderer: NSObject, ObservableObject {
                 edgeRenderables.append(BasicRenderable(
                     vertexBuffer: evb, indexBuffer: eib, indexCount: eic,
                     modelMatrix: modelMatrix,
-                    color: SIMD4<Float>(0.82, 0.88, 0.96, 1.0),
+                    color: SIMD4<Float>(0.13, 0.17, 0.24, 1.0),  // acero grafito oscuro (núcleo)
                     modelId: model.id.uuidString + "#edges",
                     center: bboxCenter, opaqueInXray: true
                 ))
@@ -1000,14 +1095,14 @@ class SatinRenderer: NSObject, ObservableObject {
 
         // Puntos de vértice SIEMPRE visibles: las esquinas del B-rep son entidades
         // reales tocables (base de selección de puntos y snap — device 2026-07-11).
-        // Mismo pipeline que las aristas, un tono más brillante.
+        // Mismo pipeline de línea; núcleo acero un punto más brillante que las aristas.
         if let dots = model.vertexDotsMesh() {
             let (dvb, dib, dic) = createBuffersFromMeshes([dots])
             if let dvb, let dib, dic > 0 {
                 edgeRenderables.append(BasicRenderable(
                     vertexBuffer: dvb, indexBuffer: dib, indexCount: dic,
                     modelMatrix: modelMatrix,
-                    color: SIMD4<Float>(0.95, 0.97, 1.0, 1.0),
+                    color: SIMD4<Float>(0.20, 0.28, 0.40, 1.0),  // acero (núcleo del punto)
                     modelId: model.id.uuidString + "#dots",
                     center: bboxCenter, opaqueInXray: true
                 ))
@@ -1348,18 +1443,79 @@ class SatinRenderer: NSObject, ObservableObject {
                 )
             }
 
+            // Dibuja una CINTA de línea (arista/punto/dibujo) con el pipeline de línea:
+            // núcleo `core` + halo `halo` de contraste, grosor `halfWidthPx` constante en
+            // pantalla. El pipeline/depth de línea deben estar activos ANTES de llamar.
+            let viewportPx = SIMD2<Float>(Float(dsz.width), Float(dsz.height))
+            func drawLine(_ r: BasicRenderable, core: SIMD4<Float>, halo: SIMD4<Float>,
+                          halfWidthPx: Float) {
+                var u = LineUniforms(
+                    modelMatrix: r.modelMatrix,
+                    viewMatrix: sceneViewMatrix,
+                    projectionMatrix: sceneProjectionMatrix,
+                    lineColor: core,
+                    haloColor: halo,
+                    viewportSize: viewportPx,
+                    halfWidthPx: halfWidthPx,
+                    depthBias: 0.00015   // empuja la línea hacia cámara: gana a la cara
+                )
+                encoder.setVertexBytes(&u, length: MemoryLayout<LineUniforms>.stride, index: 1)
+                encoder.setFragmentBytes(&u, length: MemoryLayout<LineUniforms>.stride, index: 1)
+                encoder.setVertexBuffer(r.vertexBuffer, offset: 0, index: 0)
+                encoder.drawIndexedPrimitives(
+                    type: .triangle, indexCount: r.indexCount,
+                    indexType: .uint32, indexBuffer: r.indexBuffer, indexBufferOffset: 0
+                )
+            }
+
+            // Halos de contraste (regla dura de Andrés): un claro sutil separa la línea
+            // oscura de las CARAS claras; el núcleo oscuro se lee sobre el FONDO oscuro.
+            let steelHalo = SIMD4<Float>(0.78, 0.86, 0.96, 0.85)   // halo acero claro
+            let emberCore = SIMD4<Float>(1.00, 0.48, 0.27, 1.0)    // brasa (selección)
+            let emberHalo = SIMD4<Float>(0.15, 0.09, 0.05, 0.80)   // halo oscuro tras la brasa
+
             for renderable in basicRenderables {
+                // Overlays de línea/punto (resaltado de arista + puntos de medición): su
+                // malla es cinta/disco y sería INVISIBLE bajo el shader lit (cintas
+                // degeneradas sin expansión de pantalla). Se saltan aquí y se dibujan en
+                // el pase de línea (brasa) más abajo.
+                if lineOverlayModelIds.contains(renderable.modelId) ||
+                   dotOverlayModelIds.contains(renderable.modelId) { continue }
                 let translucent = xrayEnabled && !renderable.opaqueInXray
                 drawBasic(renderable, alpha: translucent ? 0.30 : 1.0)
             }
 
-            // ---- Aristas de sólidos (look Shapr3D): opacas SIEMPRE, dibujadas
-            // tras los cuerpos (en rayos X las de atrás se ven — el look correcto).
-            if !edgeRenderables.isEmpty {
-                encoder.setRenderPipelineState(basicPS)
-                encoder.setDepthStencilState(depthState)
-                for e in edgeRenderables { drawBasic(e, alpha: 1.0) }
-            } else if xrayEnabled {
+            // ---- Aristas y puntos (look Shapr3D): LÍNEAS nítidas AA, opacas SIEMPRE,
+            // dibujadas tras los cuerpos (en rayos X las de atrás se ven). Pipeline de
+            // línea con halo de contraste. Los puntos (#dots) un poco más gruesos.
+            let haveLinePipe = edgeLinePipelineState != nil
+            if !edgeRenderables.isEmpty, let linePS = edgeLinePipelineState {
+                encoder.setRenderPipelineState(linePS)
+                encoder.setDepthStencilState(lineDepthState ?? depthState)
+                for e in edgeRenderables {
+                    let isDot = e.modelId.hasSuffix("#dots")
+                    drawLine(e, core: e.color, halo: steelHalo,
+                             halfWidthPx: isDot ? 4.0 : 2.2)
+                }
+            }
+            // (Sin fallback lit: las aristas ahora son cintas de línea, degeneradas
+            // bajo el shader lit. Si el pipeline de línea no compila es un fallo de
+            // build serio — el log de setupLinePipeline lo delata; no se dibuja basura.)
+
+            // Overlays de línea/punto en BRASA (selección de arista, puntos de medición).
+            if haveLinePipe, let linePS = edgeLinePipelineState,
+               !(lineOverlayModelIds.isEmpty && dotOverlayModelIds.isEmpty) {
+                encoder.setRenderPipelineState(linePS)
+                encoder.setDepthStencilState(lineDepthState ?? depthState)
+                for r in basicRenderables where lineOverlayModelIds.contains(r.modelId) {
+                    drawLine(r, core: emberCore, halo: emberHalo, halfWidthPx: 3.0)
+                }
+                for r in basicRenderables where dotOverlayModelIds.contains(r.modelId) {
+                    drawLine(r, core: emberCore, halo: emberHalo, halfWidthPx: 5.5)
+                }
+            }
+
+            if edgeRenderables.isEmpty, xrayEnabled {
                 encoder.setDepthStencilState(depthState)
             }
         }

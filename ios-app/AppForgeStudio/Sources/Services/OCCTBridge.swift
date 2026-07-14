@@ -74,17 +74,22 @@ enum OCCTBridge {
         toMesh(shape, quality: quality) ?? Mesh(vertices: [], indices: [])
     }
 
-    /// Malla de ARISTAS del B-rep (tubos finos por cada edge): el look Shapr3D —
-    /// todo sólido exacto muestra sus bordes. El renderer la dibuja oscura y
-    /// opaca (también en rayos X). nil si el shape no tiene aristas (esfera).
+    /// Malla de ARISTAS del B-rep como LÍNEAS nítidas (no tubos 3D): el look Shapr3D
+    /// — todo sólido exacto muestra sus bordes como líneas planas anti-aliased. El
+    /// renderer las dibuja con el pipeline de línea (núcleo acero oscuro + halo claro
+    /// de contraste), constante en píxeles y opaco también en rayos X. nil si el
+    /// shape no tiene aristas (esfera).
+    ///
+    /// El parámetro `radius` se mantiene por compatibilidad de firma con las llamadas
+    /// existentes (`LivePreviewEngine` usa 0.005) pero YA NO define geometría de tubo:
+    /// el grosor real es en píxeles y lo fija el shader (`LineUniforms.halfWidthPx`).
     static func edgesMesh(_ shape: OCCTSwift.Shape, radius: Float = 0.008) -> Mesh? {
         var vertices: [Vertex] = []
         var indices: [UInt32] = []
         for edge in shape.edges() {
             let pts = edge.points(count: edge.isLine ? 2 : 24)
                 .map { SIMD3<Float>(Float($0.x), Float($0.y), Float($0.z)) }
-            GizmoBuilder.appendTube(polyline: pts, radius: radius,
-                                    to: &vertices, indices: &indices)
+            LineRibbonBuilder.appendPolyline(pts, to: &vertices, indices: &indices)
         }
         return vertices.isEmpty ? nil : Mesh(vertices: vertices, indices: indices)
     }

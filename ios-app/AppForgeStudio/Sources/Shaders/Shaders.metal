@@ -139,6 +139,113 @@ fragment float4 grid_fragment(GridVertexOut in [[stage_in]]) {
     return float4(color, a);
 }
 
+// MARK: - Líneas nítidas anti-aliased (aristas / puntos / dibujos) — look Shapr3D
+//
+// PROBLEMA (device): las aristas se construían como TUBOS 3D (prismas barridos) y
+// se sombreaban con el shader lit → leían como cilindros glossy feos. Solución: la
+// geometría ahora es una CINTA plana (ribbon) de 2 triángulos por segmento cuya
+// anchura se expande en ESPACIO DE PANTALLA aquí, dando líneas de grosor CONSTANTE
+// en píxeles (no crecen/encogen con el zoom) — exactamente el comportamiento CAD.
+//
+// Encoding del vértice (reutiliza los 9 floats del buffer básico, sin tocar el
+// vertex descriptor): position.xyz = punto de la espina (P); normal.xyz = el OTRO
+// punto de la espina del segmento (Q) para derivar la dirección en pantalla;
+// uv.x = lado con signo en [-1,+1] (a qué lado expandir + coord transversal AA);
+// uv.y = 0 línea / 1 punto (los puntos usan un disco: expanden en ambos ejes).
+//
+// CONTRASTE GARANTIZADO (regla dura): el fragment dibuja un NÚCLEO oscuro (color
+// de línea) rodeado de un HALO claro sutil y un borde AA transparente. El halo
+// separa la línea de superficies claras; el núcleo oscuro se lee sobre el fondo
+// oscuro. Así la arista NUNCA se confunde ni con el fondo ni con la cara.
+
+struct LineUniforms {
+    float4x4 modelMatrix;
+    float4x4 viewMatrix;
+    float4x4 projectionMatrix;
+    float4 lineColor;      // color del núcleo (acero oscuro por defecto, brasa si selección)
+    float4 haloColor;      // color del halo de contraste (claro sutil)
+    float2 viewportSize;   // px del drawable (para el offset en espacio de pantalla)
+    float halfWidthPx;     // media anchura de la línea en píxeles del núcleo+halo
+    float depthBias;       // sesgo NDC hacia cámara para que la línea gane a la cara
+};
+
+struct LineVertexIn {
+    float4 position [[attribute(0)]];   // P: punto de la espina (o el punto, si disco)
+    float3 other    [[attribute(1)]];   // línea: Q (otro extremo) · punto: normal.x = esquina Y
+    float2 uv       [[attribute(2)]];   // uv.x = lado/esquinaX [-1,+1]; uv.y = 0 línea / 1 punto
+};
+
+struct LineVertexOut {
+    float4 position [[position]];
+    float2 across;         // línea: (transversal[-1,+1], 0) · punto: (cornerX, cornerY)
+    float isPoint;         // 0 línea, 1 punto
+};
+
+vertex LineVertexOut edge_line_vertex(LineVertexIn in [[stage_in]],
+                                      constant LineUniforms &u [[buffer(1)]]) {
+    LineVertexOut out;
+    float4x4 mvp = u.projectionMatrix * u.viewMatrix * u.modelMatrix;
+
+    float4 clipP = mvp * float4(in.position.xyz, 1.0);
+    float2 halfVp = u.viewportSize * 0.5;
+    float2 offsetPx;
+
+    if (in.uv.y > 0.5) {
+        // PUNTO: cuadrado en ejes de PANTALLA (independiente de cámara → nunca colapsa).
+        // uv.x = esquina X, normal.x (in.other.x) = esquina Y, ambos en {-1,+1}.
+        float2 corner = float2(in.uv.x, in.other.x);
+        offsetPx = corner * u.halfWidthPx;
+        out.across = offsetPx;                   // distancia en PÍXELES al centro
+    } else {
+        // LÍNEA: expandir perpendicular a la dirección P→Q en espacio de pantalla,
+        // dando grosor CONSTANTE en píxeles a cualquier zoom.
+        float4 clipQ = mvp * float4(in.other, 1.0);
+        float2 ndcP = clipP.xy / max(clipP.w, 1e-6);
+        float2 ndcQ = clipQ.xy / max(clipQ.w, 1e-6);
+        float2 scrP = ndcP * halfVp;
+        float2 scrQ = ndcQ * halfVp;
+        float2 dir = scrQ - scrP;
+        float len = length(dir);
+        float2 tangent = len > 1e-5 ? dir / len : float2(1.0, 0.0);
+        float2 perp = float2(-tangent.y, tangent.x);
+        float side = in.uv.x;                    // -1 o +1
+        offsetPx = perp * side * u.halfWidthPx;
+        out.across = float2(side * u.halfWidthPx, 0.0);   // distancia en PÍXELES al centro
+    }
+
+    // De vuelta a clip: el offset en píxeles se reescala a NDC y se multiplica por w
+    // (para que sea constante en pantalla tras la división por perspectiva).
+    float2 offsetNdc = offsetPx / halfVp;
+    clipP.xy += offsetNdc * clipP.w;
+    clipP.z  -= u.depthBias * clipP.w;           // sesgo hacia cámara (line-on-face)
+
+    out.position = clipP;
+    out.isPoint = in.uv.y;
+    return out;
+}
+
+fragment float4 edge_line_fragment(LineVertexOut in [[stage_in]],
+                                   constant LineUniforms &u [[buffer(1)]]) {
+    // d = distancia normalizada al centro [0..1]: línea = |transversal|; punto = radio.
+    float d = in.isPoint > 0.5 ? length(in.across) : abs(in.across.x);
+    // Ancho de pluma AA en unidades de 'd' (derivada de pantalla → borde ~1px suave).
+    float aa = fwidth(d) + 1e-4;
+
+    // Núcleo oscuro sólido hasta coreEdge; halo claro entre coreEdge y 1; fuera → fade.
+    float coreEdge = 0.55;
+    float haloEdge = 1.0;
+
+    float core = 1.0 - smoothstep(coreEdge - aa, coreEdge + aa, d);      // 1 dentro del núcleo
+    float within = 1.0 - smoothstep(haloEdge - aa, haloEdge + aa, d);    // 1 dentro del halo
+    float halo = saturate(within - core);                               // anillo del halo
+
+    // Mezcla: núcleo=color de línea, anillo=halo de contraste; alpha = cobertura AA.
+    float3 rgb = mix(u.haloColor.rgb, u.lineColor.rgb, core);
+    float alpha = max(core * u.lineColor.a, halo * u.haloColor.a);
+    if (alpha < 0.003) { discard_fragment(); }
+    return float4(rgb, alpha);
+}
+
 struct StrokeVertexIn {
     float4 position [[attribute(0)]];
     float4 color [[attribute(1)]];
