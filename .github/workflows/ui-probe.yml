@@ -286,6 +286,10 @@ jobs:
 
       - name: Run GearScenarioTests (gestos reales) contra el mismo simulador
         continue-on-error: false
+        # Cinturón: si el test se cuelga (corrida 3: query de accesibilidad colgada
+        # >35 min hasta el timeout del JOB → cero artifacts), el step muere antes
+        # y los uploads if:always() corren igual.
+        timeout-minutes: 35
         working-directory: ${{ env.WORKDIR }}
         env:
           UDID: ${{ steps.sim.outputs.UDID }}
@@ -303,6 +307,9 @@ jobs:
             -configuration Debug \
             -derivedDataPath DerivedData \
             -only-testing:AppForgeStudioUITests \
+            -test-timeouts-enabled YES \
+            -default-test-execution-time-allowance 900 \
+            -maximum-test-execution-time-allowance 1500 \
             -resultBundlePath "$GITHUB_WORKSPACE/${WORKDIR}/artifacts/GearScenario.xcresult" \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY=- \
