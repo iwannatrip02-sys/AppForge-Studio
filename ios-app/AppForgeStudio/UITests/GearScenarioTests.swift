@@ -219,18 +219,27 @@ final class GearScenarioTests: XCTestCase {
                       "El menú Patrón ○ (selectionBar) no apareció: ¿hay selección de cuerpo activa?")
 
         // --- Paso 6: patrón circular count=8 ---------------------------------
-        step("Patrón circular", "abrir panel de patrón y fijar copias=8")
+        step("Patrón circular", "abrir panel de patrón y fijar copias=5")
         tapButton(ID.patternMenu)
         // El panel es un POPOVER con Stepper real (un Menu de iOS descarta los
-        // Stepper). El default de la app es 6 → 8 son 2 incrementos deterministas.
+        // Stepper). Default de la app 6 → 5 es 1 decremento determinista.
+        // ¿Por qué 5 dientes y no 8? PRESUPUESTO CI (corrida 5): el sim de los
+        // runners renderiza por software; con 9 cuerpos en escena cada snapshot
+        // de XCUITest pasa de segundos a minutos y el allowance muere en la
+        // unión. 5 dientes = 6 cuerpos y el engranaje sigue siendo real; el
+        // barrido en device usará 8+.
         let countField = require(app.descendants(matching: .any),
                                  ID.patternCircularCount, timeout: midTimeout)
-        setStepper(id: ID.patternCircularCount, from: 6, to: 8)
+        setStepper(id: ID.patternCircularCount, from: 6, to: 5)
         XCTAssertTrue(countField.exists, "El control de conteo del patrón circular no existe.")
 
         // --- Paso 7: aplicar el patrón (8 dientes) ---------------------------
-        step("Patrón circular", "aplicar patrón circular (8 dientes)")
+        step("Patrón circular", "aplicar patrón circular (5 dientes)")
         tapButton(ID.patternCircularApply, timeout: midTimeout)
+        // Respiro: la teselación de las copias (OCCT toMesh + edges) corre en main
+        // y el re-render con la escena crecida satura el sim por software — sin
+        // esto el siguiente snapshot de XCUITest expira (corridas 4 y 5).
+        Thread.sleep(forTimeInterval: 15)
         attach(name: "\(String(format: "%02d", stepIndex))-assert-pattern-applied")
 
         // --- Paso 8: unión booleana (fusionar lo alcanzable) -----------------
@@ -296,11 +305,14 @@ final class GearScenarioTests: XCTestCase {
     /// primero intentamos por label del sistema, con fallback posicional.
     private func setStepper(id: String, from current: Int, to target: Int) {
         let container = app.descendants(matching: .any).matching(identifier: id).firstMatch
-        let byLabel = container.buttons["Increment"]
-        let increment = byLabel.exists ? byLabel : container.buttons.element(boundBy: 1)
-        for _ in 0..<max(0, target - current) {
-            guard increment.exists, increment.isHittable else { break }
-            increment.tap()
+        let delta = target - current
+        let systemLabel = delta >= 0 ? "Increment" : "Decrement"
+        let fallbackIndex = delta >= 0 ? 1 : 0
+        let byLabel = container.buttons[systemLabel]
+        let control = byLabel.exists ? byLabel : container.buttons.element(boundBy: fallbackIndex)
+        for _ in 0..<abs(delta) {
+            guard control.exists, control.isHittable else { break }
+            control.tap()
         }
     }
 }

@@ -48,7 +48,8 @@ PROHIBIDO: build.yml y todo el código fuente de la app.
    (c) assert verificable (existe el cuerpo nuevo, el panel cambió, etc. — vía accessibility).
    Pasos: nuevo proyecto → crear cilindro (disco) → crear caja (diente) → mover diente al borde
    (drag de gizmo por coordenadas) → seleccionar (cara) → Cuerpo (escalar a cuerpo) →
-   patrón circular count=8 → aplicar → unión
+   patrón circular count=5 (presupuesto CI: el sim por software de los runners colapsa
+   con 9 cuerpos; en device el barrido usará 8+) → aplicar → unión
    (lo alcanzable) → Hole en el centro de la cara superior → órbita 1-dedo en vacío + pinch zoom
    (inspección final). Launch args: `-UIProbeSkipOnboarding` (reusar el sello de onboarding
    existente de UIProbeMode) y `-UIProbeTouchViz` (visualizador de G-B).
