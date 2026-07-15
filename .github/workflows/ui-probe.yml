@@ -311,6 +311,18 @@ jobs:
           fi
 
       # ---------------------------------------------------------------------
+      # ROTAR capturas a landscape (la app corre landscapeRight; simctl
+      # enmarca en portrait del device — rotar para lectura derecha)
+      # ---------------------------------------------------------------------
+      - name: Rotate screenshots to landscape
+        if: always()
+        continue-on-error: true
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          shopt -s nullglob
+          for f in artifacts/screenshots/*.png; do sips --rotate 270 "$f" >/dev/null || true; done
+
+      # ---------------------------------------------------------------------
       # SUBIR TODA la evidencia — if: always()
       # ---------------------------------------------------------------------
       - name: Upload evidence artifacts
