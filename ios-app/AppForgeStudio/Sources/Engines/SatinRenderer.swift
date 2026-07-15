@@ -101,6 +101,10 @@ private struct BasicRenderable {
     var center: SIMD3<Float> = .zero
     /// Los overlays de UI (gizmo, highlights "__") no se vuelven translúcidos en rayos X.
     var opaqueInXray: Bool = false
+    /// Fantasma de preview en vivo (`__livePreview`): SIEMPRE translúcido, sin escribir
+    /// depth, dibujado DESPUÉS de los opacos — independiente de `xrayEnabled`. Ola
+    /// LiveInteraction · L1 · tarea 1 (obstáculo A del RECON: los "__" son opaqueInXray).
+    var forceTranslucent: Bool = false
 }
 
 /// @MainActor: AnimationEngine is @MainActor (ios-app/AppForgeStudio/Sources/Engines/AnimationEngine.swift:184).
@@ -111,6 +115,31 @@ private struct BasicRenderable {
 /// MainActor.assumeIsolated noise.
 @MainActor
 class SatinRenderer: NSObject, ObservableObject {
+
+    // MARK: - Anchos de línea (contrato visual, px)
+    //
+    // Media anchura (núcleo+halo) en píxeles que el shader de línea expande en
+    // pantalla. Constantes = única fuente de verdad (los tests fijan el contrato).
+    // Feedback en device: base era 2.2 ("casi invisible") y brasa 3.0 (apenas
+    // +0.8 sobre la base → la selección "casi no se nota"). Nuevo contrato:
+    //   · base legible/seleccionable, · brasa de selección ≥1.7× la base.
+    static let edgeHalfWidthPx: Float = 3.5        // aristas en reposo (antes 2.2)
+    static let dotHalfWidthPx: Float = 5.5         // vértices/puntos en reposo (antes 4.0)
+    static let emberEdgeHalfWidthPx: Float = 6.0   // arista SELECCIONADA (antes 3.0) — 1.71× base
+    static let emberDotHalfWidthPx: Float = 8.5    // punto SELECCIONADO (antes 5.5) — 1.55× base
+
+    // MARK: - Fantasma de preview en vivo (Ola LiveInteraction · L1)
+    //
+    // El modelo de escena con este NOMBRE es el fantasma del preview (extrude/
+    // push-pull en vivo). L1 lo renderiza SIEMPRE translúcido (contrato). La
+    // convención `__` lo mantiene fuera del picking y del export.
+    static let livePreviewName = "__livePreview"
+    // Tinte ember + alpha del fantasma (design_tokens.json: color.ember.base
+    // #FF7A45 = (1.0, 0.478, 0.271); glow.opacityCenter = 0.45 → alpha 0.40 del
+    // rango 0.35–0.45 del CONTRATO, un pelín más translúcido para que el sólido
+    // detrás lea claro). Fuente única de verdad del material del fantasma.
+    static let ghostTint = SIMD4<Float>(1.0, 0.478, 0.271, 0.40)
+
     let device: MTLDevice
     var scene: Object? = nil
     var camera: PerspectiveCamera
@@ -137,6 +166,10 @@ class SatinRenderer: NSObject, ObservableObject {
     private var lastFrameTime: CFTimeInterval = 0
     private var sceneObjectCount: Int = 0
     private var modelIdToObject: [String: Object] = [:]
+    /// Snapshot `modelId → geometryVersion` de la última reconstrucción. Permite
+    /// detectar que el ÚNICO cambio de geometría fue el del fantasma `__livePreview`
+    /// y refrescarlo en sitio sin rebuild (Ola LiveInteraction · L1 · tarea 2).
+    private var geometryVersionSnapshot: [String: Int] = [:]
 
     func updateAnimation() {
         let now = CACurrentMediaTime()
@@ -911,11 +944,57 @@ class SatinRenderer: NSObject, ObservableObject {
         for m in scene3D.models { signature = signature &* 31 &+ m.geometryVersion }
         let structureChanged = signature != sceneGeometrySignature
         self.scene3D = scene3D
-        if structureChanged {
+        if !structureChanged { return }
+
+        // FAST-PATH del fantasma (Ola LiveInteraction · L1 · tarea 2): si el único
+        // cambio de geometría respecto al snapshot es el del `__livePreview` (mismo
+        // conjunto de IDs, ninguna otra malla revisó su versión), lo refrescamos en
+        // sitio — sin `rebuildSceneFrom`. Espeja el refresh in-place del sculpt.
+        // Añadir/quitar el fantasma cambia el conjunto de IDs → cae al rebuild
+        // (ocurre 1 vez por gesto, no por frame — dentro del contrato).
+        if canUpdateGhostInPlace(scene3D) {
             sceneGeometrySignature = signature
-            sceneObjectCount = scene3D.models.count
-            rebuildSceneFrom(scene3D)
+            if let ghost = scene3D.models.first(where: { $0.name == Self.livePreviewName }) {
+                refreshNonPBRObjectGeometry(for: ghost)
+                geometryVersionSnapshot[ghost.id.uuidString] = ghost.geometryVersion
+            }
+            return
         }
+
+        sceneGeometrySignature = signature
+        sceneObjectCount = scene3D.models.count
+        rebuildSceneFrom(scene3D)
+    }
+
+    /// True si el ÚNICO cambio de geometría desde el último rebuild es el del
+    /// fantasma `__livePreview` (misma cardinalidad, mismos IDs, misma versión en
+    /// todos los demás modelos, y el fantasma YA existe como renderable no-PBR con
+    /// un objeto Satin refrescable). Si algo más cambió → false → rebuild completo.
+    private func canUpdateGhostInPlace(_ scene3D: Scene3D) -> Bool {
+        guard scene3D.models.count == geometryVersionSnapshot.count else { return false }
+        var ghostChanged = false
+        for m in scene3D.models {
+            guard let known = geometryVersionSnapshot[m.id.uuidString] else { return false } // ID nuevo
+            if m.geometryVersion == known { continue }
+            // Este modelo cambió de versión: solo se permite si ES el fantasma
+            // y no hemos visto ya otro fantasma cambiar (debe ser el único).
+            if m.name == Self.livePreviewName && !ghostChanged {
+                ghostChanged = true
+            } else {
+                return false
+            }
+        }
+        guard ghostChanged else { return false }
+        // El fantasma debe existir como objeto no-PBR refrescable (buildObject lo
+        // registró en modelIdToObject y basicRenderables). Si es PBR o no se
+        // construyó (p.ej. malla vacía en el rebuild previo) → rebuild seguro.
+        guard let ghost = scene3D.models.first(where: { $0.name == Self.livePreviewName }),
+              !ghost.usesPBR,
+              modelIdToObject[ghost.id.uuidString] != nil,
+              basicRenderables.contains(where: { $0.modelId == ghost.id.uuidString }) else {
+            return false
+        }
+        return true
     }
 
     private func rebuildSceneFrom(_ scene3D: Scene3D) {
@@ -929,6 +1008,13 @@ class SatinRenderer: NSObject, ObservableObject {
         lineOverlayModelIds.removeAll()
         dotOverlayModelIds.removeAll()
         modelIdToObject.removeAll()
+
+        // Snapshot de versiones para el fast-path del fantasma (tarea 2). Cubre
+        // TODOS los modelos (visibles o no), igual que la firma de `updateScene`.
+        geometryVersionSnapshot.removeAll(keepingCapacity: true)
+        for model in scene3D.models {
+            geometryVersionSnapshot[model.id.uuidString] = model.geometryVersion
+        }
 
         for model in scene3D.models where model.isVisible {
             if model.usesPBR {
@@ -1041,7 +1127,14 @@ class SatinRenderer: NSObject, ObservableObject {
             return Satin.Mesh(geometry: Geometry(), material: BasicColorMaterial(color: SIMD4<Float>(1, 0, 1, 1)))
         }
 
-        let materialColor = model.usesPBR ? SIMD4<Float>(model.pbrMaterial.albedo.x, model.pbrMaterial.albedo.y, model.pbrMaterial.albedo.z, 1.0) : model.color
+        // El fantasma `__livePreview` toma su tinte/alpha del token (L1 dueño del
+        // material — CONTRATO), no del color que ponga el código de inyección.
+        let materialColor: SIMD4<Float>
+        if model.name == Self.livePreviewName {
+            materialColor = Self.ghostTint
+        } else {
+            materialColor = model.usesPBR ? SIMD4<Float>(model.pbrMaterial.albedo.x, model.pbrMaterial.albedo.y, model.pbrMaterial.albedo.z, 1.0) : model.color
+        }
         let modelMatrix = model.transform
         // Centro del bbox (pivote del outline de selección)
         var minP = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
@@ -1062,7 +1155,8 @@ class SatinRenderer: NSObject, ObservableObject {
             color: materialColor,
             modelId: model.id.uuidString,
             center: bboxCenter,
-            opaqueInXray: model.name.hasPrefix("__")
+            opaqueInXray: model.name.hasPrefix("__"),
+            forceTranslucent: model.name == Self.livePreviewName
         ))
 
         // Overlays "__" cuya geometría es de LÍNEA/PUNTO (resaltado de arista, puntos
@@ -1474,6 +1568,17 @@ class SatinRenderer: NSObject, ObservableObject {
             let emberCore = SIMD4<Float>(1.00, 0.48, 0.27, 1.0)    // brasa (selección)
             let emberHalo = SIMD4<Float>(0.15, 0.09, 0.05, 0.80)   // halo oscuro tras la brasa
 
+            // Anchos de línea en PÍXELES (media anchura núcleo+halo; el shader la
+            // expande en pantalla). Feedback en device: las aristas base eran "tan
+            // delgaditas que casi ni se notan" (era 2.2) y la selección "casi no se
+            // nota" (brasa era 3.0, apenas +0.8 sobre la base → imperceptible).
+            // Contrato nuevo: base legible y seleccionable; la BRASA de selección
+            // claramente MÁS ancha que la base (≥1.7×) para que resalte sin ambigüedad.
+            let edgeHalfWidthPx: Float = SatinRenderer.edgeHalfWidthPx        // 3.5
+            let dotHalfWidthPx: Float = SatinRenderer.dotHalfWidthPx          // 5.5
+            let emberEdgeHalfWidthPx: Float = SatinRenderer.emberEdgeHalfWidthPx  // 6.0
+            let emberDotHalfWidthPx: Float = SatinRenderer.emberDotHalfWidthPx    // 8.5
+
             for renderable in basicRenderables {
                 // Overlays de línea/punto (resaltado de arista + puntos de medición): su
                 // malla es cinta/disco y sería INVISIBLE bajo el shader lit (cintas
@@ -1481,8 +1586,36 @@ class SatinRenderer: NSObject, ObservableObject {
                 // el pase de línea (brasa) más abajo.
                 if lineOverlayModelIds.contains(renderable.modelId) ||
                    dotOverlayModelIds.contains(renderable.modelId) { continue }
+                // El fantasma de preview se pinta en su PROPIO pase (translúcido, sin
+                // depth-write) DESPUÉS de los opacos — no aquí (obstáculo A del RECON).
+                if renderable.forceTranslucent { continue }
                 let translucent = xrayEnabled && !renderable.opaqueInXray
                 drawBasic(renderable, alpha: translucent ? 0.30 : 1.0)
+            }
+
+            // ---- Fantasma de preview en vivo (`__livePreview`) ----
+            // SIEMPRE translúcido, independiente de `xrayEnabled` (obstáculo A del
+            // RECON: los "__" son opaqueInXray). Pipeline con blending
+            // (sourceAlpha/oneMinusSourceAlpha) + depth `.less` sin escritura de depth:
+            // el fantasma NO ocluye la geometría real que queda detrás, pero SÍ pasa el
+            // depth-test contra los opacos ya escritos (la parte tapada del fantasma no
+            // se pinta encima). Dibujado tras los opacos → blending correcto sobre ellos.
+            if let ghostPS = basicXrayPipelineState {
+                var drewGhost = false
+                for renderable in basicRenderables where renderable.forceTranslucent {
+                    if !drewGhost {
+                        encoder.setRenderPipelineState(ghostPS)
+                        if let xd = xrayDepthState { encoder.setDepthStencilState(xd) }
+                        drewGhost = true
+                    }
+                    // El alpha ya vive en el color del fantasma (ghostTint); no re-atenuar.
+                    drawBasic(renderable, alpha: 1.0)
+                }
+                // Restaurar pipeline/depth de cuerpos opacos para los pases siguientes.
+                if drewGhost {
+                    encoder.setRenderPipelineState(bodyPS)
+                    encoder.setDepthStencilState(xrayEnabled ? (xrayDepthState ?? depthState) : depthState)
+                }
             }
 
             // ---- Aristas y puntos (look Shapr3D): LÍNEAS nítidas AA, opacas SIEMPRE,
@@ -1495,7 +1628,7 @@ class SatinRenderer: NSObject, ObservableObject {
                 for e in edgeRenderables {
                     let isDot = e.modelId.hasSuffix("#dots")
                     drawLine(e, core: e.color, halo: steelHalo,
-                             halfWidthPx: isDot ? 4.0 : 2.2)
+                             halfWidthPx: isDot ? dotHalfWidthPx : edgeHalfWidthPx)
                 }
             }
             // (Sin fallback lit: las aristas ahora son cintas de línea, degeneradas
@@ -1508,10 +1641,10 @@ class SatinRenderer: NSObject, ObservableObject {
                 encoder.setRenderPipelineState(linePS)
                 encoder.setDepthStencilState(lineDepthState ?? depthState)
                 for r in basicRenderables where lineOverlayModelIds.contains(r.modelId) {
-                    drawLine(r, core: emberCore, halo: emberHalo, halfWidthPx: 3.0)
+                    drawLine(r, core: emberCore, halo: emberHalo, halfWidthPx: emberEdgeHalfWidthPx)
                 }
                 for r in basicRenderables where dotOverlayModelIds.contains(r.modelId) {
-                    drawLine(r, core: emberCore, halo: emberHalo, halfWidthPx: 5.5)
+                    drawLine(r, core: emberCore, halo: emberHalo, halfWidthPx: emberDotHalfWidthPx)
                 }
             }
 

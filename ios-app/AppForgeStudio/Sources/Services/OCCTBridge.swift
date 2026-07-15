@@ -59,14 +59,22 @@ enum OCCTBridge {
     }
     
     static func toMesh(_ shape: OCCTSwift.Shape, quality: MeshQuality = .medium) -> Mesh? {
-        let deflection: Double
+        // Deflección LINEAL (desviación de cuerda máx, unidades de mundo) Y ANGULAR
+        // (ángulo máx entre triángulos vecinos, radianes). La angular es la que
+        // gobierna cuántos segmentos tiene una CURVA: OCCT por defecto usa 0.5 rad
+        // (~28.6°) → un cilindro sale con ~13 gajos planos (el "juego indie" del
+        // feedback en device). Bajarla hace las superficies curvas continuas.
+        // Coste de memoria acotado: el nº de triángulos crece ~1/angular, y aun en
+        // .medium (0.20 rad ≈ 11.5°, ~32 segmentos/círculo) es barato para un iPad.
+        let linear: Double
+        let angular: Double
         switch quality {
-        case .low:     deflection = 0.5
-        case .medium:  deflection = 0.1
-        case .high:    deflection = 0.02
-        case .ultra:   deflection = 0.005
+        case .low:     linear = 0.5;   angular = 0.5    // preview rápido
+        case .medium:  linear = 0.1;   angular = 0.20   // display interactivo (curva continua)
+        case .high:    linear = 0.02;  angular = 0.10
+        case .ultra:   linear = 0.005; angular = 0.05
         }
-        return shapeToMesh(shape, linearDeflection: deflection)
+        return shapeToMesh(shape, linearDeflection: linear, angularDeflection: angular)
     }
     
     /// Require mesh (fatal on nil) for cases where we know the shape is valid.

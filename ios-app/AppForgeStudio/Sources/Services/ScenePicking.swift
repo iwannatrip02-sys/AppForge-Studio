@@ -220,10 +220,14 @@ enum BRepFacePicker {
 enum BRepEdgePicker {
 
     /// Índice de la arista más cercana al punto (proyección de curva OCCT).
-    /// `maxDistance` más apretado que el de cara: una arista es un objetivo fino
-    /// y solo debe ganar cuando el toque es claramente sobre ella.
+    /// `maxDistance` es el radio de "tocar cerca" en unidades de mundo. Feedback en
+    /// device: 0.03 era demasiado apretado — con líneas finas y dedo grueso, casi
+    /// nunca acertabas la arista. Subido a 0.08 (proporcional al ancho de línea
+    /// nuevo) para que un toque junto a la arista la seleccione. Sigue muy por
+    /// debajo de 1.0 (distancia arista↔centro-de-cara en una caja 2×2×2), así que
+    /// el centro de una cara jamás se confunde con una arista.
     static func edgeIndex(of shape: CADShape, nearest point: SIMD3<Float>,
-                          maxDistance: Double = 0.03) -> Int? {
+                          maxDistance: Double = 0.08) -> Int? {
         let p = SIMD3<Double>(Double(point.x), Double(point.y), Double(point.z))
         var bestIndex: Int?
         var bestDistance = Double.greatestFiniteMagnitude
@@ -291,9 +295,11 @@ enum BRepVertexPicker {
 
     /// Índice del vértice más cercano al punto. `maxDistance` MÁS apretado que el de
     /// arista: un punto es el objetivo más fino y solo gana con un toque claramente
-    /// sobre la esquina.
+    /// sobre la esquina. Subido de 0.03 a 0.06 (proporcional al ancho de punto
+    /// nuevo, y por debajo del 0.08 de arista para conservar la prioridad
+    /// arista > vértice); sigue lejísimos de 1.73 (centro↔esquina en caja 2×2×2).
     static func vertexIndex(of shape: CADShape, nearest point: SIMD3<Float>,
-                            maxDistance: Float = 0.03) -> Int? {
+                            maxDistance: Float = 0.06) -> Int? {
         let verts = vertices(of: shape)
         var bestIndex: Int?
         var bestDistance = Float.greatestFiniteMagnitude

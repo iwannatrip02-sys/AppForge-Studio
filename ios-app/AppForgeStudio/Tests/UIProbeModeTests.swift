@@ -25,6 +25,19 @@ final class UIProbeModeTests: XCTestCase {
                                     "Se esperan al menos los pasos núcleo (caja→cilindro→cara→push/pull→boolean)")
     }
 
+    /// La ola LiveInteraction añadió 2 pasos: ghost en vivo SIN commit + commit del
+    /// ghost. El arnés debe declararlos para que las capturas del agente Sonnet
+    /// atrapen el fantasma translúcido y luego el sólido cambiado (tarea 7).
+    func testLiveInteractionGhostStepsDeclared() {
+        let joined = UIProbeMode.declaredSteps.joined(separator: " | ").lowercased()
+        XCTAssertTrue(joined.contains("ghost") && joined.contains("sin commit"),
+                      "debe existir el paso del ghost en vivo sin commit")
+        XCTAssertTrue(joined.contains("commit del ghost"),
+                      "debe existir el paso del commit del ghost")
+        XCTAssertGreaterThanOrEqual(UIProbeMode.declaredSteps.count, 9,
+                                    "9 pasos tras añadir los 2 de LiveInteraction")
+    }
+
     /// El flag y la clave de onboarding sellada son las cadenas exactas que el
     /// workflow / el gate de entrada esperan (contrato con el mundo externo).
     func testContractConstants() {

@@ -57,9 +57,11 @@ final class SelectionController: ObservableObject {
         }
 
         let item: Item
-        if let v = BRepVertexPicker.vertexIndex(of: shape, nearest: hit.position, maxDistance: 0.03) {
+        // Sin maxDistance explícito: hereda los defaults de los pickers (subidos en la
+        // ola mesh-quality 2026-07-15 — feedback device: "difícil seleccionar aristas").
+        if let v = BRepVertexPicker.vertexIndex(of: shape, nearest: hit.position) {
             item = .vertex(modelIndex: hit.modelIndex, vertexIndex: v)
-        } else if let e = BRepEdgePicker.edgeIndex(of: shape, nearest: hit.position, maxDistance: 0.05) {
+        } else if let e = BRepEdgePicker.edgeIndex(of: shape, nearest: hit.position) {
             item = .edge(modelIndex: hit.modelIndex, edgeIndex: e)
         } else if let f = BRepFacePicker.faceIndex(of: shape, nearest: hit.position) {
             item = .face(modelIndex: hit.modelIndex, faceIndex: f)

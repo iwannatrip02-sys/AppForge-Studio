@@ -91,3 +91,5 @@ fi
 echo "=== Escenario v2 completado. Capturas en $SHOTS ==="
 ls -la "$SHOTS" || true
 exit 0
+
+# 2026-07-15: la secuencia in-app ahora incluye PROBE-STEP 6 (ghost translucido sin commit) y 7 (commit) — ola LiveInteraction.

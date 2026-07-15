@@ -234,6 +234,13 @@ class ExportService {
     }
 
     func export(model: Model, format: ExportFormat, to url: URL, skipValidation: Bool = false) -> Result<Void, ExportError> {
+        // Overlays de escena (`__livePreview`, `__faceHighlight`, gizmos, cotas…) NO
+        // son geometría del usuario: nunca se exportan (Ola LiveInteraction · L1 ·
+        // tarea 3). Antes solo `exportUSDZScene` filtraba `__`; las rutas de un solo
+        // modelo (OBJ/STL/STEP/GLTF/FBX) exportarían el fantasma si se les entregaba.
+        guard !model.name.hasPrefix("__") else {
+            return .failure(.invalidModel("Los overlays de escena (\(model.name)) no se exportan"))
+        }
         guard !model.meshes.isEmpty, model.meshes.contains(where: { !$0.vertices.isEmpty }) else {
             return .failure(.invalidModel("El modelo no tiene vertices para exportar"))
         }

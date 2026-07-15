@@ -57,6 +57,8 @@ enum UIProbeMode {
         "Crear cilindro B-rep al lado de la caja",
         "Seleccionar la cara superior de la caja (faceIndex por normal +Y)",
         "Push/pull: extruir la cara superior de la caja +0.4",
+        "Ghost EN VIVO: beginExtrude+update sobre una cara SIN commit (fantasma translúcido)",
+        "Commit del ghost: hornear el push/pull real (sólido cambiado, sin fantasma)",
         "Boolean union caja ∪ cilindro (B-rep real)",
         "Re-encuadrar cámara (resetView) para la captura final",
     ]
@@ -168,9 +170,70 @@ enum UIProbeMode {
         }
         await pause()
 
-        // Paso 6 — BOOLEAN union caja ∪ cilindro (B-rep real, barato para 2 sólidos).
+        // Paso 6 — GHOST EN VIVO sobre una cara SIN commit (Ola LiveInteraction · L2
+        // · tarea 7a). Ejercita LivePreviewEngine.beginExtrude + update REALES y monta
+        // el fantasma `__livePreview` en la escena tal como lo hace CADModeView (el
+        // probe no corre la SwiftUI View, así que inyectamos el modelo aquí). La
+        // captura de este paso debe mostrar el fantasma translúcido sobre el sólido.
+        let ghostEngine = LivePreviewEngine()
         do {
-            step(6, "boolean union caja ∪ cilindro")
+            step(6, "ghost en vivo (beginExtrude+update, sin commit)")
+            if let ci = cylIndex, ci < canvasVM.scene.models.count,
+               let shape = canvasVM.scene.models[ci].cadShape,
+               let topFI = BRepModeling.faceIndex(of: shape, withNormal: SIMD3<Double>(0, 1, 0)) {
+                ghostEngine.beginExtrude(shape: shape, faceIndex: topFI,
+                                         direction: SIMD3<Float>(0, 1, 0), initialDistance: 0)
+                ghostEngine.update(parameter: 0.6)   // arrastre simulado: +0.6 en vivo
+                if let ghostMesh = ghostEngine.previewMesh {
+                    let ghost = Model(name: "__livePreview")
+                    var mesh = ghostMesh
+                    if let device = deviceForUpload() { mesh.uploadToGPU(device: device) }
+                    ghost.meshes = [mesh]
+                    ghost.color = SIMD4<Float>(1.0, 0.48, 0.27, 0.45)  // ember translúcido
+                    ghost.edgesMesh = ghostEngine.previewEdges
+                    canvasVM.scene.models.removeAll { $0.name == "__livePreview" }
+                    canvasVM.scene.addModel(ghost)
+                    canvasVM.objectWillChange.send()
+                    probeLog.log("PROBE: fantasma `__livePreview` inyectado (cara \(topFI), dist 0.6)")
+                } else {
+                    fail(6, "LivePreviewEngine.previewMesh nil (OCCT no generó la malla ghost)")
+                }
+            } else {
+                fail(6, "no hay cilindro/cara superior para el ghost en vivo")
+            }
+        }
+        await pause()
+
+        // Paso 7 — COMMIT del ghost (tarea 7b): retira el fantasma y hornea el push/pull
+        // REAL en el cilindro. La captura de este paso debe mostrar el sólido cambiado
+        // (sin fantasma): la geometría creció +0.6, ya no es una malla translúcida.
+        do {
+            step(7, "commit del ghost → sólido real (sin fantasma)")
+            canvasVM.scene.models.removeAll { $0.name == "__livePreview" }
+            if let ci = cylIndex, ci < canvasVM.scene.models.count,
+               let shape = canvasVM.scene.models[ci].cadShape,
+               let topFI = BRepModeling.faceIndex(of: shape, withNormal: SIMD3<Double>(0, 1, 0)) {
+                let model = canvasVM.scene.models[ci]
+                let ok = BRepModeling.applyFeature(to: model) { s in
+                    BRepModeling.pushPullFace(s, faceIndex: topFI, distance: 0.6)
+                }
+                if ok {
+                    canvasVM.selectedModelIndex = ci
+                    canvasVM.objectWillChange.send()
+                    probeLog.log("PROBE: ghost horneado — cilindro creció +0.6 (fantasma retirado)")
+                } else {
+                    fail(7, "applyFeature/pushPullFace del commit no mutó")
+                }
+            } else {
+                fail(7, "no hay cilindro/cara para hornear el commit")
+            }
+            canvasVM.objectWillChange.send()
+        }
+        await pause()
+
+        // Paso 8 — BOOLEAN union caja ∪ cilindro (B-rep real, barato para 2 sólidos).
+        do {
+            step(8, "boolean union caja ∪ cilindro")
             if let bi = boxIndex, let ci = cylIndex,
                bi < canvasVM.scene.models.count, ci < canvasVM.scene.models.count {
                 let a = canvasVM.scene.models[bi]
@@ -190,17 +253,17 @@ enum UIProbeMode {
                     canvasVM.selectedModelIndex = canvasVM.scene.models.count - 1
                     canvasVM.objectWillChange.send()
                 } else {
-                    fail(6, "BRepModeling.boolean devolvió nil (geometría degenerada?)")
+                    fail(8, "BRepModeling.boolean devolvió nil (geometría degenerada?)")
                 }
             } else {
-                fail(6, "faltan índices de caja/cilindro para boolean")
+                fail(8, "faltan índices de caja/cilindro para boolean")
             }
         }
         await pause()
 
-        // Paso 7 — re-encuadre para la captura final (cámara isométrica limpia).
+        // Paso 9 — re-encuadre para la captura final (cámara isométrica limpia).
         do {
-            step(7, "re-encuadrar cámara (resetView)")
+            step(9, "re-encuadrar cámara (resetView)")
             canvasVM.resetView()
             canvasVM.objectWillChange.send()
         }

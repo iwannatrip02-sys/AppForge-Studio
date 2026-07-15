@@ -596,27 +596,56 @@ struct CADModeView: View {
                                 .allowsHitTesting(false)
                         }
 
-                        // Preview fantasma de operación activa (extrude/fillet en vivo)
+                        // Preview fantasma de operación activa (extrude/fillet/push-pull
+                        // en vivo). El código de inyección alimenta el modelo `__livePreview`;
+                        // L1 garantiza que se renderice SIEMPRE translúcido (ver CONTRATO).
+                        // Se re-sincroniza CADA frame que el motor regenera la malla
+                        // (`.onChange(of: livePreviewEngine.state)`), no solo al montar.
                         if livePreviewEngine.state.isActive,
-                           let previewMesh = livePreviewEngine.previewMesh {
-                            // El preview se inyecta como modelo overlay temporal
+                           livePreviewEngine.previewMesh != nil {
                             Color.clear
-                                .onAppear {
-                                    let previewModel = Model(name: "__livePreview")
-                                    previewModel.meshes = [previewMesh]
-                                    previewModel.color = SIMD4<Float>(1.0, 0.48, 0.27, 0.45)
-                                    if let edges = livePreviewEngine.previewEdges {
-                                        previewModel.edgesMesh = edges
-                                    }
-                                    canvasVM.scene.models.removeAll { $0.name == "__livePreview" }
-                                    canvasVM.scene.addModel(previewModel)
-                                    canvasVM.objectWillChange.send()
+                                .onAppear { syncLivePreviewGhost() }
+                                .onChange(of: livePreviewEngine.state) { _ in
+                                    syncLivePreviewGhost()
                                 }
-                                .onDisappear {
-                                    canvasVM.scene.models.removeAll { $0.name == "__livePreview" }
-                                    canvasVM.objectWillChange.send()
-                                }
+                                .onDisappear { removeLivePreviewGhost() }
                         }
+
+                        // Guía de snap: línea del eje activo + ticks de incremento,
+                        // proyectados a pantalla (Ola LiveInteraction · L2 · tarea 2).
+                        // Hace VISIBLE la cuantización que el snap ya aplica.
+                        GeometryReader { geo in
+                            TransformSnapGuide(
+                                worldCenter: activeGizmoCenter,
+                                worldAxis: transformGuideAxis,
+                                projector: ViewportProjector(
+                                    viewMatrix: canvasVM.viewMatrix,
+                                    projectionMatrix: canvasVM.projectionMatrix(for: geo.size),
+                                    viewportSize: geo.size),
+                                gridStep: transformGuideStep,
+                                isActive: isTransformDragging && toolVM.gridSnapEnabled,
+                                isSnapped: transformHUDSnapped)
+                        }
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false)
+
+                        // HUD flotante del transform: número vivo editable anclado al
+                        // gizmo (Ola LiveInteraction · L2 · tarea 1). Reemplaza el número
+                        // huérfano — ahora el usuario ve y edita la medida en el viewport.
+                        GeometryReader { geo in
+                            TransformHUD(
+                                worldCenter: activeGizmoCenter,
+                                projector: ViewportProjector(
+                                    viewMatrix: canvasVM.viewMatrix,
+                                    projectionMatrix: canvasVM.projectionMatrix(for: geo.size),
+                                    viewportSize: geo.size),
+                                readout: transformReadout,
+                                isSnapped: transformHUDSnapped,
+                                isActive: isTransformGestureActive,
+                                nudge: $transformNudge,
+                                onCommitEdit: { applyNudgeEdit() })
+                        }
+                        .ignoresSafeArea()
 
                         // Chrome flotante izquierdo: panel de Elementos arriba,
                         // RAIL de herramientas con flyouts al centro (Shapr3D)
@@ -670,6 +699,13 @@ struct CADModeView: View {
             executeCADTool(newTool, canvasVM: canvasVM, toolVM: toolVM)
             rebuildGizmoOverlays()
             rebuildSketchOverlays()
+            // Ghost en vivo de la extrusión de sketch (tarea 6): al entrar a la
+            // herramienta Extruir se muestra; al salir se retira.
+            if newTool == .extrude { updateExtrudeGhost() } else { removeLivePreviewGhost() }
+        }
+        // La distancia del slider mueve el ghost OCCT real en vivo (tarea 6).
+        .onChange(of: extrudeDistance) { _ in
+            if selectedTool == .extrude { updateExtrudeGhost() }
         }
         .onChange(of: sketch.entities.count) { _ in rebuildSketchOverlays() }
         .onChange(of: sketch.chain.count) { _ in rebuildSketchOverlays() }
@@ -1832,10 +1868,55 @@ struct CADModeView: View {
                 }
                 .padding(.horizontal, 10).padding(.vertical, 6)
                 .background(theme.surfaceSecondary)
+            case .move, .rotate, .scale:
+                transformParameterBar
             default:
                 EmptyView()
             }
         }
+    }
+
+    /// Barra de parámetros de Mover/Rotar/Escalar (Ola LiveInteraction · L2 · tareas
+    /// 1 y 3). Muestra el toggle de espacio local/global + la lectura viva de la
+    /// medida (que el HUD flotante también refleja sobre el gizmo). Reemplaza el
+    /// `default: EmptyView()` que dejaba a estas herramientas sin barra.
+    private var transformParameterBar: some View {
+        HStack(spacing: 10) {
+            // Toggle LOCAL / GLOBAL — la matemática de `transformParams` respeta el
+            // espacio elegido vía `constrainedAxis` → `TransformSnap.resolveAxis`.
+            Picker("", selection: $transformSpaceLocal) {
+                Text("Global").tag(false)
+                Text("Local").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 140)
+            .onChange(of: transformSpaceLocal) { _ in
+                HapticService.shared.selection()
+                // El espacio cambió a mitad del gesto: refresca el preview en vivo.
+                if dragModelIndex != nil || dragFace != nil { applyTransformPreview() }
+            }
+
+            Image(systemName: transformSpaceLocal ? "move.3d" : "globe")
+                .font(.system(size: 11))
+                .foregroundColor(AppTheme.steel)
+                .help(transformSpaceLocal ? "Ejes locales del cuerpo" : "Ejes de mundo")
+
+            Spacer()
+
+            // Lectura viva: el mismo texto que flota en el HUD sobre el gizmo.
+            if !transformReadout.isEmpty {
+                Text(transformReadout)
+                    .font(AppTheme.Typography.monoLarge.font)
+                    .monospacedDigit()
+                    .foregroundColor(transformHUDSnapped ? AppTheme.steel : theme.accent)
+            } else {
+                Text("Arrastra el cuerpo o el gizmo")
+                    .font(.caption2)
+                    .foregroundColor(theme.textSecondary)
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 4)
+        .background(theme.surfaceSecondary)
     }
 
     /// Fila de utilidades: agrupar, historial, exports, features. Los booleanos
@@ -2092,8 +2173,36 @@ struct CADModeView: View {
         finishExtrudeCommit(cut: false, distance: distance, message: "Sólido creado ✓")
     }
 
+    /// Ghost en vivo de la extrusión de sketch (tarea 6): mientras se ajusta la
+    /// distancia (slider del `parameterBar`) se muestra el prisma OCCT REAL como
+    /// `__livePreview` translúcido, ANTES de Añadir/Cortar. Usa el mismo camino puro
+    /// verificado (`extrudedShapeForActiveRegion`) que el commit — el ghost y el
+    /// sólido final son la misma geometría, no una aproximación.
+    private func updateExtrudeGhost() {
+        guard selectedTool == .extrude, !sketch.entities.isEmpty else {
+            removeLivePreviewGhost(); return
+        }
+        let distance = Double(extrudeDistance)
+        guard let shape = sketch.extrudedShapeForActiveRegion(distance: distance),
+              let mesh = OCCTBridge.toMesh(shape, quality: .low) else {
+            removeLivePreviewGhost(); return
+        }
+        let name = Self.livePreviewName
+        let ghost = canvasVM.scene.models.first(where: { $0.name == name }) ?? {
+            let m = Model(name: name)
+            canvasVM.scene.addModel(m)
+            return m
+        }()
+        ghost.meshes = [mesh]
+        ghost.color = SIMD4<Float>(1.0, 0.48, 0.27, 0.45)  // ember translúcido (token)
+        ghost.edgesMesh = OCCTBridge.edgesMesh(shape, radius: 0.005)
+        ghost.geometryVersion += 1
+        canvasVM.objectWillChange.send()
+    }
+
     /// Cierre común del commit de extrusión: historia paramétrica + feedback.
     private func finishExtrudeCommit(cut: Bool, distance: Double, message: String) {
+        removeLivePreviewGhost()   // el ghost cumplió; el sólido real lo reemplaza (tarea 6)
         canvasVM.scene.cadHistory.pushOperation(
             CADOperation(type: .sketchExtrude,
                          description: cut ? "Extrusión (cortar)" : "Extrusión (añadir)",
@@ -2167,12 +2276,19 @@ struct CADModeView: View {
     /// Eje sobre el que opera el transform, YA resuelto a MUNDO. En modo global es
     /// el eje del gizmo tal cual; en modo LOCAL se rota por `model.rotation` (los
     /// ejes viajan con el cuerpo — tarea 3). `nil` = drag libre (sin restricción).
+    /// Delega en `TransformSnap.resolveAxis` (matemática pura, testeable).
     private func constrainedAxis(for model: Model) -> SIMD3<Float>? {
-        guard let axis = gizmoAxis else { return nil }
-        if transformSpaceLocal {
-            return simd_normalize(model.rotation.act(axis))
+        TransformSnap.resolveAxis(gizmoAxis, local: transformSpaceLocal, rotation: model.rotation)
+    }
+
+    /// Clase de magnitud del snap/lectura según la herramienta activa (tarea 8).
+    /// Puente entre `CADTool` y el enum puro `TransformSnapKind`.
+    private var transformSnapKind: TransformSnapKind {
+        switch selectedTool {
+        case .rotate: return .angle
+        case .scale:  return .factor
+        default:      return .length
         }
-        return axis
     }
 
     /// Valor BRUTO del arrastre (sin nudge, sin snap), en unidades naturales de la
@@ -2231,23 +2347,13 @@ struct CADModeView: View {
     /// Cuantiza el escalar activo a incrementos redondos si el snap está activo
     /// (tarea 2). Mover → paso de rejilla; rotar → `angleSnapDegrees`; escalar →
     /// factores de 0.25. Snap REAL: modifica el valor que se aplica, no un placebo.
+    /// Delega en `TransformSnap.quantize` (matemática pura, testeable — tarea 8).
     private func snapTransformScalar(_ value: Double) -> Double {
-        guard toolVM.gridSnapEnabled else { return value }
-        switch selectedTool {
-        case .move:
-            let step = max(0.01, projectSettings.config.gridStep)
-            return (value / step).rounded() * step
-        case .rotate:
-            let deg = projectSettings.config.angleSnapDegrees > 0
-                ? projectSettings.config.angleSnapDegrees : 15.0
-            let stepRad = deg * .pi / 180
-            return (value / stepRad).rounded() * stepRad
-        case .scale:
-            let step = 0.25
-            return max(0.05, (value / step).rounded() * step)
-        default:
-            return value
-        }
+        TransformSnap.quantize(value,
+                               kind: transformSnapKind,
+                               enabled: toolVM.gridSnapEnabled,
+                               gridStep: projectSettings.config.gridStep,
+                               angleStepDegrees: projectSettings.config.angleSnapDegrees)
     }
 
     /// Dispara un tick háptico de selección al CRUZAR a un nuevo detente de snap
@@ -2255,21 +2361,123 @@ struct CADModeView: View {
     /// no cambió de incremento (evita zumbido continuo).
     private func fireSnapTickIfCrossed(_ snapped: Double) {
         guard toolVM.gridSnapEnabled else { lastSnapDetent = nil; return }
-        if lastSnapDetent == nil || abs(snapped - (lastSnapDetent ?? snapped)) > 1e-9 {
-            if lastSnapDetent != nil { HapticService.shared.selection() }
-            lastSnapDetent = snapped
+        if TransformSnap.crossedDetent(snapped, last: lastSnapDetent) {
+            HapticService.shared.selection()
         }
+        lastSnapDetent = snapped
     }
 
-    /// Texto de la medida viva del transform (guía de la barra, tarea 4).
-    private func transformReadoutText(for model: Model) -> String {
-        let s = transformScalar(for: model)
-        switch selectedTool {
-        case .move:   return String(format: "%+.2f", s)
-        case .rotate: return String(format: "%+.1f°", s * 180 / .pi)
-        case .scale:  return String(format: "×%.2f", s)
-        default:      return ""
+    // MARK: - HUD flotante · guía de snap · ghost (Ola LiveInteraction · L2)
+
+    /// Nombre del modelo fantasma inyectado a la escena (contrato L1↔L2).
+    static let livePreviewName = "__livePreview"
+
+    /// ¿Hay un gesto de transform EN CURSO? (dedo abajo o motor de preview vivo).
+    /// Gobierna la guía de snap (tarea 2) y la lectura VIVA del readout.
+    private var isTransformDragging: Bool {
+        (dragModelIndex != nil || dragFace != nil || livePreviewEngine.state.isActive)
+            && [.move, .rotate, .scale].contains(selectedTool)
+    }
+
+    /// ¿El HUD flotante debe verse? (tarea 1). Persiste mientras haya una herramienta
+    /// de transform activa CON objetivo seleccionado — no solo durante el arrastre —
+    /// para que el TAP sobre el número (editar valor exacto) sea alcanzable tras
+    /// soltar el dedo. Sin selección ni gesto, se oculta.
+    private var isTransformGestureActive: Bool {
+        guard [.move, .rotate, .scale].contains(selectedTool) else { return false }
+        return isTransformDragging || activeGizmoCenter != nil
+    }
+
+    /// ¿El transform está PEGADO a un detente de snap justo ahora? Vira el número
+    /// del HUD a acero + enciende su glow (tarea 2 — hacer visible el snap).
+    private var transformHUDSnapped: Bool {
+        toolVM.gridSnapEnabled && lastSnapDetent != nil && isTransformGestureActive
+    }
+
+    /// Eje de la guía de snap (tarea 2): el eje restringido del cuerpo/cara activo
+    /// YA resuelto a mundo (respeta local/global). nil ⇒ drag libre / sin eje.
+    private var transformGuideAxis: SIMD3<Float>? {
+        if let df = dragFace, df.modelIndex < canvasVM.scene.models.count {
+            return df.normal   // push/pull: la guía sigue la normal de la cara
         }
+        guard let idx = dragModelIndex, idx < canvasVM.scene.models.count else { return nil }
+        return constrainedAxis(for: canvasVM.scene.models[idx])
+    }
+
+    /// Paso de rejilla actual (unidades de mundo) para los ticks de la guía.
+    private var transformGuideStep: Double {
+        max(0.01, projectSettings.config.gridStep)
+    }
+
+    /// Sincroniza el modelo fantasma `__livePreview` con la malla actual del motor.
+    /// Se llama al montar el preview y en CADA regeneración de malla (`.onChange`),
+    /// para que el ghost siga la distancia en vivo. L1 lo renderiza translúcido.
+    private func syncLivePreviewGhost() {
+        guard let previewMesh = livePreviewEngine.previewMesh else { return }
+        let name = Self.livePreviewName
+        let ghost = canvasVM.scene.models.first(where: { $0.name == name }) ?? {
+            let m = Model(name: name)
+            canvasVM.scene.addModel(m)
+            return m
+        }()
+        ghost.meshes = [previewMesh]
+        ghost.color = SIMD4<Float>(1.0, 0.48, 0.27, 0.45)  // ember translúcido (token)
+        ghost.edgesMesh = livePreviewEngine.previewEdges
+        ghost.geometryVersion += 1
+        canvasVM.objectWillChange.send()
+    }
+
+    /// Retira el fantasma de la escena (al commit/cancel del gesto — contrato L2).
+    private func removeLivePreviewGhost() {
+        canvasVM.scene.models.removeAll { $0.name == Self.livePreviewName }
+        canvasVM.objectWillChange.send()
+    }
+
+    /// Aplica un valor EXACTO tecleado en el HUD (tarea 1). Dos caminos, ambos reales:
+    ///   · Gesto EN CURSO (dedo abajo / ghost vivo) → solo refresca el preview con el
+    ///     `transformNudge` nuevo; el bake ocurre al soltar como siempre.
+    ///   · IDLE con objetivo seleccionado → arma el drag desde cero, aplica el preview
+    ///     con el nudge y lo HORNEA al B-rep de inmediato (aplicación exacta directa).
+    /// Nunca es un botón falso: si no hay objetivo ni gesto, avisa honestamente.
+    private func applyNudgeEdit() {
+        HapticService.shared.selection()
+        if isTransformDragging {
+            applyTransformPreview()          // el bake llega al soltar el dedo
+            return
+        }
+        // IDLE: aplica un valor exacto al CUERPO seleccionado (móver/rotar/escalar).
+        // El push/pull de cara necesita el arrastre vivo (su geometría depende de la
+        // normal + ghost OCCT): sin gesto, guía honestamente en vez de fingir.
+        let typed = transformNudge
+        guard let target = activeTransformTarget else {
+            selectionController.showHint("Selecciona un cuerpo o cara para aplicar el valor")
+            return
+        }
+        guard abs(typed) > 1e-9 else { return }
+        if case .face = target, selectedTool == .move {
+            selectionController.showHint("Arrastra la cara para empujarla — o teclea mientras arrastras")
+            return
+        }
+        let axisSeed = gizmoAxis ?? primaryAxisForNudge  // sin eje del gizmo, usa uno por defecto
+        beginTransformDrag(hitModelIndex: nil)           // OJO: resetea transformNudge a 0
+        gizmoAxis = axisSeed
+        transformNudge = typed                           // re-inyecta el valor tecleado
+        applyTransformPreview()
+        bakeTransform()
+    }
+
+    /// Eje por defecto para aplicar un nudge numérico sin haber tocado el gizmo:
+    /// Y para rotar (giro sobre vertical), X en el resto. Solo se usa como semilla
+    /// cuando `gizmoAxis == nil` en la aplicación numérica directa.
+    private var primaryAxisForNudge: SIMD3<Float> {
+        selectedTool == .rotate ? SIMD3<Float>(0, 1, 0) : SIMD3<Float>(1, 0, 0)
+    }
+
+    /// Texto de la medida viva del transform (HUD flotante + guía de la barra,
+    /// tareas 1/4). Delega en `TransformSnap.readout` (formateo puro, testeable).
+    private func transformReadoutText(for model: Model) -> String {
+        guard [.move, .rotate, .scale].contains(selectedTool) else { return "" }
+        return TransformSnap.readout(transformScalar(for: model), kind: transformSnapKind)
     }
 
     /// Prepara el estado de arrastre de transformación a partir del OBJETIVO
@@ -2328,7 +2536,13 @@ struct CADModeView: View {
                 selectionController.showHint("Esta cara no se puede empujar aquí")
                 return
             }
-            dragFace = (m, f, SIMD3<Float>(Float(n.x), Float(n.y), Float(n.z)))
+            let normal = SIMD3<Float>(Float(n.x), Float(n.y), Float(n.z))
+            dragFace = (m, f, normal)
+            // Ghost REAL de push/pull (tarea 4): el motor genera la malla del sólido
+            // resultante y la inyecta como `__livePreview`. Reemplaza el pseudo-ghost
+            // de mover el highlight. El commit horneará el B-rep real en bakeTransform.
+            livePreviewEngine.beginExtrude(shape: shape, faceIndex: f,
+                                           direction: normal, initialDistance: 0)
 
         case .edge, .vertex:
             // supportsRealGeometry == false: estado honesto, cero geometría fingida.
@@ -2341,15 +2555,14 @@ struct CADModeView: View {
     /// por frame). Al soltar, bakeTransform lo hornea al B-rep y resetea el TRS.
     /// Pivote en el centro c: T(c)·Op·T(−c) ⇒ position compensada.
     private func applyTransformPreview() {
-        // Drag de CARA: ghost del highlight viajando por la normal + distancia viva
-        // en la barra (preview honesto sin recomputar OCCT por frame).
+        // Drag de CARA: ghost REAL de push/pull vía LivePreviewEngine (tarea 4). El
+        // motor regenera la malla del sólido resultante por la distancia proyectada
+        // sobre la normal; la inyección de `__livePreview` la muestra translúcida.
         if let df = dragFace, selectedTool == .move,
            df.modelIndex < canvasVM.scene.models.count {
             let model = canvasVM.scene.models[df.modelIndex]
             let d = simd_dot(transformParams(for: model).delta, df.normal)
-            if let overlay = canvasVM.scene.models.first(where: { $0.name == Self.edgeHighlightName }) {
-                overlay.position = df.normal * d
-            }
+            livePreviewEngine.update(parameter: d)
             fireSnapTickIfCrossed(transformScalar(for: model))
             transformReadout = String(format: "%+.2f", d)
             selectionController.showHint(String(format: "Mover cara · %+.2f", d))
@@ -2400,10 +2613,12 @@ struct CADModeView: View {
     /// siguen exactos) o, si el modelo no tiene B-rep, a los vértices de la malla.
     private func bakeTransform() {
         // Drag de CARA: hornear el push/pull real (BRepFeat prism) con la distancia
-        // proyectada del gesto sobre la normal capturada al empezar.
+        // proyectada del gesto sobre la normal capturada al empezar. El ghost en vivo
+        // (`__livePreview`, tarea 4) se retira aquí: el sólido REAL lo reemplaza.
         if let df = dragFace, selectedTool == .move {
             dragFace = nil
-            canvasVM.scene.models.first(where: { $0.name == Self.edgeHighlightName })?.position = .zero
+            livePreviewEngine.cancel()      // el ghost cumplió su función; fuera del motor
+            removeLivePreviewGhost()        // retira el modelo `__livePreview` de la escena
             // Limpia el estado de arrastre (eje + acumulador) para que el SIGUIENTE
             // gesto empiece desde identidad — sin arrastrar el offset del anterior.
             defer { dragAccum = .zero; gizmoAxis = nil; transformNudge = 0; lastSnapDetent = nil; transformReadout = "" }
