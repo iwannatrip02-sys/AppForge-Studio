@@ -27,7 +27,9 @@ jobs:
   ui-probe:
     name: Boot simulator, drive app, capture evidence
     runs-on: macos-15
-    timeout-minutes: 75
+    # 110: corrida 4 probó que el ciclo completo necesita ~85-95 min (setup 22'
+    # + compilar runner UITests 21' + test ~20' con snapshots lentos + video 15').
+    timeout-minutes: 110
 
     env:
       # Bundle ID REAL de la app (verificado en project.yml:
@@ -288,8 +290,9 @@ jobs:
         continue-on-error: false
         # Cinturón: si el test se cuelga (corrida 3: query de accesibilidad colgada
         # >35 min hasta el timeout del JOB → cero artifacts), el step muere antes
-        # y los uploads if:always() corren igual.
-        timeout-minutes: 35
+        # y los uploads if:always() corren igual. 55 = compilar runner (~21') +
+        # allowance del test (25') + margen.
+        timeout-minutes: 55
         working-directory: ${{ env.WORKDIR }}
         env:
           UDID: ${{ steps.sim.outputs.UDID }}
@@ -308,8 +311,8 @@ jobs:
             -derivedDataPath DerivedData \
             -only-testing:AppForgeStudioUITests \
             -test-timeouts-enabled YES \
-            -default-test-execution-time-allowance 900 \
-            -maximum-test-execution-time-allowance 1500 \
+            -default-test-execution-time-allowance 1500 \
+            -maximum-test-execution-time-allowance 1800 \
             -resultBundlePath "$GITHUB_WORKSPACE/${WORKDIR}/artifacts/GearScenario.xcresult" \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY=- \
