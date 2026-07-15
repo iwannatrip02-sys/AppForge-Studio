@@ -135,6 +135,23 @@ final class GearScenarioTests: XCTestCase {
         }
     }
 
+    /// Abre el flyout de un grupo del rail con RECUPERACIÓN DE TOGGLE: los flyouts
+    /// son encadenables (pueden quedar abiertos tras usar una herramienta), así que
+    /// un tap "de apertura" puede en realidad cerrarlos. Estrategia: si la
+    /// herramienta esperada ya está visible, no tocar nada; si no, tap al grupo; si
+    /// sigue sin aparecer (el tap lo cerró), tap de nuevo. (Fallo real corrida 1:
+    /// 'cad.primitive.box' nunca apareció porque el flyout quedó abierto tras el
+    /// cilindro y el tap del guión lo cerró.)
+    private func openFlyout(group groupID: String, expecting toolID: String,
+                            file: StaticString = #filePath, line: UInt = #line) {
+        if app.buttons[toolID].waitForExistence(timeout: 2) { return }
+        tapButton(groupID, file: file, line: line)
+        if !app.buttons[toolID].waitForExistence(timeout: 3) {
+            tapButton(groupID, file: file, line: line)
+            _ = app.buttons[toolID].waitForExistence(timeout: midTimeout)
+        }
+    }
+
     /// El viewport 3D: el mayor elemento tocable de la app (Metal view a pantalla
     /// completa). No tiene identifier del contrato — usamos el propio `app` como
     /// sistema de coordenadas normalizado, lo que es estable ante el tamaño de pantalla.
@@ -156,7 +173,7 @@ final class GearScenarioTests: XCTestCase {
 
         // --- Paso 2: crear cilindro (el disco base) --------------------------
         step("Primitivas/Cilindro", "abrir flyout y crear cilindro (disco)")
-        tapButton(ID.primitivesMenu)
+        openFlyout(group: ID.primitivesMenu, expecting: ID.primitiveCylinder)
         tapButton(ID.primitiveCylinder, timeout: midTimeout)
         // Assert: aparece HUD de transform (cuerpo activo) o el menú de patrón se
         // habilita al haber selección. El HUD vivo es la señal más directa.
@@ -166,7 +183,7 @@ final class GearScenarioTests: XCTestCase {
 
         // --- Paso 3: crear caja (el diente) ----------------------------------
         step("Primitivas/Caja", "abrir flyout y crear caja (diente)")
-        tapButton(ID.primitivesMenu)
+        openFlyout(group: ID.primitivesMenu, expecting: ID.primitiveBox)
         tapButton(ID.primitiveBox, timeout: midTimeout)
         // Assert: la herramienta mover debe existir para poder colocar el diente.
         let moveTool = require(app.buttons, ID.toolMove, timeout: midTimeout)
@@ -212,6 +229,9 @@ final class GearScenarioTests: XCTestCase {
         // → union define y ejecuta. Somos defensivos: si el botón no está tras un
         // par, no reventamos el resto del escenario.
         step("Unión booleana", "unir dientes al disco (pares alcanzables)")
+        // La unión vive en el flyout del grupo "Combinar" (identifier derivado del
+        // rawValue español: cad.group.combinar) — abrirlo primero.
+        openFlyout(group: "cad.group.combinar", expecting: ID.booleanUnion)
         tapButton(ID.booleanUnion, timeout: midTimeout)
         // Definir A (centro = disco) y B (borde = un diente) por toques al viewport.
         viewportPoint(0.50, 0.52).tap()   // A: disco
@@ -225,6 +245,8 @@ final class GearScenarioTests: XCTestCase {
 
         // --- Paso 9: Hole en el centro de la cara superior -------------------
         step("Agujero", "activar Hole y perforar el centro de la cara superior")
+        // Hole vive en el flyout del grupo "Formar" (cad.group.formar) — abrirlo primero.
+        openFlyout(group: "cad.group.formar", expecting: ID.toolHole)
         tapButton(ID.toolHole, timeout: midTimeout)
         // Parámetros del agujero via NumericField genérico (el activo), si está.
         let numeric = app.textFields[ID.numericField]

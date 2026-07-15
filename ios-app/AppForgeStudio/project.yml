@@ -120,3 +120,26 @@ targets:
         TEST_TARGET_NAME: AppForgeStudio
     dependencies:
       - target: AppForgeStudio
+
+# Schemes EXPLÍCITOS (2026-07-15): sin esto, el scheme auto-generado metía los
+# UI-tests (GearScenario, ~5 min de gestos) al carril sagrado build.yml y lo
+# ponía rojo/lento. AppForgeStudio = build+tests unitarios (build.yml intacto);
+# GearScenario = solo los UI-tests de gestos (los corre ui-probe.yml).
+schemes:
+  AppForgeStudio:
+    build:
+      targets:
+        AppForgeStudio: all
+    test:
+      config: Debug
+      targets:
+        - AppForgeStudioTests
+  GearScenario:
+    build:
+      targets:
+        AppForgeStudio: all
+        AppForgeStudioUITests: [test]
+    test:
+      config: Debug
+      targets:
+        - AppForgeStudioUITests

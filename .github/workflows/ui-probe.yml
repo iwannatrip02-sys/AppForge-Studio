@@ -27,7 +27,7 @@ jobs:
   ui-probe:
     name: Boot simulator, drive app, capture evidence
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 75
 
     env:
       # Bundle ID REAL de la app (verificado en project.yml:
@@ -297,7 +297,7 @@ jobs:
           # simulador iOS 18 rechaza instalar el runner con "Missing bundle ID".
           xcodebuild test \
             -project AppForgeStudio.xcodeproj \
-            -scheme AppForgeStudio \
+            -scheme GearScenario \
             -sdk iphonesimulator \
             -destination "platform=iOS Simulator,id=$UDID" \
             -configuration Debug \
