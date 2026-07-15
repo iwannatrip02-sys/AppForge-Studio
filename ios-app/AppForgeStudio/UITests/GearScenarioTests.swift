@@ -46,6 +46,7 @@ final class GearScenarioTests: XCTestCase {
         static let patternMenu          = "cad.pattern.menu"
         static let patternCircularCount = "cad.pattern.circular.count"
         static let patternCircularApply = "cad.pattern.circular.apply"
+        static let selectionBody        = "cad.selection.body"
         static let booleanUnion         = "cad.boolean.union"
         static let booleanSubtract      = "cad.boolean.subtract"
         static let numericField         = "cad.numeric.field"
@@ -205,17 +206,26 @@ final class GearScenarioTests: XCTestCase {
         step("Seleccionar", "activar select y tocar el diente para seleccionarlo")
         tapButton(ID.toolSelect)
         viewportPoint(0.68, 0.52).tap()
-        // Assert: el menú de patrón (parte del selectionBar) ya debe existir.
+        // El toque selecciona la CARA (estilo Shapr3D). El menú de patrón solo existe
+        // con CUERPO seleccionado (bodyIndex) → escalar cara→cuerpo con el botón
+        // "Cuerpo" del selectionBar. (Fallo real corrida 2: 'cad.pattern.menu' nunca
+        // apareció porque la selección quedó en cara — la jerarquía mostraba
+        // Push/Pull, Quitar, Cuerpo, Deseleccionar.)
+        step("Cuerpo", "escalar la selección de cara a cuerpo entero")
+        tapButton(ID.selectionBody, timeout: midTimeout)
+        // Assert: el menú de patrón (parte del selectionBar de cuerpo) ya debe existir.
         let patternMenu = require(app.buttons, ID.patternMenu, timeout: midTimeout)
         XCTAssertTrue(patternMenu.exists,
-                      "El menú Patrón ○ (selectionBar) no apareció: ¿hay selección activa?")
+                      "El menú Patrón ○ (selectionBar) no apareció: ¿hay selección de cuerpo activa?")
 
         // --- Paso 6: patrón circular count=8 ---------------------------------
-        step("Patrón circular", "abrir menú patrón y fijar copias=8")
+        step("Patrón circular", "abrir panel de patrón y fijar copias=8")
         tapButton(ID.patternMenu)
-        let countField = require(app.otherElements, ID.patternCircularCount, timeout: midTimeout)
-        // El count es un Stepper (2...36). Lo empujamos a 8 con incrementos.
-        setStepper(toValue: 8, incrementButtonHint: ID.patternCircularCount)
+        // El panel es un POPOVER con Stepper real (un Menu de iOS descarta los
+        // Stepper). El default de la app es 6 → 8 son 2 incrementos deterministas.
+        let countField = require(app.descendants(matching: .any),
+                                 ID.patternCircularCount, timeout: midTimeout)
+        setStepper(id: ID.patternCircularCount, from: 6, to: 8)
         XCTAssertTrue(countField.exists, "El control de conteo del patrón circular no existe.")
 
         // --- Paso 7: aplicar el patrón (8 dientes) ---------------------------
@@ -280,25 +290,17 @@ final class GearScenarioTests: XCTestCase {
 
     // MARK: - Stepper helper
 
-    /// Empuja un Stepper de conteo hacia `value` tocando su incremento.
-    /// Defensivo: SwiftUI expone el Stepper como dos botones "Increment"/"Decrement"
-    /// hijos del elemento con el identifier dado. Como no conocemos el valor inicial
-    /// (default suele ser el mínimo del rango, 2), incrementamos hasta un tope seguro.
-    private func setStepper(toValue value: Int, incrementButtonHint id: String) {
-        // Buscar el botón Increment del stepper por su relación con el identifier.
-        let container = app.otherElements[id]
-        let increment = container.buttons["Increment"].exists
-            ? container.buttons["Increment"]
-            : app.steppers[id].buttons.element(boundBy: 1)
-        // Rango 2...36; desde el mínimo 2 hasta `value` son (value-2) incrementos.
-        // Cap defensivo por si el default no es el mínimo.
-        let taps = max(0, min(value - 2, 34))
-        for _ in 0..<taps {
-            if increment.exists && increment.isHittable {
-                increment.tap()
-            } else {
-                break
-            }
+    /// Empuja un Stepper de `from` a `to` tocando su botón de incremento. El valor
+    /// inicial es CONOCIDO (default de la app) porque el popover se crea fresco.
+    /// SwiftUI expone el Stepper con dos botones hijos (Decrement=0, Increment=1);
+    /// primero intentamos por label del sistema, con fallback posicional.
+    private func setStepper(id: String, from current: Int, to target: Int) {
+        let container = app.descendants(matching: .any).matching(identifier: id).firstMatch
+        let byLabel = container.buttons["Increment"]
+        let increment = byLabel.exists ? byLabel : container.buttons.element(boundBy: 1)
+        for _ in 0..<max(0, target - current) {
+            guard increment.exists, increment.isHittable else { break }
+            increment.tap()
         }
     }
 }

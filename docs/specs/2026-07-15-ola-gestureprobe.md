@@ -22,8 +22,12 @@ cad.tool.select | cad.tool.move | cad.tool.rotate | cad.tool.scale
 cad.tool.sketch | cad.tool.extrude | cad.tool.hole
 cad.primitives.menu      → flyout/menú de primitivas
 cad.primitive.box | cad.primitive.cylinder
-cad.pattern.menu         → menú Patrón ○ del selectionBar
+cad.selection.body       → botón "Cuerpo" del selectionBar (escala selección cara→cuerpo;
+                           precondición del menú de patrón: bodyIndex != nil)
+cad.pattern.menu         → botón Patrón ○ del selectionBar (abre POPOVER de parámetros —
+                           era Menu, pero UIMenu descarta los Stepper)
 cad.pattern.circular.count | cad.pattern.circular.apply
+cad.pattern.linear.menu | cad.pattern.linear.count | cad.pattern.linear.spacing | cad.pattern.linear.apply
 cad.boolean.union | cad.boolean.subtract
 cad.numeric.field        → NumericField genérico (el activo)
 cad.export.button        → botón Exportar del chrome CAD
@@ -43,7 +47,8 @@ PROHIBIDO: build.yml y todo el código fuente de la app.
    (a) `os_log "GESTURE-STEP N: <herramienta> — <acción>"`, (b) screenshot XCTAttachment,
    (c) assert verificable (existe el cuerpo nuevo, el panel cambió, etc. — vía accessibility).
    Pasos: nuevo proyecto → crear cilindro (disco) → crear caja (diente) → mover diente al borde
-   (drag de gizmo por coordenadas) → seleccionar → patrón circular count=8 → aplicar → unión
+   (drag de gizmo por coordenadas) → seleccionar (cara) → Cuerpo (escalar a cuerpo) →
+   patrón circular count=8 → aplicar → unión
    (lo alcanzable) → Hole en el centro de la cara superior → órbita 1-dedo en vacío + pinch zoom
    (inspección final). Launch args: `-UIProbeSkipOnboarding` (reusar el sello de onboarding
    existente de UIProbeMode) y `-UIProbeTouchViz` (visualizador de G-B).

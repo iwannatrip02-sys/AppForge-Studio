@@ -87,6 +87,10 @@ struct CADModeView: View {
     @State private var patternLinearCount: Int = 3
     @State private var patternLinearSpacing: Double = 1.6
     @State private var patternCircularCount: Int = 6
+    /// Popovers de parámetros de patrón: un Menu de iOS DESCARTA los Stepper
+    /// (UIMenu solo renderiza botones/toggles) — las variables quedaban invisibles.
+    @State private var showLinearPatternPanel = false
+    @State private var showCircularPatternPanel = false
     /// Dispara el flash "templado" (IDENTIDAD_FORGE §6) al confirmar push/pull.
     @State private var temperTick: Int = 0
     /// Medición por toques sobre el modelo REAL (A → B → distancia exacta).
@@ -1348,30 +1352,58 @@ struct CADModeView: View {
                 .font(.caption)
 
                 // Patrón LINEAL con parámetros (cantidad + espaciado) en un popover
-                // compacto — antes ×3 y espaciado fijos.
-                Menu {
-                    Stepper("Copias: \(patternLinearCount)",
-                            value: $patternLinearCount, in: 2...24)
-                    Stepper(String(format: "Espaciado: %.1f×", patternLinearSpacing),
-                            value: $patternLinearSpacing, in: 0.5...5.0, step: 0.1)
-                    Button("Aplicar patrón lineal") { applyLinearPattern(modelIndex: modelIndex) }
+                // con controles REALES (Stepper dentro de Menu no se renderiza).
+                Button {
+                    HapticService.shared.light()
+                    showLinearPatternPanel = true
                 } label: {
                     Label("Patrón ↹", systemImage: "rectangle.grid.1x2")
                         .font(.caption)
                 }
+                .accessibilityIdentifier("cad.pattern.linear.menu")
+                .popover(isPresented: $showLinearPatternPanel, arrowEdge: .top) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Stepper("Copias: \(patternLinearCount)",
+                                value: $patternLinearCount, in: 2...24)
+                            .accessibilityIdentifier("cad.pattern.linear.count")
+                        Stepper(String(format: "Espaciado: %.1f×", patternLinearSpacing),
+                                value: $patternLinearSpacing, in: 0.5...5.0, step: 0.1)
+                            .accessibilityIdentifier("cad.pattern.linear.spacing")
+                        Button("Aplicar patrón lineal") {
+                            applyLinearPattern(modelIndex: modelIndex)
+                            showLinearPatternPanel = false
+                        }
+                        .accessibilityIdentifier("cad.pattern.linear.apply")
+                    }
+                    .font(.caption)
+                    .padding(12)
+                    .frame(minWidth: 240)
+                }
 
                 // Patrón CIRCULAR con cantidad configurable (arco: siempre 360°).
-                Menu {
-                    Stepper("Copias: \(patternCircularCount)",
-                            value: $patternCircularCount, in: 2...36)
-                    .accessibilityIdentifier("cad.pattern.circular.count")
-                    Button("Aplicar patrón circular") { applyCircularPattern(modelIndex: modelIndex) }
-                    .accessibilityIdentifier("cad.pattern.circular.apply")
+                Button {
+                    HapticService.shared.light()
+                    showCircularPatternPanel = true
                 } label: {
                     Label("Patrón ○", systemImage: "circle.grid.cross")
                         .font(.caption)
                 }
                 .accessibilityIdentifier("cad.pattern.menu")
+                .popover(isPresented: $showCircularPatternPanel, arrowEdge: .top) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Stepper("Copias: \(patternCircularCount)",
+                                value: $patternCircularCount, in: 2...36)
+                            .accessibilityIdentifier("cad.pattern.circular.count")
+                        Button("Aplicar patrón circular") {
+                            applyCircularPattern(modelIndex: modelIndex)
+                            showCircularPatternPanel = false
+                        }
+                        .accessibilityIdentifier("cad.pattern.circular.apply")
+                    }
+                    .font(.caption)
+                    .padding(12)
+                    .frame(minWidth: 240)
+                }
 
                 Button(role: .destructive) {
                     HapticService.shared.heavy()
@@ -1444,6 +1476,7 @@ struct CADModeView: View {
                     selectionController.escalateToBody(models: canvasVM.scene.models)
                 }
                 .font(.caption)
+                .accessibilityIdentifier("cad.selection.body")
             }
 
             Button(action: { selectionController.deselect() }) {
