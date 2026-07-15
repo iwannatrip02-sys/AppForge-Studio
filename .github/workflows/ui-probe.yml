@@ -161,33 +161,7 @@ jobs:
 
           # Elegir el primer iPad disponible; preferir iPad Pro si existe.
           # Salida: UDID en stdout, vacío si no hay ninguno.
-          UDID=$(python3 <<'PY'
-import json
-with open('/tmp/devices.json') as f:
-    data = json.load(f)
-ipads = []
-for runtime, devs in data.get('devices', {}).items():
-    if 'iOS' not in runtime:
-        continue
-    for dev in devs:
-        if not dev.get('isAvailable', True):
-            continue
-        name = dev.get('name', '')
-        if 'iPad' in name:
-            # prioridad: iPad Pro > iPad Air > cualquier iPad
-            score = 0
-            if 'Pro' in name:
-                score = 3
-            elif 'Air' in name:
-                score = 2
-            else:
-                score = 1
-            ipads.append((score, name, dev['udid']))
-ipads.sort(reverse=True)
-if ipads:
-    print(ipads[0][2])
-PY
-)
+          UDID=$(python3 scripts/ui-probe/pick_ipad.py /tmp/devices.json)
 
           if [ -z "$UDID" ]; then
             echo "=== No hay iPad preexistente; creando uno ==="
