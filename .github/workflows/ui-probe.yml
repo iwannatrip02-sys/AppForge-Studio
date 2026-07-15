@@ -286,23 +286,70 @@ jobs:
         continue-on-error: true
         run: brew install ffmpeg || echo "ffmpeg no instalable (segment_video.py degradará)"
 
-      - name: Run GearScenarioTests (gestos reales) contra el mismo simulador
+      # Compilar el runner de UITests SEPARADO del test (corrida 6: el runner de
+      # GitHub murió por inanición de CPU/memoria — "lost communication" — con
+      # grabación de video de 70+ min + build + sim simultáneos). build-for-testing
+      # corre SIN grabación activa; el test luego usa test-without-building.
+      - name: Build UITest runner (build-for-testing, sin grabación)
         continue-on-error: false
-        # Cinturón: si el test se cuelga (corrida 3: query de accesibilidad colgada
-        # >35 min hasta el timeout del JOB → cero artifacts), el step muere antes
-        # y los uploads if:always() corren igual. 55 = compilar runner (~21') +
-        # allowance del test (25') + margen.
-        timeout-minutes: 55
+        timeout-minutes: 35
         working-directory: ${{ env.WORKDIR }}
         env:
           UDID: ${{ steps.sim.outputs.UDID }}
         run: |
           set -x
           set -o pipefail
-          echo "=== xcodebuild test -only-testing:AppForgeStudioUITests (UDID=$UDID) ==="
           # Firma ad-hoc IDÉNTICA al resto (invariante ci_infra): sin esto el
           # simulador iOS 18 rechaza instalar el runner con "Missing bundle ID".
-          xcodebuild test \
+          xcodebuild build-for-testing \
+            -project AppForgeStudio.xcodeproj \
+            -scheme GearScenario \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$UDID" \
+            -configuration Debug \
+            -derivedDataPath DerivedData \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY=- \
+            OTHER_CODE_SIGN_FLAGS=--deep \
+            OTHER_CPLUSPLUSFLAGS='$(inherited) -Wno-c++11-narrowing' \
+            2>&1 | tee gear-build.log
+
+      # La grabación del probe llevaba 40+ min al llegar aquí: (a) presión de
+      # CPU/disco que mató al runner en corrida 6, (b) los clips-tutorial se
+      # cortaban de la sección EQUIVOCADA (segment_video.py anclaba el paso 1 a
+      # t=0 del video). Video fresco solo para la sesión del engranaje + hora de
+      # inicio real para el ancla exacta del segmentador.
+      - name: Reiniciar grabación (video fresco para el engranaje)
+        continue-on-error: true
+        run: |
+          set -x
+          UDID="${{ steps.sim.outputs.UDID }}"
+          if [ -f /tmp/videopid ]; then
+            kill -INT "$(cat /tmp/videopid)" 2>/dev/null || true
+            sleep 5
+          fi
+          cd "$GITHUB_WORKSPACE/${WORKDIR}/artifacts"
+          [ -f video.mp4 ] && mv video.mp4 video-probe.mp4
+          xcrun simctl io "$UDID" recordVideo --codec=h264 --force video.mp4 &
+          echo $! > /tmp/videopid
+          date -u +%H:%M:%S > video-start.txt
+          sleep 2
+
+      - name: Run GearScenarioTests (gestos reales) contra el mismo simulador
+        continue-on-error: false
+        # Cinturón: si el test se cuelga (corrida 3: query de accesibilidad colgada
+        # >35 min hasta el timeout del JOB → cero artifacts), el step muere antes
+        # y los uploads if:always() corren igual. 30 = allowance del test (25') +
+        # margen (el build ya corrió en el step anterior).
+        timeout-minutes: 30
+        working-directory: ${{ env.WORKDIR }}
+        env:
+          UDID: ${{ steps.sim.outputs.UDID }}
+        run: |
+          set -x
+          set -o pipefail
+          echo "=== xcodebuild test-without-building (UDID=$UDID) ==="
+          xcodebuild test-without-building \
             -project AppForgeStudio.xcodeproj \
             -scheme GearScenario \
             -sdk iphonesimulator \
@@ -314,10 +361,6 @@ jobs:
             -default-test-execution-time-allowance 1500 \
             -maximum-test-execution-time-allowance 1800 \
             -resultBundlePath "$GITHUB_WORKSPACE/${WORKDIR}/artifacts/GearScenario.xcresult" \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY=- \
-            OTHER_CODE_SIGN_FLAGS=--deep \
-            OTHER_CPLUSPLUSFLAGS='$(inherited) -Wno-c++11-narrowing' \
             2>&1 | tee gear-test.log
 
       # Extraer los XCTAttachment (screenshots por paso) del .xcresult.
@@ -361,10 +404,12 @@ jobs:
         working-directory: ${{ env.WORKDIR }}
         run: |
           set -x
+          VIDEO_START="$(cat artifacts/video-start.txt 2>/dev/null || true)"
           python3 "$GITHUB_WORKSPACE/scripts/ui-probe/segment_video.py" \
             --video artifacts/video.mp4 \
             --log artifacts/app-log.txt \
             --out artifacts/tutorials \
+            ${VIDEO_START:+--video-start "$VIDEO_START"} \
             || echo "segment_video.py devolvió no-cero (degradado; video completo igual sube)"
           ls -laR artifacts/tutorials || true
 

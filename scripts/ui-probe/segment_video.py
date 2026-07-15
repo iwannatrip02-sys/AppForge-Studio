@@ -128,14 +128,16 @@ def video_duration(video_path):
         return None
 
 
-def compute_ranges(steps, duration):
+def compute_ranges(steps, duration, video_start=None):
     """Asigna a cada paso [start, end) en segundos RELATIVOS al inicio del video.
 
     Estrategia:
-      - Con timestamps absolutos: el primer paso ancla t=0 (el video empezó ~antes;
-        no tenemos el instante exacto de inicio del recordVideo, así que anclamos al
-        primer marcador y desplazamos hacia atrás un pequeño pre-roll). Cada frontera
-        es el timestamp del paso siguiente.
+      - Con ``video_start`` (segundos del día, mismo reloj UTC del log): ancla exacta —
+        cada paso cae en (abs_secs - video_start). Corrige el sesgo histórico de
+        anclar el paso 1 a t=0 (el video de la sesión arranca ~1-2 min antes por el
+        launch de la app).
+      - Con timestamps absolutos pero sin video_start: el primer paso ancla t=0
+        (aproximación; válida si la grabación arrancó justo antes del test).
       - Sin timestamps: reparto uniforme sobre la duración (o 3s/paso si no hay dur).
     """
     if not steps:
@@ -146,6 +148,16 @@ def compute_ranges(steps, duration):
 
     if have_ts:
         base = steps[0]["abs_secs"]
+        anchor_offset = 0.0
+        if video_start is not None:
+            delta = base - video_start
+            if delta < 0:
+                delta += 86400.0  # el video arrancó antes de medianoche
+            # Sanidad: si la deriva no es plausible (>6h), ignorar el ancla externa.
+            if delta <= 6 * 3600:
+                anchor_offset = delta
+            else:
+                log(f"video-start implausible (delta={delta:.1f}s); anclando al paso 1")
         # Corregir vuelta de medianoche (raro en CI pero barato de cubrir).
         rel = []
         prev = None
@@ -154,7 +166,7 @@ def compute_ranges(steps, duration):
             t = st["abs_secs"] - base
             if prev is not None and t < prev:
                 acc += 86400.0  # cruzó medianoche
-            rel.append(t + acc)
+            rel.append(t + acc + anchor_offset)
             prev = t
         for i, st in enumerate(steps):
             start = max(0.0, rel[i] - PRE_ROLL)
@@ -193,7 +205,18 @@ def main():
     ap.add_argument("--video", required=True)
     ap.add_argument("--log", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--video-start", default=None,
+                    help="Hora UTC de inicio de la grabación (HH:MM:SS[.frac], mismo "
+                         "reloj del log). Ancla exacta de los clips; vacío = paso 1.")
     args = ap.parse_args()
+
+    video_start = None
+    if args.video_start:
+        mt = re.match(r"^(\d{1,2}):(\d{2}):(\d{2})(?:\.(\d+))?$", args.video_start.strip())
+        if mt:
+            video_start = secs_of(mt.group(1), mt.group(2), mt.group(3), mt.group(4) or "")
+        else:
+            log(f"--video-start ilegible: {args.video_start!r} (anclando al paso 1)")
 
     os.makedirs(args.out, exist_ok=True)
     manifest_path = os.path.join(args.out, "tutorials.json")
@@ -202,7 +225,7 @@ def main():
     have_video = os.path.isfile(args.video)
     have_ffmpeg = shutil.which("ffmpeg") is not None
     duration = video_duration(args.video) if have_video else None
-    ranges = compute_ranges(steps, duration)
+    ranges = compute_ranges(steps, duration, video_start)
 
     manifest = {
         "source_video": os.path.basename(args.video) if have_video else None,
