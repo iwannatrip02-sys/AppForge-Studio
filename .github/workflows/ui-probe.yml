@@ -256,32 +256,20 @@ jobs:
           pip3 install --break-system-packages fb-idb || pip3 install fb-idb || { echo "fb-idb falló"; exit 1; }
           idb --help >/dev/null 2>&1 && echo "IDB_OK=1" >> "$GITHUB_OUTPUT" || echo "idb no responde"
 
-      - name: Accessibility tree + tap scenario (idb)
-        if: steps.idb.outputs.IDB_OK == '1'
+      # ARNÉS INTERNO (patrón launch-argument) — NO depende de idb. Relanza la app
+      # con `-UIProbeMode` y captura la secuencia cronometrada. idb (si logró
+      # instalarse) solo añade el árbol de accesibilidad + un toque de propina
+      # DENTRO del propio scenario.sh. Corre SIEMPRE: es la fuente de evidencia.
+      - name: Drive in-app PROBE mode + timed screenshots
         continue-on-error: true
         working-directory: ${{ env.WORKDIR }}
         env:
           UDID: ${{ steps.sim.outputs.UDID }}
+          BUNDLE_ID: ${{ env.BUNDLE_ID }}
         run: |
           set -x
           chmod +x "$GITHUB_WORKSPACE/scripts/ui-probe/scenario.sh"
           "$GITHUB_WORKSPACE/scripts/ui-probe/scenario.sh" "$UDID" "artifacts"
-
-      - name: Fallback settle screenshots (si no hubo idb)
-        if: steps.idb.outputs.IDB_OK != '1'
-        continue-on-error: true
-        working-directory: ${{ env.WORKDIR }}
-        run: |
-          set -x
-          UDID="${{ steps.sim.outputs.UDID }}"
-          mkdir -p artifacts/screenshots
-          # Sin idb no hay toques dirigidos, pero seguimos capturando el estado
-          # con simctl: un par de screenshots espaciados para ver animaciones/carga.
-          sleep 4
-          xcrun simctl io "$UDID" screenshot artifacts/screenshots/01-idle.png
-          sleep 4
-          xcrun simctl io "$UDID" screenshot artifacts/screenshots/02-idle.png
-          ls -la artifacts/screenshots
 
       # ---------------------------------------------------------------------
       # TEARDOWN — cerrar video/log limpiamente ANTES de empaquetar

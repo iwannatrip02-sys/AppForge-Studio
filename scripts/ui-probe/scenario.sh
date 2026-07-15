@@ -1,27 +1,29 @@
 #!/usr/bin/env bash
 #
-# scenario.sh — escenario de toques versionado para el UI Probe.
+# scenario.sh v2 — capturas cronometradas del MODO PROBE interno de la app.
 #
-# Maneja AppForgeStudio en un iPad Simulator ya booteado, con la app YA lanzada,
-# usando idb (fb-idb). Produce:
-#   - artifacts/ui-tree.json         (árbol de accesibilidad completo tras Home)
-#   - artifacts/screenshots/NN-*.png (una captura NUMERADA tras cada acción)
+# CAMBIO DE ENFOQUE (v1 → v2): v1 dependía de idb (toques externos) para salir
+# del onboarding y manejar la app. Eso resultó FRÁGIL en CI: la app se quedaba
+# en el carrusel de onboarding y no veíamos nada más (corrida 1).
 #
-# Filosofía: MEJOR ESFUERZO. Ningún fallo aquí debe tumbar el workflow — el step
-# que lo invoca lleva `continue-on-error: true`. Por eso NO usamos `set -e`; cada
-# acción es defensiva y siempre intentamos capturar el estado visual.
+# v2 usa el patrón estándar de UI-testing por LAUNCH-ARGUMENT: la app trae un
+# arnés interno (Sources/Services/UIProbeMode.swift) que se activa SOLO con
+# `-UIProbeMode`. Al activarse: sella el onboarding, pide landscape, abre un
+# proyecto y corre una secuencia cronometrada de modelado B-rep REAL
+# (caja → cilindro → seleccionar cara → push/pull → boolean), logueando cada
+# paso con os_log como "PROBE-STEP N: ...". Este script solo tiene que:
+#   1) (re)lanzar la app CON el flag, y
+#   2) tomar screenshots numerados cada ~3s durante ~45s (step-00..step-14).
+# Los toques idb son ahora un BONUS opcional al final, NO un requisito.
+#
+# HONESTIDAD: esto ejercita view models → kernel OCCT → Metal/Satin (lógica +
+# render de punta a punta), NO gestos táctiles crudos. El feel táctil se calibra
+# en device real.
 #
 # Uso:  scenario.sh <UDID> <ARTIFACTS_DIR>
 #
-# Flujo de la app (verificado en AppForgeStudioApp.swift):
-#   OnboardingFlow (si !onboardingComplete)  ->  HomeView (galería)  ->  Workspace
-# Un simulador recién instalado arranca en ONBOARDING, así que primero hay que
-# salir de él para llegar a Home y crear un proyecto.
-#
-# Cómo editarlo: añade bloques `act "descripcion" <comando idb>` en orden. El
-# número de captura se autoincrementa. Coordenadas en PUNTOS lógicos del iPad
-# (idb usa el sistema de puntos, no píxeles). Ver README para el catálogo de
-# labels de accesibilidad reales de la app.
+# Filosofía: MEJOR ESFUERZO. Ningún fallo aquí debe tumbar el workflow (el step
+# que lo invoca lleva continue-on-error). Por eso NO usamos `set -e`.
 
 set -x
 set -o pipefail
@@ -31,85 +33,61 @@ ART="${2:?falta ARTIFACTS_DIR}"
 SHOTS="$ART/screenshots"
 mkdir -p "$SHOTS"
 
-STEP=1
+# Bundle ID real de la app (verificado en project.yml).
+BUNDLE_ID="${BUNDLE_ID:-com.appforgestudio.app}"
 
 # --- helpers ---------------------------------------------------------------
 
-# shot "nombre"  -> guarda una captura NUMERADA (03-nombre.png) via simctl.
+# shot "step-NN" -> guarda una captura numerada via simctl (siempre best-effort).
 shot() {
   local name="$1"
-  local n
-  n=$(printf '%02d' "$STEP")
-  xcrun simctl io "$UDID" screenshot "$SHOTS/${n}-${name}.png" || echo "shot ${name} falló (continuo)"
-  STEP=$((STEP + 1))
+  xcrun simctl io "$UDID" screenshot "$SHOTS/${name}.png" \
+    || echo "shot ${name} falló (continuo)"
 }
 
-# act "desc" <cmd...>  -> ejecuta una acción idb, deja asentar, captura.
-act() {
-  local desc="$1"; shift
-  echo "=== ACCIÓN: $desc ==="
-  "$@" || echo "acción '$desc' devolvió no-cero (continuo)"
-  sleep 2
-  # nombre de captura = desc en slug simple
-  local slug
-  slug=$(echo "$desc" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-')
-  shot "$slug"
-}
+# --- 1. Relanzar la app CON el arnés activado ------------------------------
+# Terminamos cualquier instancia previa (el workflow ya lanzó la app SIN flag
+# para el 00-launch base) y relanzamos con -UIProbeMode para arrancar el arnés
+# desde cero: onboarding sellado, landscape, workspace, secuencia programada.
+echo "=== Relanzando $BUNDLE_ID con -UIProbeMode ==="
+xcrun simctl terminate "$UDID" "$BUNDLE_ID" 2>/dev/null || true
+sleep 1
+xcrun simctl launch "$UDID" "$BUNDLE_ID" -UIProbeMode \
+  || echo "launch -UIProbeMode devolvió no-cero (continuo; capturaremos igual)"
 
-# tap x y  -> toque puntual
-tap() { idb ui tap --udid "$UDID" "$1" "$2"; }
+# Dar tiempo a Metal/Satin a levantar el primer frame del workspace.
+sleep 4
+shot "step-00-probe-boot"
 
-# --- 0. árbol de accesibilidad del estado inicial --------------------------
-# describe-all revela labels/frames reales; sirve para diagnosticar y para
-# ajustar coordenadas si el layout del runner difiere.
-echo "=== Volcando árbol de accesibilidad inicial ==="
-idb ui describe-all --udid "$UDID" > "$ART/ui-tree.json" 2>>"$ART/ui-tree.err" \
-  || echo "describe-all falló (ui-tree.json puede quedar vacío)"
-shot "initial"
-
-# --- 1. Salir del onboarding ----------------------------------------------
-# OnboardingFlow suele ser un carrusel con botón de avanzar/empezar. Sin labels
-# garantizados, avanzamos con taps en la zona inferior-central (donde vive el
-# CTA "Empezar"/"Siguiente" en la mayoría de onboardings) varias veces.
-# Coordenadas para iPad Pro 13" (~1032x1376 pt en landscape; el simulador
-# arranca en portrait ~1032 de ancho). Zona baja-centro = CTA típico.
-for i in 1 2 3 4; do
-  act "onboarding-avanzar-$i" tap 516 1180
+# --- 2. Captura cronometrada de la secuencia interna -----------------------
+# El arnés deja ~3s entre pasos (UIProbeMode.stepInterval). Capturamos a la
+# misma cadencia para alinear cada screenshot con un "PROBE-STEP N" del log.
+# 14 tomas x ~3s ≈ 42s cubren caja→cilindro→cara→push/pull→boolean→idle.
+for n in $(seq 1 14); do
+  sleep 3
+  label=$(printf 'step-%02d' "$n")
+  shot "$label"
 done
 
-# Reintento: algunos onboardings cierran con un tap en "X" arriba-derecha.
-act "onboarding-cerrar" tap 980 90
+# --- 3. Idle final ---------------------------------------------------------
+sleep 3
+shot "step-15-idle-final"
 
-# Re-volcar árbol: si ya estamos en Home, aquí se verá "Nuevo proyecto".
-idb ui describe-all --udid "$UDID" > "$ART/ui-tree-home.json" 2>/dev/null || true
-shot "home"
+# --- 4. BONUS opcional: árbol de accesibilidad + un toque, si hay idb ------
+# NO es requerido; si idb no está o falla, el arnés interno ya produjo toda la
+# evidencia de arriba. Solo enriquece el diagnóstico cuando está disponible.
+if command -v idb >/dev/null 2>&1; then
+  echo "=== idb disponible: volcando árbol de accesibilidad (bonus) ==="
+  idb ui describe-all --udid "$UDID" > "$ART/ui-tree.json" 2>>"$ART/ui-tree.err" \
+    || echo "describe-all falló (ui-tree.json puede quedar vacío)"
+  # Un toque en el centro del viewport como prueba de vida del hit-testing.
+  idb ui tap --udid "$UDID" 700 500 || echo "tap bonus falló (continuo)"
+  sleep 2
+  shot "step-16-bonus-tap"
+else
+  echo "=== idb no disponible: el arnés interno ya cubrió la evidencia ==="
+fi
 
-# --- 2. Crear un proyecto nuevo desde Home --------------------------------
-# HomeView: primera tarjeta = "Nuevo proyecto" (icono plus). En el LazyVGrid
-# es la esquina superior-izquierda de la rejilla, bajo el header. Tap ahí.
-act "crear-proyecto" tap 150 300
-
-# Esperar a que Metal/Satin levante el viewport del workspace.
-sleep 4
-shot "workspace"
-
-# --- 3. Interactuar con el viewport 3D ------------------------------------
-# Tap en el centro del viewport para crear/seleccionar en el lienzo.
-act "tap-viewport-centro" tap 516 700
-
-# Arrastre corto = orbitar la cámara (gesto típico del canvas 3D).
-act "orbitar-camara" idb ui swipe --udid "$UDID" 400 700 650 620 --duration 0.4
-
-# --- 4. Tocar botones del rail de herramientas ----------------------------
-# El rail vive normalmente en un borde. Probamos el borde izquierdo (herramientas
-# de boceto en CADModeView) y el superior (barra Archivo/agrupar/rayos-X).
-act "rail-izquierdo-1" tap 60 400
-act "rail-izquierdo-2" tap 60 500
-act "barra-superior" tap 60 60
-
-# --- 5. Captura final ------------------------------------------------------
-shot "final"
-
-echo "=== Escenario completado. Capturas en $SHOTS ==="
+echo "=== Escenario v2 completado. Capturas en $SHOTS ==="
 ls -la "$SHOTS" || true
 exit 0

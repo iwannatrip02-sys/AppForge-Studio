@@ -1,14 +1,48 @@
 import SwiftUI
 import Metal
 import Satin
+import UIKit
+import OSLog
 
 @main
 struct AppForgeStudioApp: App {
     @StateObject private var appState = AppState()
-    @State private var showOnboarding = !UserDefaults.standard.bool(forKey: "onboardingComplete")
+    @State private var showOnboarding: Bool
     /// Inicio (galería de proyectos) — la puerta de entrada tras el onboarding.
-    @State private var showHome = true
+    @State private var showHome: Bool
     @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        // ARNÉS UI-PROBE (solo con el launch-argument `-UIProbeMode`; en
+        // producción no hace nada). Ver Sources/Services/UIProbeMode.swift.
+        // Bajo el arnés: SELLA el onboarding y SALTA la galería (Home) para
+        // montar directo el workspace — el flag debe leerse ANTES de fijar los
+        // @State del gate, por eso se inicializan aquí y no en su declaración.
+        if UIProbeMode.isActive {
+            UIProbeMode.sealOnboarding()
+            _showOnboarding = State(initialValue: false)
+            _showHome = State(initialValue: false)
+        } else {
+            _showOnboarding = State(initialValue: !UserDefaults.standard.bool(forKey: "onboardingComplete"))
+            _showHome = State(initialValue: true)
+        }
+    }
+
+    /// Pide orientación LANDSCAPE al window scene activo (API iOS 16+:
+    /// `UIWindowScene.requestGeometryUpdate`). Solo se llama bajo el arnés; en un
+    /// iPad la app ya soporta landscape, así que esto solo fuerza el arranque.
+    @MainActor
+    private func requestLandscapeOrientation() {
+        guard let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive }) ?? UIApplication.shared
+            .connectedScenes.compactMap({ $0 as? UIWindowScene }).first else { return }
+        scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscapeRight)) { error in
+            // Mejor esfuerzo: si el device/simulador rechaza el update, seguimos.
+            Logger(subsystem: "com.appforgestudio", category: "UIProbe")
+                .error("PROBE: requestGeometryUpdate landscape falló: \(error.localizedDescription)")
+        }
+    }
 
     var body: some SwiftUI.Scene {
         WindowGroup {
@@ -41,6 +75,15 @@ struct AppForgeStudioApp: App {
                     // borderedProminent) hablan brasa, no el azul de iOS.
                     .tint(AppTheme.accentColor)
                 }
+            }
+            .task {
+                // ARNÉS UI-PROBE: solo con `-UIProbeMode`. Pide LANDSCAPE, abre un
+                // proyecto nuevo y corre la secuencia cronometrada sobre los VM
+                // reales. En producción `isActive == false` → no-op.
+                guard UIProbeMode.isActive else { return }
+                requestLandscapeOrientation()
+                appState.newProject()
+                await UIProbeMode.run(appState: appState)
             }
             .onChange(of: scenePhase) { phase in
                 // App al fondo con documento abierto → guardar (nivel Shapr3D:
