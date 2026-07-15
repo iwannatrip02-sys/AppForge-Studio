@@ -27,9 +27,8 @@ jobs:
   ui-probe:
     name: Boot simulator, drive app, capture evidence
     runs-on: macos-15
-    # 110: corrida 4 probó que el ciclo completo necesita ~85-95 min (setup 22'
-    # + compilar runner UITests 21' + test ~20' con snapshots lentos + video 15').
-    timeout-minutes: 110
+    # 120: setup 22' + build runner UITests ≤40' + test ≤30' + video/uploads 15'.
+    timeout-minutes: 120
 
     env:
       # Bundle ID REAL de la app (verificado en project.yml:
@@ -286,13 +285,29 @@ jobs:
         continue-on-error: true
         run: brew install ffmpeg || echo "ffmpeg no instalable (segment_video.py degradará)"
 
+      # La grabación del probe DEBE morir ANTES del build (corrida 7: quedó viva
+      # durante build-for-testing → encoder + clang compitiendo 35 min → timeout;
+      # corrida 6: la misma presión mató al runner entero). El video del probe se
+      # conserva como video-probe.mp4 (sube en evidence).
+      - name: Detener grabación del probe (antes del build)
+        continue-on-error: true
+        run: |
+          set -x
+          if [ -f /tmp/videopid ]; then
+            kill -INT "$(cat /tmp/videopid)" 2>/dev/null || true
+            rm -f /tmp/videopid
+            sleep 5
+          fi
+          cd "$GITHUB_WORKSPACE/${WORKDIR}/artifacts"
+          [ -f video.mp4 ] && mv video.mp4 video-probe.mp4 || true
+
       # Compilar el runner de UITests SEPARADO del test (corrida 6: el runner de
       # GitHub murió por inanición de CPU/memoria — "lost communication" — con
       # grabación de video de 70+ min + build + sim simultáneos). build-for-testing
       # corre SIN grabación activa; el test luego usa test-without-building.
       - name: Build UITest runner (build-for-testing, sin grabación)
         continue-on-error: false
-        timeout-minutes: 35
+        timeout-minutes: 40
         working-directory: ${{ env.WORKDIR }}
         env:
           UDID: ${{ steps.sim.outputs.UDID }}
@@ -314,22 +329,15 @@ jobs:
             OTHER_CPLUSPLUSFLAGS='$(inherited) -Wno-c++11-narrowing' \
             2>&1 | tee gear-build.log
 
-      # La grabación del probe llevaba 40+ min al llegar aquí: (a) presión de
-      # CPU/disco que mató al runner en corrida 6, (b) los clips-tutorial se
-      # cortaban de la sección EQUIVOCADA (segment_video.py anclaba el paso 1 a
-      # t=0 del video). Video fresco solo para la sesión del engranaje + hora de
-      # inicio real para el ancla exacta del segmentador.
-      - name: Reiniciar grabación (video fresco para el engranaje)
+      # Video FRESCO solo para la sesión del engranaje: clips-tutorial de la
+      # sección correcta (antes segment_video.py anclaba el paso 1 a t=0 del
+      # video largo → cortaba el probe) + hora de inicio real para ancla exacta.
+      - name: Grabación fresca para el engranaje
         continue-on-error: true
         run: |
           set -x
           UDID="${{ steps.sim.outputs.UDID }}"
-          if [ -f /tmp/videopid ]; then
-            kill -INT "$(cat /tmp/videopid)" 2>/dev/null || true
-            sleep 5
-          fi
           cd "$GITHUB_WORKSPACE/${WORKDIR}/artifacts"
-          [ -f video.mp4 ] && mv video.mp4 video-probe.mp4
           xcrun simctl io "$UDID" recordVideo --codec=h264 --force video.mp4 &
           echo $! > /tmp/videopid
           date -u +%H:%M:%S > video-start.txt
