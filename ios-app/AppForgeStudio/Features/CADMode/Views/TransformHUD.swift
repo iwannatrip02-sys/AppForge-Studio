@@ -42,6 +42,7 @@ struct TransformHUD: View {
                 .position(x: p.x, y: max(48, p.y - 56))  // flota ~56pt sobre el gizmo
                 .animation(ForgeGlass.Motion.snappy, value: isSnapped)
                 .allowsHitTesting(true)
+                .accessibilityIdentifier("transform.hud")
         }
     }
 

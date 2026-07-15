@@ -271,6 +271,93 @@ jobs:
           chmod +x "$GITHUB_WORKSPACE/scripts/ui-probe/scenario.sh"
           "$GITHUB_WORKSPACE/scripts/ui-probe/scenario.sh" "$UDID" "artifacts"
 
+      # =====================================================================
+      # OLA GestureProbe (carril G-A): engranaje por GESTOS REALES vía XCUITest.
+      # Corre DESPUÉS del probe interno, contra el MISMO simulador ya booteado
+      # (destination por UDID). continue-on-error: false — este step SÍ define el
+      # veredicto del engranaje. El video ya está grabándose (recordVideo del
+      # step previo, en paralelo); GearScenarioTests emite GESTURE-STEP N al log
+      # (ya streamado a artifacts/app-log.txt) que segment_video.py cortará.
+      # =====================================================================
+      - name: Install ffmpeg (para cortar tutoriales)
+        if: always()
+        continue-on-error: true
+        run: brew install ffmpeg || echo "ffmpeg no instalable (segment_video.py degradará)"
+
+      - name: Run GearScenarioTests (gestos reales) contra el mismo simulador
+        continue-on-error: false
+        working-directory: ${{ env.WORKDIR }}
+        env:
+          UDID: ${{ steps.sim.outputs.UDID }}
+        run: |
+          set -x
+          set -o pipefail
+          echo "=== xcodebuild test -only-testing:AppForgeStudioUITests (UDID=$UDID) ==="
+          # Firma ad-hoc IDÉNTICA al resto (invariante ci_infra): sin esto el
+          # simulador iOS 18 rechaza instalar el runner con "Missing bundle ID".
+          xcodebuild test \
+            -project AppForgeStudio.xcodeproj \
+            -scheme AppForgeStudio \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$UDID" \
+            -configuration Debug \
+            -derivedDataPath DerivedData \
+            -only-testing:AppForgeStudioUITests \
+            -resultBundlePath "$GITHUB_WORKSPACE/${WORKDIR}/artifacts/GearScenario.xcresult" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY=- \
+            OTHER_CODE_SIGN_FLAGS=--deep \
+            OTHER_CPLUSPLUSFLAGS='$(inherited) -Wno-c++11-narrowing' \
+            2>&1 | tee gear-test.log
+
+      # Extraer los XCTAttachment (screenshots por paso) del .xcresult.
+      # Ruta 1: xcresulttool export attachments (nativo, Xcode 16). Ruta 2 (fallback):
+      # xcparse vía brew. Si ambas fallan, NO se rompe el job (continue-on-error).
+      - name: Extract per-step attachments del .xcresult
+        if: always()
+        continue-on-error: true
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          set -x
+          XCRESULT="artifacts/GearScenario.xcresult"
+          OUT="artifacts/gesture-steps"
+          mkdir -p "$OUT"
+          if [ ! -d "$XCRESULT" ]; then
+            echo "=== .xcresult ausente (el test no llegó a producirlo); nada que extraer ==="
+            exit 0
+          fi
+          # Ruta 1: xcresulttool nativo.
+          if xcrun xcresulttool export attachments \
+                --path "$XCRESULT" --output-path "$OUT" 2>>"$OUT/extract.err"; then
+            echo "=== Attachments extraídos con xcresulttool ==="
+          else
+            echo "=== xcresulttool falló; probando fallback xcparse ==="
+            if brew install chargepoint/xcparse/xcparse 2>>"$OUT/extract.err" \
+                 || brew install xcparse 2>>"$OUT/extract.err"; then
+              xcparse attachments "$XCRESULT" "$OUT" 2>>"$OUT/extract.err" \
+                || echo "=== xcparse también falló; se sube el .xcresult crudo ==="
+            else
+              echo "=== xcparse no instalable; se sube el .xcresult crudo ==="
+            fi
+          fi
+          ls -laR "$OUT" || true
+
+      # Cortar el video en clips-tutorial por paso (parseando GESTURE-STEP del log).
+      # Degradación elegante: si ffmpeg o el log fallan, sube el video completo +
+      # manifest igual (segment_video.py lo maneja y siempre exit 0).
+      - name: Segment video en clips-tutorial por paso
+        if: always()
+        continue-on-error: true
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          set -x
+          python3 "$GITHUB_WORKSPACE/scripts/ui-probe/segment_video.py" \
+            --video artifacts/video.mp4 \
+            --log artifacts/app-log.txt \
+            --out artifacts/tutorials \
+            || echo "segment_video.py devolvió no-cero (degradado; video completo igual sube)"
+          ls -laR artifacts/tutorials || true
+
       # ---------------------------------------------------------------------
       # TEARDOWN — cerrar video/log limpiamente ANTES de empaquetar
       # ---------------------------------------------------------------------
@@ -348,3 +435,29 @@ jobs:
           name: ui-probe-build-log-${{ github.run_id }}
           path: ios-app/AppForgeStudio/build.log
           retention-days: 14
+
+      # --- OLA GestureProbe: attachments por paso + clips-tutorial ----------
+      - name: Upload gesture-steps (attachments por paso)
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: ui-probe-gesture-steps-${{ github.run_id }}
+          path: |
+            ios-app/AppForgeStudio/artifacts/gesture-steps/**
+            ios-app/AppForgeStudio/artifacts/GearScenario.xcresult/**
+            ios-app/AppForgeStudio/gear-test.log
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Upload tutorials (clips por paso + manifest)
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: ui-probe-tutorials-${{ github.run_id }}
+          path: |
+            ios-app/AppForgeStudio/artifacts/tutorials/**
+            ios-app/AppForgeStudio/artifacts/video.mp4
+          retention-days: 14
+          if-no-files-found: warn

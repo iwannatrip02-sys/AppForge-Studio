@@ -892,8 +892,10 @@ struct CADModeView: View {
             NumericField(value: Binding(get: { holeRadius * 2 },
                                         set: { holeRadius = $0 / 2 }),
                          range: 0.02...4)
+            .accessibilityIdentifier("cad.numeric.field")
             Text("Prof.").font(.caption2).foregroundColor(theme.textSecondary)
             NumericField(value: $holeDepth, range: 0...20)
+            .accessibilityIdentifier("cad.numeric.field")
             Text(holeDepth == 0 ? "pasante" : "ciego")
                 .font(.caption2)
                 .foregroundColor(AppTheme.steel)
@@ -1362,11 +1364,14 @@ struct CADModeView: View {
                 Menu {
                     Stepper("Copias: \(patternCircularCount)",
                             value: $patternCircularCount, in: 2...36)
+                    .accessibilityIdentifier("cad.pattern.circular.count")
                     Button("Aplicar patrón circular") { applyCircularPattern(modelIndex: modelIndex) }
+                    .accessibilityIdentifier("cad.pattern.circular.apply")
                 } label: {
                     Label("Patrón ○", systemImage: "circle.grid.cross")
                         .font(.caption)
                 }
+                .accessibilityIdentifier("cad.pattern.menu")
 
                 Button(role: .destructive) {
                     HapticService.shared.heavy()
@@ -1596,6 +1601,7 @@ struct CADModeView: View {
                             .toolbarGlow(active: expandedGroup == group)
                     }
                     .accessibilityLabel(group.rawValue)
+                    .accessibilityIdentifier(toolGroupIdentifier(group))
                 }
                 Rectangle().fill(theme.border).frame(width: 22, height: 1)
                     .padding(.vertical, 3)
@@ -1615,14 +1621,16 @@ struct CADModeView: View {
                         ForEach(primitiveTools.indices, id: \.self) { idx in
                             let prim = primitiveTools[idx]
                             flyoutButton(icon: prim.icon, label: prim.label,
-                                         active: false) {
+                                         active: false,
+                                         identifier: primitiveIdentifier(prim.id)) {
                                 performAddPrimitive(prim.id)
                             }
                         }
                     } else {
                         ForEach(tools(for: group), id: \.self) { tool in
                             flyoutButton(icon: tool.icon, label: tool.displayName,
-                                         active: selectedTool == tool) {
+                                         active: selectedTool == tool,
+                                         identifier: flyoutToolIdentifier(tool)) {
                                 activate(tool)
                             }
                         }
@@ -1645,10 +1653,55 @@ struct CADModeView: View {
                 .toolbarGlow(active: selectedTool == tool)
         }
         .accessibilityLabel(tool.displayName)
+        .accessibilityIdentifier(railToolIdentifier(tool))
+    }
+
+    /// Identifier de contrato GestureProbe para los botones de rail de transformación.
+    private func railToolIdentifier(_ tool: CADTool) -> String {
+        switch tool {
+        case .select: return "cad.tool.select"
+        case .move:   return "cad.tool.move"
+        case .rotate: return "cad.tool.rotate"
+        case .scale:  return "cad.tool.scale"
+        case .sketch: return "cad.tool.sketch"
+        case .extrude: return "cad.tool.extrude"
+        case .hole:   return "cad.tool.hole"
+        default:      return "cad.tool.\(tool.rawValue.lowercased())"
+        }
+    }
+
+    /// Identifier de contrato para los botones de grupo del rail (abren flyouts).
+    private func toolGroupIdentifier(_ group: ToolGroup) -> String {
+        switch group {
+        case .primitives: return "cad.primitives.menu"
+        default:          return "cad.group.\(group.rawValue.lowercased())"
+        }
+    }
+
+    /// Identifier de contrato para primitivas en el flyout de Primitivas.
+    private func primitiveIdentifier(_ primId: String) -> String {
+        switch primId {
+        case "Box":      return "cad.primitive.box"
+        case "Cylinder": return "cad.primitive.cylinder"
+        default:         return "cad.primitive.\(primId.lowercased())"
+        }
+    }
+
+    /// Identifier de contrato para herramientas en flyouts Forming/Combining/Drawing.
+    private func flyoutToolIdentifier(_ tool: CADTool) -> String {
+        switch tool {
+        case .sketch:          return "cad.tool.sketch"
+        case .extrude:         return "cad.tool.extrude"
+        case .hole:            return "cad.tool.hole"
+        case .booleanUnion:    return "cad.boolean.union"
+        case .booleanSubtract: return "cad.boolean.subtract"
+        default:               return "cad.tool.\(tool.rawValue.lowercased().replacingOccurrences(of: " ", with: "-"))"
+        }
     }
 
     /// Botón de flyout (icono + etiqueta) con estética calma.
     private func flyoutButton(icon: String, label: String, active: Bool,
+                              identifier: String? = nil,
                               action: @escaping () -> Void) -> some View {
         Button(action: { HapticService.shared.light(); action() }) {
             HStack(spacing: 8) {
@@ -1665,6 +1718,7 @@ struct CADModeView: View {
             .background(active ? theme.accent.opacity(0.12) : Color.clear)
             .cornerRadius(AppTheme.radiusSM)
         }
+        .accessibilityIdentifier(identifier ?? "")
     }
 
     /// Activación central de herramienta (rail y flyouts): un solo camino.
@@ -1937,6 +1991,7 @@ struct CADModeView: View {
                     Label("Exportar STEP", systemImage: "square.and.arrow.up")
                 }
                 .disabled(canvasVM.scene.models.isEmpty)
+                .accessibilityIdentifier("cad.export.button")
                 Button(action: { showExport = true }) {
                     Label("Exportar...", systemImage: "square.and.arrow.up.on.square")
                 }

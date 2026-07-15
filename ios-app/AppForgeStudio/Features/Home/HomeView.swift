@@ -83,6 +83,7 @@ struct HomeView: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("home.newProject")
     }
 
     private func projectCard(_ item: (url: URL, metadata: ProjectMetadata)) -> some View {

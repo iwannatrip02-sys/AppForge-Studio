@@ -44,4 +44,36 @@ final class UIProbeModeTests: XCTestCase {
         XCTAssertEqual(UIProbeMode.launchFlag, "-UIProbeMode")
         XCTAssertEqual(UIProbeMode.onboardingDefaultsKey, "onboardingComplete")
     }
+
+    // MARK: - Blindaje Ola GestureProbe
+
+    /// Sin `-UIProbeForcePencil` en args, `forcePencil` debe ser false.
+    /// Garantiza que en producción el seam del pencil no fuerza nada.
+    func testForcePencilFalseWithoutFlag() {
+        XCTAssertFalse(ProcessInfo.processInfo.arguments.contains(UIProbeMode.forcePencilFlag),
+                       "La suite de tests NO debe correr con -UIProbeForcePencil")
+        XCTAssertFalse(UIProbeMode.forcePencil,
+                       "forcePencil debe ser false sin el launch-argument (producción intacta)")
+    }
+
+    /// Sin `-UIProbeTouchViz` en args, el visualizador de toques no debe instalarse.
+    func testTouchVizInactiveWithoutFlag() {
+        XCTAssertFalse(ProcessInfo.processInfo.arguments.contains(UIProbeMode.touchVizFlag),
+                       "La suite de tests NO debe correr con -UIProbeTouchViz")
+        XCTAssertFalse(UIProbeMode.touchVizActive,
+                       "touchVizActive debe ser false sin el launch-argument")
+    }
+
+    /// Sin `-UIProbeSkipOnboarding`, el flag extra no está presente.
+    func testSkipOnboardingFlagAbsentInNormalRun() {
+        XCTAssertFalse(ProcessInfo.processInfo.arguments.contains(UIProbeMode.skipOnboardingFlag),
+                       "La suite de tests NO debe correr con -UIProbeSkipOnboarding")
+    }
+
+    /// Los strings de los flags del contrato son los exactos que usa G-A (XCUITest).
+    func testGestureProbeContractFlags() {
+        XCTAssertEqual(UIProbeMode.forcePencilFlag, "-UIProbeForcePencil")
+        XCTAssertEqual(UIProbeMode.touchVizFlag, "-UIProbeTouchViz")
+        XCTAssertEqual(UIProbeMode.skipOnboardingFlag, "-UIProbeSkipOnboarding")
+    }
 }

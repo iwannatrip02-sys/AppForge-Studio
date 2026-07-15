@@ -19,9 +19,16 @@ struct AppForgeStudioApp: App {
         // montar directo el workspace — el flag debe leerse ANTES de fijar los
         // @State del gate, por eso se inicializan aquí y no en su declaración.
         if UIProbeMode.isActive {
+            // Arnés completo: sella onboarding, salta home, monta workspace directo.
             UIProbeMode.sealOnboarding()
             _showOnboarding = State(initialValue: false)
             _showHome = State(initialValue: false)
+        } else if ProcessInfo.processInfo.arguments.contains(UIProbeMode.skipOnboardingFlag) {
+            // Solo skip de onboarding: sella el gate pero muestra Home normalmente.
+            // G-A lanza con este flag para gestos libres sin arnés auto-secuencia.
+            UIProbeMode.sealOnboarding()
+            _showOnboarding = State(initialValue: false)
+            _showHome = State(initialValue: true)
         } else {
             _showOnboarding = State(initialValue: !UserDefaults.standard.bool(forKey: "onboardingComplete"))
             _showHome = State(initialValue: true)
@@ -77,6 +84,18 @@ struct AppForgeStudioApp: App {
                 }
             }
             .task {
+                // VISUALIZADOR DE TOQUES: instalar si `-UIProbeTouchViz` está presente.
+                // Se activa también sin `-UIProbeMode` (el arnés GearScenarioTests lo
+                // pasa junto con `-UIProbeSkipOnboarding`). Cero efecto sin el flag.
+                if UIProbeMode.touchVizActive {
+                    let scene = UIApplication.shared.connectedScenes
+                        .compactMap({ $0 as? UIWindowScene })
+                        .first(where: { $0.activationState == .foregroundActive })
+                        ?? UIApplication.shared.connectedScenes
+                        .compactMap({ $0 as? UIWindowScene }).first
+                    if let scene { TouchVisualizer.installIfNeeded(in: scene) }
+                }
+
                 // ARNÉS UI-PROBE: solo con `-UIProbeMode`. Pide LANDSCAPE, abre un
                 // proyecto nuevo y corre la secuencia cronometrada sobre los VM
                 // reales. En producción `isActive == false` → no-op.

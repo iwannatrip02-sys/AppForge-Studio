@@ -45,6 +45,27 @@ enum UIProbeMode {
         ProcessInfo.processInfo.arguments.contains(launchFlag)
     }
 
+    /// Launch-argument que fuerza la clasificación pencil en el seam de MetalView.
+    /// Permite que XCUITest sintetice un trazo con `forcePencil == true` en simulador,
+    /// donde `touch.type == .pencil` nunca ocurre. Cero costo cuando el flag no está.
+    static let forcePencilFlag = "-UIProbeForcePencil"
+
+    /// true ↔ la app fue lanzada con `-UIProbeForcePencil`.
+    /// Evaluado UNA VEZ en el seam `gestureRecognizer(_:shouldReceive:)`.
+    static let forcePencil: Bool = ProcessInfo.processInfo.arguments.contains("-UIProbeForcePencil")
+
+    /// Launch-argument del visualizador de toques (TouchVisualizer).
+    /// Activa el overlay de círculos ember SOLO para sesiones XCUITest/tutorial.
+    static let touchVizFlag = "-UIProbeTouchViz"
+
+    /// true ↔ la app fue lanzada con `-UIProbeTouchViz`.
+    static let touchVizActive: Bool = ProcessInfo.processInfo.arguments.contains("-UIProbeTouchViz")
+
+    /// Launch-argument para saltar el onboarding SIN activar el arnés completo.
+    /// G-A lanza la app con este arg para que quede lista para gestos libres
+    /// sin que UIProbeMode mueva nada de la escena.
+    static let skipOnboardingFlag = "-UIProbeSkipOnboarding"
+
     /// Segundos entre pasos: da margen a que las capturas externas (cada ~3s)
     /// atrapen el estado de cada paso y a que Metal reconstruya buffers GPU.
     static let stepInterval: Duration = .seconds(3)
@@ -175,14 +196,18 @@ enum UIProbeMode {
         // el fantasma `__livePreview` en la escena tal como lo hace CADModeView (el
         // probe no corre la SwiftUI View, así que inyectamos el modelo aquí). La
         // captura de este paso debe mostrar el fantasma translúcido sobre el sólido.
+        //
+        // FIX PROBE-FAIL 6/7: OCCT crea el cilindro a lo largo del eje Z, por lo que
+        // su cara plana superior tiene normal (0,0,1), NO (0,1,0). Buscar (0,1,0)
+        // devolvía nil → condicional fallaba → "no hay cilindro/cara superior".
         let ghostEngine = LivePreviewEngine()
         do {
             step(6, "ghost en vivo (beginExtrude+update, sin commit)")
             if let ci = cylIndex, ci < canvasVM.scene.models.count,
                let shape = canvasVM.scene.models[ci].cadShape,
-               let topFI = BRepModeling.faceIndex(of: shape, withNormal: SIMD3<Double>(0, 1, 0)) {
+               let topFI = BRepModeling.faceIndex(of: shape, withNormal: SIMD3<Double>(0, 0, 1)) {
                 ghostEngine.beginExtrude(shape: shape, faceIndex: topFI,
-                                         direction: SIMD3<Float>(0, 1, 0), initialDistance: 0)
+                                         direction: SIMD3<Float>(0, 0, 1), initialDistance: 0)
                 ghostEngine.update(parameter: 0.6)   // arrastre simulado: +0.6 en vivo
                 if let ghostMesh = ghostEngine.previewMesh {
                     let ghost = Model(name: "__livePreview")
@@ -207,12 +232,13 @@ enum UIProbeMode {
         // Paso 7 — COMMIT del ghost (tarea 7b): retira el fantasma y hornea el push/pull
         // REAL en el cilindro. La captura de este paso debe mostrar el sólido cambiado
         // (sin fantasma): la geometría creció +0.6, ya no es una malla translúcida.
+        // FIX: usar (0,0,1) igual que paso 6 — cilindro OCCT tiene eje Z.
         do {
             step(7, "commit del ghost → sólido real (sin fantasma)")
             canvasVM.scene.models.removeAll { $0.name == "__livePreview" }
             if let ci = cylIndex, ci < canvasVM.scene.models.count,
                let shape = canvasVM.scene.models[ci].cadShape,
-               let topFI = BRepModeling.faceIndex(of: shape, withNormal: SIMD3<Double>(0, 1, 0)) {
+               let topFI = BRepModeling.faceIndex(of: shape, withNormal: SIMD3<Double>(0, 0, 1)) {
                 let model = canvasVM.scene.models[ci]
                 let ok = BRepModeling.applyFeature(to: model) { s in
                     BRepModeling.pushPullFace(s, faceIndex: topFI, distance: 0.6)

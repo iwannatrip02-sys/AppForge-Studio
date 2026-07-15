@@ -305,7 +305,10 @@ struct MetalView: UIViewRepresentable {
         }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-            lastTouchWasPencil = (touch.type == .pencil)
+            // Pencil-shim: `-UIProbeForcePencil` fuerza la clasificación pencil en
+            // simulador (donde touch.type nunca es .pencil). Cero costo en producción
+            // porque UIProbeMode.forcePencil es una constante estática evaluada al arranque.
+            lastTouchWasPencil = (touch.type == .pencil) || UIProbeMode.forcePencil
             if lastTouchWasPencil, touch.maximumPossibleForce > 0 {
                 // force llega a 0 al inicio del toque: clamp para no matar el trazo.
                 strokePressure = max(0.2, Float(touch.force / touch.maximumPossibleForce))
