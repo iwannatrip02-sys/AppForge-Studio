@@ -1,0 +1,182 @@
+{
+  "$schema": "https://design-tokens.github.io/community-group/format/",
+  "meta": {
+    "name": "AppForge Studio — Forge Glass",
+    "version": "1.0.0",
+    "date": "2026-07-15",
+    "system": "Forge Glass (Acero & Brasa, ola de vidrio)",
+    "source": "docs/design/DESIGN_SYSTEM.md",
+    "note": "Fuente para generar el Theme Swift. No editar tokens sin actualizar DESIGN_SYSTEM.md."
+  },
+  "color": {
+    "bg": {
+      "canvas":  { "value": "#0A0B10", "role": "viewport 3D — el negro mas profundo" },
+      "base":    { "value": "#12141A", "role": "superficie principal sin viewport" },
+      "raised":  { "value": "#1A1D26", "role": "cards y superficies elevadas" },
+      "overlay": { "value": "#222630", "role": "hover / estado activo de fila" },
+      "glass":   { "value": "#1B1E28", "role": "tinte base del vidrio (bajo el material)" }
+    },
+    "ember": {
+      "base": { "value": "#FF7A45", "role": "acento unico: editandose ahora" },
+      "glow": { "value": "#FFA06B", "role": "halo del glow / pressed" },
+      "deep": { "value": "#D9541E", "role": "destructivo-intencional" }
+    },
+    "material": {
+      "steel":       { "value": "#6FA3D0", "role": "B-rep: edges, cotas, valores confirmados" },
+      "steelBright": { "value": "#8FBCE4", "role": "acero enfatizado: cara exacta" },
+      "clay":        { "value": "#C79A6B", "role": "malla: badges, seleccion" }
+    },
+    "semantic": {
+      "success": { "value": "#34D399", "role": "exito de sistema" },
+      "warning": { "value": "#FBBF24", "role": "atencion" },
+      "error":   { "value": "#F87171", "role": "error de sistema" }
+    },
+    "axis": {
+      "x": { "value": "#F87171" },
+      "y": { "value": "#34D399" },
+      "z": { "value": "#6FA3D0" }
+    },
+    "text": {
+      "primary":   { "value": "#F0F1F5" },
+      "secondary": { "value": "#9AA0B0" },
+      "tertiary":  { "value": "#5A5F6E" }
+    },
+    "border": {
+      "default": { "value": "#2A2E3A", "role": "borde de vidrio y separadores 1px" },
+      "subtle":  { "value": "#1E212B", "role": "borde interno apenas perceptible" }
+    },
+    "light": {
+      "bgCanvas":     { "value": "#F2F2F7" },
+      "bgBase":       { "value": "#FFFFFF" },
+      "bgRaised":     { "value": "#F9F9FB" },
+      "bgOverlay":    { "value": "#E5E5EA" },
+      "textPrimary":  { "value": "#1C1C1E" },
+      "textSecondary":{ "value": "#636366" },
+      "textTertiary": { "value": "#AEAEB2" },
+      "border":       { "value": "#C6C6C8" }
+    }
+  },
+  "opacity": {
+    "glass": {
+      "onViewport":   { "value": 0.72, "role": "panel sobre viewport 3D" },
+      "flyout":       { "value": 0.78, "role": "flyout de herramienta" },
+      "paramBar":     { "value": 0.80, "role": "barra de parametro activa" },
+      "onBase":       { "value": 0.92, "role": "panel sobre bg.base (sin 3D detras)" },
+      "inlineHud":    { "value": 0.65, "role": "HUD/cota sobre geometria" }
+    },
+    "state": {
+      "pressedFill":  { "value": 0.12, "role": "fill al presionar (ember.glow)" },
+      "activeFill":   { "value": 0.15, "role": "fill de seleccionado (ember)" },
+      "activeBorder": { "value": 0.30, "role": "borde de seleccionado (ember)" },
+      "chipActiveFill": { "value": 0.20, "role": "fill de chip activo (ember)" },
+      "disabled":     { "value": 0.35, "role": "control deshabilitado" },
+      "glowStart":    { "value": 0.45, "role": "centro del glow de estado" }
+    }
+  },
+  "blur": {
+    "panel":    { "value": "ultraThinMaterial", "approxPt": 25, "role": "material del sistema para paneles" },
+    "glow":     { "value": 24, "unit": "pt", "role": "blur gaussiano de la luz del glow" },
+    "maxUI":    { "value": 30, "unit": "pt", "role": "limite duro de blur en UI" }
+  },
+  "spacing": {
+    "grid": 4,
+    "0":  { "value": 0 },
+    "1":  { "value": 4 },
+    "2":  { "value": 8 },
+    "3":  { "value": 12 },
+    "4":  { "value": 16 },
+    "5":  { "value": 20 },
+    "6":  { "value": 24 },
+    "8":  { "value": 32 },
+    "10": { "value": 40 },
+    "12": { "value": 48 }
+  },
+  "radius": {
+    "none": { "value": 0 },
+    "sm":   { "value": 6,   "role": "chips, tooltips, HUD inline" },
+    "md":   { "value": 10,  "role": "cards, paneles de vidrio, flyouts, barras" },
+    "lg":   { "value": 14,  "role": "modales, sheets" },
+    "xl":   { "value": 20,  "role": "contenedor exterior del viewport" },
+    "full": { "value": 999, "role": "pildoras, circulos" }
+  },
+  "elevation": {
+    "none":   { "color": "#000000", "opacity": 0.00, "radius": 0,  "y": 0 },
+    "level1": { "color": "#000000", "opacity": 0.15, "radius": 4,  "y": 1, "role": "cards sobre bg.base" },
+    "level2": { "color": "#000000", "opacity": 0.25, "radius": 12, "y": 3, "role": "paneles de vidrio sobre viewport (default)" },
+    "level3": { "color": "#000000", "opacity": 0.35, "radius": 20, "y": 6, "role": "modales, popovers" },
+    "level4": { "color": "#000000", "opacity": 0.45, "radius": 28, "y": 8, "role": "tooltips, menus contextuales" }
+  },
+  "typography": {
+    "family": "SF Pro (system, design=default)",
+    "monoFamily": "SF Mono (system, design=monospaced)",
+    "scale": {
+      "largeTitle": { "size": 28, "weight": "bold",     "design": "default",    "role": "headers de onboarding" },
+      "title1":     { "size": 20, "weight": "semibold", "design": "default",    "role": "titulos de pantalla" },
+      "title2":     { "size": 15, "weight": "semibold", "design": "default",    "role": "headers de seccion" },
+      "heading":    { "size": 12, "weight": "medium",   "design": "default",    "role": "group labels (UPPERCASE +8% tracking)" },
+      "body":       { "size": 13, "weight": "regular",  "design": "default",    "role": "cuerpo" },
+      "caption":    { "size": 10, "weight": "regular",  "design": "default",    "role": "info secundaria, unidades" },
+      "monoLarge":  { "size": 13, "weight": "medium",   "design": "monospaced", "role": "valores de dimension en barras" },
+      "mono":       { "size": 10, "weight": "medium",   "design": "monospaced", "role": "lecturas numericas pequenas" },
+      "numberLive": { "size": 34, "weight": "regular",  "design": "monospaced", "role": "numero vivo en viewport (ember)" },
+      "toolLabel":  { "size": 8,  "weight": "medium",   "design": "default",    "role": "labels de icono en rail/mode bar" }
+    },
+    "rules": {
+      "groupLabelTracking": 0.08,
+      "groupLabelCase": "upper",
+      "maxWeightsPerScreen": 2,
+      "numbersAlwaysMonospaced": true
+    }
+  },
+  "icon": {
+    "size": {
+      "sm":  { "value": 12 },
+      "md":  { "value": 17, "role": "rail / mode bar" },
+      "lg":  { "value": 24 },
+      "xl":  { "value": 32 },
+      "xxl": { "value": 56 }
+    },
+    "weight": {
+      "inactive": "regular",
+      "active":   "medium"
+    },
+    "sfSymbolScale": { "default": "medium", "featured": "large" }
+  },
+  "touch": {
+    "min":         { "value": 44, "role": "HIG minimo" },
+    "comfortable": { "value": 48 }
+  },
+  "chrome": {
+    "railWidth":       { "value": 56, "role": "rail de herramientas izquierdo" },
+    "modeBarHeight":   { "value": 56, "role": "barra de modos inferior" },
+    "topChromeHeight": { "value": 44, "role": "chrome superior maximo" },
+    "maxChromeAreaPct":{ "value": 15, "role": "chrome permanente <= 15% del area" }
+  },
+  "duration": {
+    "unit": "seconds",
+    "spring": {
+      "snappy":  { "response": 0.20, "damping": 0.60, "role": "micro-interacciones, press, chips" },
+      "default": { "response": 0.30, "damping": 0.70, "role": "paneles, seleccion" },
+      "smooth":  { "response": 0.40, "damping": 0.80, "role": "modales, transiciones de pantalla" },
+      "glacial": { "response": 0.50, "damping": 0.85, "role": "transiciones grandes" }
+    },
+    "named": {
+      "toolIgnite":  { "value": 0.15, "curve": "easeOut", "role": "encendido de herramienta (fade-in glow)" },
+      "temperDecay": { "value": 0.40, "curve": "easeOut", "role": "templado: glow ember->steel decae a 0" }
+    },
+    "limits": {
+      "interactiveMax": 0.20,
+      "modalMax": 0.35,
+      "screenTransitionMax": 0.40
+    }
+  },
+  "glow": {
+    "colorNormal":      "#FF7A45",
+    "colorDestructive": "#D9541E",
+    "colorSettled":     "#6FA3D0",
+    "opacityCenter":    0.45,
+    "blurPt":           24,
+    "bleedPt":          16,
+    "role": "firma de estado: sangra por el vidrio, se enfria a steel al confirmar"
+  }
+}
