@@ -46,7 +46,9 @@ final class SketchController: ObservableObject {
     @Published private(set) var regions: [SketchKernel.SketchRegion] = []
 
     private var undoStack: [SketchModel] = []
-    private let snapEngine = SnapEngine()
+    // Calificado: la app tiene un `class SnapEngine` propio (snap 3D de
+    // transformaciones) que sombrea al del kernel dentro de este módulo.
+    private let snapEngine = SketchKernel.SnapEngine()
     private let hitTester = HitTester()
 
     /// Radio de snap en unidades del plano. La UI puede reducirlo con Pencil.
