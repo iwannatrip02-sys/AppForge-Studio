@@ -48,3 +48,7 @@ docs/design/moodboard/
 ci-ipa/
 ui-probe-evidence/
 artifacts/
+__pycache__/
+*.pyc
+ipad_*.png
+syslog_*.txt
