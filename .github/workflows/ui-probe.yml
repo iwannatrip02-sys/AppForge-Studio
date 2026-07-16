@@ -1,0 +1,525 @@
+name: UI Probe (Simulator evidence)
+
+# Carril independiente del iPad físico: bota un iPad Simulator en el runner
+# macOS, instala la app, la maneja con toques programados y sube TODA la
+# evidencia visual/funcional como artifacts (+ el .app de simulador para
+# Appetize.io). El orquestador puede VER y diagnosticar la app sin device.
+#
+# Trigger SOLO manual → cero riesgo para el CI de build.yml.
+#   gh workflow run ui-probe.yml --ref feature/fase-c
+#
+# Los pasos de SETUP (Xcode, xcodegen, generate, resolve SPM, flags de firma
+# y de narrowing) están REPLICADOS 1:1 desde build.yml — son invariantes
+# ganados con sangre (memoria Serena `ci_infra`). No desviarse.
+
+on:
+  workflow_dispatch:
+  # push filtrado SOLO a los archivos del probe: el primer push lo dispara
+  # (workflow_dispatch no funciona hasta que el archivo llegue a main) y cada
+  # recalibración del escenario re-corre el probe sola. Cero impacto en pushes normales.
+  push:
+    branches: [feature/fase-c, main]
+    paths:
+      - '.github/workflows/ui-probe.yml'
+      - 'scripts/ui-probe/**'
+
+jobs:
+  ui-probe:
+    name: Boot simulator, drive app, capture evidence
+    runs-on: macos-15
+    # 120: setup 22' + build runner UITests ≤40' + test ≤30' + video/uploads 15'.
+    timeout-minutes: 120
+
+    env:
+      # Bundle ID REAL de la app (verificado en project.yml:
+      # PRODUCT_BUNDLE_IDENTIFIER: com.appforgestudio.app). El id de tests
+      # (…app.tests) NO se usa aquí — solo lanzamos la app.
+      BUNDLE_ID: com.appforgestudio.app
+      APP_NAME: AppForgeStudio
+      WORKDIR: ios-app/AppForgeStudio
+
+    steps:
+      # ---------------------------------------------------------------------
+      # SETUP — copiado EXACTO de build.yml (no reinventar)
+      # ---------------------------------------------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Select Xcode (Swift 6.1+ required)
+        run: |
+          set -x
+          echo "=== Available Xcodes ==="
+          ls -d /Applications/Xcode*.app 2>/dev/null
+          echo "=== Default Swift ==="
+          swift --version
+          echo "=== Trying to find Swift 6.1+ ==="
+          FOUND=false
+          for xcode in /Applications/Xcode_16*.app /Applications/Xcode_17*.app /Applications/Xcode.app; do
+            if [ -d "$xcode" ]; then
+              sudo xcode-select -s "$xcode" 2>/dev/null || true
+              SWIFT_VER=$(swift --version 2>/dev/null | head -1)
+              echo "Tried $xcode: $SWIFT_VER"
+              if echo "$SWIFT_VER" | grep -qE 'version (6\.[1-9]|[7-9])'; then
+                FOUND=true
+                echo "=== Using $xcode ($SWIFT_VER) ==="
+                break
+              fi
+            fi
+          done
+          if [ "$FOUND" = false ]; then
+            echo "=== Installing Swift 6.1 manually ==="
+            curl -sL https://download.swift.org/swift-6.1-release/xcode/swift-6.1-RELEASE/swift-6.1-RELEASE-osx.pkg -o /tmp/swift.pkg
+            sudo installer -pkg /tmp/swift.pkg -target /
+            export TOOLCHAINS=swift
+            swift --version
+          fi
+          echo "=== Final: $(swift --version | head -1) ==="
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          set -x
+          xcodegen generate
+          echo "=== Generated project ==="
+          ls -la *.xcodeproj 2>/dev/null || echo "No xcodeproj found"
+
+      - name: Resolve SPM dependencies (OCCTSwift + Satin)
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          set -x
+          xcodebuild -resolvePackageDependencies \
+            -project AppForgeStudio.xcodeproj \
+            -scheme AppForgeStudio \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath DerivedData
+
+      # SatinCore .mm files violan -Wc++11-narrowing en muchos call sites; se
+      # suprime globalmente vía OTHER_CPLUSPLUSFLAGS en el build (igual que build.yml).
+
+      - name: Install iOS Simulator runtime
+        run: |
+          set -x
+          echo "=== Available runtimes ==="
+          xcrun simctl list runtimes
+          echo "=== Downloading iOS Simulator platform ==="
+          xcodebuild -downloadPlatform iOS 2>&1 | tail -5 || true
+          echo "=== Runtimes after install ==="
+          xcrun simctl list runtimes
+
+      # ---------------------------------------------------------------------
+      # BUILD para SIMULADOR (Debug, firma ad-hoc — invariante ci_infra)
+      # ---------------------------------------------------------------------
+      - name: Build for iOS Simulator
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          set -x
+          set -o pipefail
+          echo "=== Building AppForgeStudio for the simulator ==="
+          xcodebuild build \
+            -project AppForgeStudio.xcodeproj \
+            -scheme AppForgeStudio \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug \
+            -derivedDataPath DerivedData \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY=- \
+            OTHER_CODE_SIGN_FLAGS=--deep \
+            OTHER_CPLUSPLUSFLAGS='$(inherited) -Wno-c++11-narrowing' \
+            2>&1 | tee build.log
+
+      - name: Locate built .app
+        id: locate
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          set -x
+          APP_PATH=$(find DerivedData/Build/Products/Debug-iphonesimulator -maxdepth 1 -name "${APP_NAME}.app" -type d 2>/dev/null | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "=== ERROR: no se encontró el .app de simulador ==="
+            find DerivedData/Build/Products -maxdepth 3 -name "*.app" -type d 2>/dev/null || true
+            exit 1
+          fi
+          ABS_APP=$(cd "$(dirname "$APP_PATH")" && pwd)/$(basename "$APP_PATH")
+          echo "APP_PATH=$ABS_APP" >> "$GITHUB_OUTPUT"
+          echo "=== .app localizado: $ABS_APP ==="
+          ls -la "$ABS_APP"
+          echo "=== Bundle ID real dentro del .app ==="
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$ABS_APP/Info.plist" || plutil -p "$ABS_APP/Info.plist" | grep -i bundleidentifier || true
+
+      # ---------------------------------------------------------------------
+      # BOOT DINÁMICO del simulador (nunca hardcodear un modelo)
+      # ---------------------------------------------------------------------
+      - name: Pick and boot an iPad simulator
+        id: sim
+        run: |
+          set -x
+          echo "=== Dispositivos disponibles ==="
+          xcrun simctl list -j devices available > /tmp/devices.json
+          cat /tmp/devices.json | python3 -c 'import json,sys; d=json.load(sys.stdin); [print(rt, x["name"], x["udid"], x["state"]) for rt,arr in d["devices"].items() for x in arr]' || true
+
+          # Elegir el primer iPad disponible; preferir iPad Pro si existe.
+          # Salida: UDID en stdout, vacío si no hay ninguno.
+          UDID=$(python3 scripts/ui-probe/pick_ipad.py /tmp/devices.json)
+
+          if [ -z "$UDID" ]; then
+            echo "=== No hay iPad preexistente; creando uno ==="
+            RUNTIME=$(xcrun simctl list -j runtimes available | python3 -c 'import json,sys; r=[x for x in json.load(sys.stdin)["runtimes"] if x.get("isAvailable") and "iOS" in x["name"]]; print(r[-1]["identifier"] if r else "")')
+            DEVTYPE=$(xcrun simctl list -j devicetypes | python3 -c 'import json,sys; t=[x for x in json.load(sys.stdin)["devicetypes"] if "iPad-Pro" in x["identifier"] or "iPad" in x["identifier"]]; t.sort(key=lambda x: ("Pro" not in x["identifier"], x["name"])); print(t[0]["identifier"] if t else "")')
+            echo "Runtime=$RUNTIME DeviceType=$DEVTYPE"
+            if [ -z "$RUNTIME" ] || [ -z "$DEVTYPE" ]; then
+              echo "=== ERROR: no se pudo determinar runtime/devicetype para crear iPad ==="
+              exit 1
+            fi
+            UDID=$(xcrun simctl create "ui-probe-ipad" "$DEVTYPE" "$RUNTIME")
+          fi
+
+          echo "=== iPad elegido: $UDID ==="
+          xcrun simctl boot "$UDID" || echo "boot devolvió no-cero (quizá ya booteando)"
+          xcrun simctl bootstatus "$UDID" -b
+          echo "UDID=$UDID" >> "$GITHUB_OUTPUT"
+
+      # ---------------------------------------------------------------------
+      # INSTALL + LAUNCH
+      # ---------------------------------------------------------------------
+      - name: Install app on simulator
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          set -x
+          UDID="${{ steps.sim.outputs.UDID }}"
+          APP_PATH="${{ steps.locate.outputs.APP_PATH }}"
+          xcrun simctl install "$UDID" "$APP_PATH"
+          echo "=== Instalado. Contenedor de la app: ==="
+          xcrun simctl get_app_container "$UDID" "$BUNDLE_ID" app || true
+
+      - name: Start log stream (background)
+        run: |
+          set -x
+          UDID="${{ steps.sim.outputs.UDID }}"
+          mkdir -p "$GITHUB_WORKSPACE/${WORKDIR}/artifacts"
+          # Stream de logs de la app a archivo; se mata en el step de teardown.
+          xcrun simctl spawn "$UDID" log stream --level debug \
+            --predicate "processImagePath CONTAINS '${APP_NAME}'" \
+            > "$GITHUB_WORKSPACE/${WORKDIR}/artifacts/app-log.txt" 2>&1 &
+          echo $! > /tmp/logpid
+          echo "=== log stream PID $(cat /tmp/logpid) ==="
+
+      - name: Start screen recording (background)
+        run: |
+          set -x
+          UDID="${{ steps.sim.outputs.UDID }}"
+          mkdir -p "$GITHUB_WORKSPACE/${WORKDIR}/artifacts"
+          xcrun simctl io "$UDID" recordVideo --codec=h264 --force \
+            "$GITHUB_WORKSPACE/${WORKDIR}/artifacts/video.mp4" &
+          echo $! > /tmp/videopid
+          echo "=== recordVideo PID $(cat /tmp/videopid) ==="
+          # dar tiempo a que el grabador enganche
+          sleep 2
+
+      - name: Launch app
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          set -x
+          UDID="${{ steps.sim.outputs.UDID }}"
+          xcrun simctl launch "$UDID" "$BUNDLE_ID" || {
+            echo "=== launch falló; volcando diagnósticos ==="
+            xcrun simctl listapps "$UDID" | grep -i appforge || true
+            exit 1
+          }
+          # settle: dar tiempo a Metal/Satin a levantar el primer frame
+          sleep 6
+
+      # ---------------------------------------------------------------------
+      # EVIDENCIA base — SIEMPRE, aunque idb/toques fallen
+      # ---------------------------------------------------------------------
+      - name: Screenshot after launch (settle)
+        continue-on-error: true
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          set -x
+          UDID="${{ steps.sim.outputs.UDID }}"
+          mkdir -p artifacts/screenshots
+          xcrun simctl io "$UDID" screenshot artifacts/screenshots/00-launch.png
+          ls -la artifacts/screenshots
+
+      # ---------------------------------------------------------------------
+      # INTERACCIÓN — mejor esfuerzo con DEGRADACIÓN ELEGANTE (nunca rompe el job)
+      # ---------------------------------------------------------------------
+      - name: Install idb (best effort)
+        id: idb
+        continue-on-error: true
+        run: |
+          set -x
+          echo "=== Instalando idb-companion + fb-idb (best effort) ==="
+          brew install facebook/fb/idb-companion || { echo "idb-companion falló"; exit 1; }
+          pip3 install --break-system-packages fb-idb || pip3 install fb-idb || { echo "fb-idb falló"; exit 1; }
+          idb --help >/dev/null 2>&1 && echo "IDB_OK=1" >> "$GITHUB_OUTPUT" || echo "idb no responde"
+
+      # ARNÉS INTERNO (patrón launch-argument) — NO depende de idb. Relanza la app
+      # con `-UIProbeMode` y captura la secuencia cronometrada. idb (si logró
+      # instalarse) solo añade el árbol de accesibilidad + un toque de propina
+      # DENTRO del propio scenario.sh. Corre SIEMPRE: es la fuente de evidencia.
+      - name: Drive in-app PROBE mode + timed screenshots
+        continue-on-error: true
+        working-directory: ${{ env.WORKDIR }}
+        env:
+          UDID: ${{ steps.sim.outputs.UDID }}
+          BUNDLE_ID: ${{ env.BUNDLE_ID }}
+        run: |
+          set -x
+          chmod +x "$GITHUB_WORKSPACE/scripts/ui-probe/scenario.sh"
+          "$GITHUB_WORKSPACE/scripts/ui-probe/scenario.sh" "$UDID" "artifacts"
+
+      # =====================================================================
+      # OLA GestureProbe (carril G-A): engranaje por GESTOS REALES vía XCUITest.
+      # Corre DESPUÉS del probe interno, contra el MISMO simulador ya booteado
+      # (destination por UDID). continue-on-error: false — este step SÍ define el
+      # veredicto del engranaje. El video ya está grabándose (recordVideo del
+      # step previo, en paralelo); GearScenarioTests emite GESTURE-STEP N al log
+      # (ya streamado a artifacts/app-log.txt) que segment_video.py cortará.
+      # =====================================================================
+      - name: Install ffmpeg (para cortar tutoriales)
+        if: always()
+        continue-on-error: true
+        run: brew install ffmpeg || echo "ffmpeg no instalable (segment_video.py degradará)"
+
+      # La grabación del probe DEBE morir ANTES del build (corrida 7: quedó viva
+      # durante build-for-testing → encoder + clang compitiendo 35 min → timeout;
+      # corrida 6: la misma presión mató al runner entero). El video del probe se
+      # conserva como video-probe.mp4 (sube en evidence).
+      - name: Detener grabación del probe (antes del build)
+        continue-on-error: true
+        run: |
+          set -x
+          if [ -f /tmp/videopid ]; then
+            kill -INT "$(cat /tmp/videopid)" 2>/dev/null || true
+            rm -f /tmp/videopid
+            sleep 5
+          fi
+          cd "$GITHUB_WORKSPACE/${WORKDIR}/artifacts"
+          [ -f video.mp4 ] && mv video.mp4 video-probe.mp4 || true
+
+      # Compilar el runner de UITests SEPARADO del test (corrida 6: el runner de
+      # GitHub murió por inanición de CPU/memoria — "lost communication" — con
+      # grabación de video de 70+ min + build + sim simultáneos). build-for-testing
+      # corre SIN grabación activa; el test luego usa test-without-building.
+      - name: Build UITest runner (build-for-testing, sin grabación)
+        continue-on-error: false
+        timeout-minutes: 40
+        working-directory: ${{ env.WORKDIR }}
+        env:
+          UDID: ${{ steps.sim.outputs.UDID }}
+        run: |
+          set -x
+          set -o pipefail
+          # Firma ad-hoc IDÉNTICA al resto (invariante ci_infra): sin esto el
+          # simulador iOS 18 rechaza instalar el runner con "Missing bundle ID".
+          xcodebuild build-for-testing \
+            -project AppForgeStudio.xcodeproj \
+            -scheme GearScenario \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$UDID" \
+            -configuration Debug \
+            -derivedDataPath DerivedData \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY=- \
+            OTHER_CODE_SIGN_FLAGS=--deep \
+            OTHER_CPLUSPLUSFLAGS='$(inherited) -Wno-c++11-narrowing' \
+            2>&1 | tee gear-build.log
+
+      # Video FRESCO solo para la sesión del engranaje: clips-tutorial de la
+      # sección correcta (antes segment_video.py anclaba el paso 1 a t=0 del
+      # video largo → cortaba el probe) + hora de inicio real para ancla exacta.
+      - name: Grabación fresca para el engranaje
+        continue-on-error: true
+        run: |
+          set -x
+          UDID="${{ steps.sim.outputs.UDID }}"
+          cd "$GITHUB_WORKSPACE/${WORKDIR}/artifacts"
+          xcrun simctl io "$UDID" recordVideo --codec=h264 --force video.mp4 &
+          echo $! > /tmp/videopid
+          date -u +%H:%M:%S > video-start.txt
+          sleep 2
+
+      - name: Run GearScenarioTests (gestos reales) contra el mismo simulador
+        continue-on-error: false
+        # Cinturón: si el test se cuelga (corrida 3: query de accesibilidad colgada
+        # >35 min hasta el timeout del JOB → cero artifacts), el step muere antes
+        # y los uploads if:always() corren igual. 30 = allowance del test (25') +
+        # margen (el build ya corrió en el step anterior).
+        timeout-minutes: 30
+        working-directory: ${{ env.WORKDIR }}
+        env:
+          UDID: ${{ steps.sim.outputs.UDID }}
+        run: |
+          set -x
+          set -o pipefail
+          echo "=== xcodebuild test-without-building (UDID=$UDID) ==="
+          xcodebuild test-without-building \
+            -project AppForgeStudio.xcodeproj \
+            -scheme GearScenario \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$UDID" \
+            -configuration Debug \
+            -derivedDataPath DerivedData \
+            -only-testing:AppForgeStudioUITests \
+            -test-timeouts-enabled YES \
+            -default-test-execution-time-allowance 1500 \
+            -maximum-test-execution-time-allowance 1800 \
+            -resultBundlePath "$GITHUB_WORKSPACE/${WORKDIR}/artifacts/GearScenario.xcresult" \
+            2>&1 | tee gear-test.log
+
+      # Extraer los XCTAttachment (screenshots por paso) del .xcresult.
+      # Ruta 1: xcresulttool export attachments (nativo, Xcode 16). Ruta 2 (fallback):
+      # xcparse vía brew. Si ambas fallan, NO se rompe el job (continue-on-error).
+      - name: Extract per-step attachments del .xcresult
+        if: always()
+        continue-on-error: true
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          set -x
+          XCRESULT="artifacts/GearScenario.xcresult"
+          OUT="artifacts/gesture-steps"
+          mkdir -p "$OUT"
+          if [ ! -d "$XCRESULT" ]; then
+            echo "=== .xcresult ausente (el test no llegó a producirlo); nada que extraer ==="
+            exit 0
+          fi
+          # Ruta 1: xcresulttool nativo.
+          if xcrun xcresulttool export attachments \
+                --path "$XCRESULT" --output-path "$OUT" 2>>"$OUT/extract.err"; then
+            echo "=== Attachments extraídos con xcresulttool ==="
+          else
+            echo "=== xcresulttool falló; probando fallback xcparse ==="
+            if brew install chargepoint/xcparse/xcparse 2>>"$OUT/extract.err" \
+                 || brew install xcparse 2>>"$OUT/extract.err"; then
+              xcparse attachments "$XCRESULT" "$OUT" 2>>"$OUT/extract.err" \
+                || echo "=== xcparse también falló; se sube el .xcresult crudo ==="
+            else
+              echo "=== xcparse no instalable; se sube el .xcresult crudo ==="
+            fi
+          fi
+          ls -laR "$OUT" || true
+
+      # TEARDOWN ANTES de segmentar (corrida 11: con el video aún grabándose el
+      # mp4 no tiene moov atom → ffprobe falla → manifest degraded y cero clips).
+      - name: Stop recording and log stream
+        if: always()
+        continue-on-error: true
+        run: |
+          set -x
+          # kill -INT al grabador para que cierre el mp4 con moov atom válido
+          if [ -f /tmp/videopid ]; then
+            kill -INT "$(cat /tmp/videopid)" 2>/dev/null || true
+          fi
+          if [ -f /tmp/logpid ]; then
+            kill -INT "$(cat /tmp/logpid)" 2>/dev/null || true
+          fi
+          # dar tiempo a que ffmpeg/simctl finalice el archivo
+          sleep 4
+          echo "=== Artifacts recolectados ==="
+          ls -laR "$GITHUB_WORKSPACE/${WORKDIR}/artifacts" || true
+
+      # Cortar el video en clips-tutorial por paso (parseando GESTURE-STEP del log).
+      # Degradación elegante: si ffmpeg o el log fallan, sube el video completo +
+      # manifest igual (segment_video.py lo maneja y siempre exit 0).
+      - name: Segment video en clips-tutorial por paso
+        if: always()
+        continue-on-error: true
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          set -x
+          VIDEO_START="$(cat artifacts/video-start.txt 2>/dev/null || true)"
+          python3 "$GITHUB_WORKSPACE/scripts/ui-probe/segment_video.py" \
+            --video artifacts/video.mp4 \
+            --log artifacts/app-log.txt \
+            --out artifacts/tutorials \
+            ${VIDEO_START:+--video-start "$VIDEO_START"} \
+            || echo "segment_video.py devolvió no-cero (degradado; video completo igual sube)"
+          ls -laR artifacts/tutorials || true
+
+      # ---------------------------------------------------------------------
+      # EMPAQUETAR el .app de simulador (para Appetize.io)
+      # ---------------------------------------------------------------------
+      - name: Zip simulator .app (for Appetize.io)
+        if: always()
+        continue-on-error: true
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          set -x
+          APP_PATH="${{ steps.locate.outputs.APP_PATH }}"
+          if [ -n "$APP_PATH" ] && [ -d "$APP_PATH" ]; then
+            mkdir -p artifacts
+            # Appetize acepta el .app zipeado directamente (build de simulador).
+            ( cd "$(dirname "$APP_PATH")" && ditto -c -k --sequesterRsrc --keepParent "$(basename "$APP_PATH")" "$GITHUB_WORKSPACE/${WORKDIR}/artifacts/${APP_NAME}-sim.zip" )
+            ls -lh artifacts/${APP_NAME}-sim.zip
+          else
+            echo "=== .app no disponible para empaquetar (build previa falló) ==="
+          fi
+
+      # ---------------------------------------------------------------------
+      # ROTAR capturas a landscape (la app corre landscapeRight; simctl
+      # enmarca en portrait del device — rotar para lectura derecha)
+      # ---------------------------------------------------------------------
+      - name: Rotate screenshots to landscape
+        if: always()
+        continue-on-error: true
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          shopt -s nullglob
+          for f in artifacts/screenshots/*.png; do sips --rotate 270 "$f" >/dev/null || true; done
+
+      # ---------------------------------------------------------------------
+      # SUBIR TODA la evidencia — if: always()
+      # ---------------------------------------------------------------------
+      - name: Upload evidence artifacts
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: ui-probe-evidence-${{ github.run_id }}
+          path: |
+            ios-app/AppForgeStudio/artifacts/screenshots/**
+            ios-app/AppForgeStudio/artifacts/video.mp4
+            ios-app/AppForgeStudio/artifacts/ui-tree.json
+            ios-app/AppForgeStudio/artifacts/app-log.txt
+            ios-app/AppForgeStudio/artifacts/${{ env.APP_NAME }}-sim.zip
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Upload build log (always)
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: ui-probe-build-log-${{ github.run_id }}
+          path: ios-app/AppForgeStudio/build.log
+          retention-days: 14
+
+      # --- OLA GestureProbe: attachments por paso + clips-tutorial ----------
+      - name: Upload gesture-steps (attachments por paso)
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: ui-probe-gesture-steps-${{ github.run_id }}
+          path: |
+            ios-app/AppForgeStudio/artifacts/gesture-steps/**
+            ios-app/AppForgeStudio/artifacts/GearScenario.xcresult/**
+            ios-app/AppForgeStudio/gear-test.log
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Upload tutorials (clips por paso + manifest)
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: ui-probe-tutorials-${{ github.run_id }}
+          path: |
+            ios-app/AppForgeStudio/artifacts/tutorials/**
+            ios-app/AppForgeStudio/artifacts/video.mp4
+          retention-days: 14
+          if-no-files-found: warn

@@ -1,8 +1,38 @@
 # AppForge Studio — TODO.md
-> Updated: 2026-07-07
-> CI VERDE: build + 165 tests (0 fallos) + IPA. PR #6 mergeado a main (ca2ec00).
+> Updated: 2026-07-08
+> CI VERDE: build + 205 tests (0 fallos) + IPA. Rama feature/fase-c (PR #9), adelantada a main.
 
 ## Foco actual
+- FASE D EN CURSO (2026-07-08, ola 1 commit 06e4133): UI real, cero fachada.
+  - [x] DESCUBRIMIENTO CLAVE: el chrome (WorkspaceView) era una MAQUETA — ignoraba
+    selectedMode y ninguna vista de Features/ se instanciaba jamás. Reconectado:
+    cada modo monta su vista real (CAD/Sculpt/Paint/Híbrido/Animar/Render).
+  - [x] BUG raíz sculpt: renderer.setSculptEngine() no se llamaba desde ningún
+    sitio — esculpir con el dedo estuvo muerto SIEMPRE. AppState posee e inyecta
+    el engine (test AppStateWiringTests).
+  - [x] Router de gestos v1 (contrato DISENO_INTERFAZ §3) + picking unificado en
+    ScenePicker (raycast duplicado de MetalView eliminado; ya no esculpía overlays).
+  - [x] Doble manejo de cámara eliminado (DragGesture SwiftUI vs pan UIKit competían).
+  - [x] 10 deformers cableados (selector Sculpt + menú Hybrid); Remesh voxel real;
+    sliders radio/fuerza/simetría sincronizados al engine.
+  - [x] Purga: maqueta (LeftToolbar/FloatingParams/RightProperties/pills falsas) +
+    7 archivos de chrome huérfano; Loft oculto hasta F3; ViewCube funcional.
+  - [x] IDENTIDAD "Acero & Brasa" (docs/IDENTIDAD_FORGE.md): accent propio ember
+    (mata el azul heredado de Shapr3D), tokens steel/clay, highlight de selección
+    brasa en viewport, clearColor=bgCanvas. Checklist de aplicación en el doc.
+  - [x] OLA 2 "Las manos" (BLUEPRINT §3.6): undo/redo por tap 2/3 dedos (router
+    dual B-rep/sculpt/escena), doble tap encuadre universal, sliders laterales
+    de pulgar radio/fuerza (N1, VerticalParamSlider), pincel inverso (N2, test),
+    Pencil=herramienta con presión real (S1), efecto "templado" (tempered()).
+  - [x] OLA 3.1 "La selección es el menú" (S2, primer paso): BRepEdgePicker
+    (proyección de curva OCCT + tubo de highlight), BRepModeling.filletEdge
+    (fillet SELECTIVO por arista), EdgeFilletController + barra contextual.
+    7 tests nuevos con oráculos exactos.
+  - [ ] Ola 3.2: número vivo editable + NumericPad (S3); clasificar cara-vs-arista
+    en un solo tap (hoy arista solo con Select); chamfer por arista.
+  - [ ] Ola 4: Forge Flow (hornear B-rep→malla, badges de material ⬡/〰).
+  - [ ] Siguiente también: rediseño chrome CADModeView (rail izquierdo),
+    drag-en-cara push/pull en vivo (necesita device), pintura real (F3).
 - FASE A COMPLETA (2026-07-07, PR #7): núcleo B-rep fuente de verdad — Model.cadShape,
   booleanos OCCT reales entre modelos, push/pull por cara (BRepFeat boss/pocket),
   fillet/chamfer/shell B-rep in-place, STEP AP214 real. 179 tests verdes con
@@ -11,10 +41,21 @@
   pantalla→rayo→malla→cara B-rep (ScenePicking, testeable), bug onTouch3D
   (pasaba model.position), PushPullController + herramienta Push/Pull con barra
   contextual, docs/DISENO_INTERFAZ.md canónico. 190 tests verdes.
-- Siguiente (Fase C, por orden del doc de diseño): highlight visual de cara
-  seleccionada (no negociable antes de más tools); router de gesto
-  geometría-vs-vacío; drag-en-cara para push/pull en vivo (necesita device);
-  drawings DXF/PDF, SheetMetal, FeatureRecognition (kernel listo)
+- FASE C EN CURSO (rama feature/fase-c, PR #9, 206 tests verdes 2026-07-08):
+  - [x] Highlight visual de cara seleccionada (overlay __faceHighlight amarillo,
+    BRepFacePicker.highlightMesh) + undo/redo B-rep (BRepHistory) + overlays no-tocables.
+    BUG corregido: Fatal access conflict en BRepHistory.swapTop (syncCounts en defer
+    leía los arrays inout prestados) — solo verificable por CI, crasheaba 4 tests.
+  - [x] Drawings 2D DXF+PDF (DrawingExportService): proyecta el B-rep a vistas ortográficas
+    (planta/alzado/lateral/iso) → DXF R12 (Exporter.writeDXF) y PDF imprimible A4/A3
+    (Exporter.writePDF). Shapr3D cobra esto.
+  - [x] Feature Recognition (FeatureRecognitionService): agujeros + cajeras desde el
+    B-rep vía AAG (shape.buildAAG → detectPockets/detectHoles). Base para selección
+    inteligente y árbol de features.
+  - [ ] Siguiente: UI para Drawings/Features (barra export DXF + resaltar features);
+    drag-en-cara para push/pull en vivo (necesita device); router de gesto CAD
+    geometría-vs-vacío (la lógica ya existe para sculpt en MetalView.handlePan);
+    PDF export (OCCTSwift trae PDFExporter), SheetMetal (kernel listo).
 - Bajar la IPA sin firmar del CI y sideload para probar en iPad real
 
 ## Pendientes
@@ -22,17 +63,13 @@
 - [x] Tests pasan en iOS Simulator via CI *(done 2026-07-07 — 165/165)*
 - [ ] Obtener cuenta Apple Developer ($99/año) para firmar y deployar
 - [ ] O conseguir Mac/Mac mini para compilar + sideloading gratuito (AltStore, 7 días)
-- [ ] Conectar sculpt al touch — los 10 deformers existen pero MetalView nunca los llama. rayTriangleIntersect() existe pero no se usa
-- [ ] Activar botones de HybridMode — Remesh, Color, Tamaño, Opacidad, Loop Cut, Bisel (engines implementados, closures vacíos)
-- [ ] Agregar botón "Import" con fileImporter → ModelLoadService (el engine existe, falta UI)
-- [ ] Arreglar export GLTF (escribe JSON pero nunca escribe el buffer .bin)
-- [ ] Implementar filleted/chamfered/shelled/extruded/revolved/swept reales en Shape (actualmente son stubs identidad)
-- [ ] Corregir BUG1: layout GPU PBR (float3 padding a 16 bytes)
-- [ ] Corregir BUG2: updateAnimation() doble por frame
-- [ ] Corregir BUG3: UInt16 → UInt32 para mallas >65k vértices
-- [ ] Corregir BUG5: normal matrix bajo escala no-uniforme
-- [ ] Corregir BUG7: grab deformer dirección contraria
-- [ ] Corregir BUG9: rebuildSceneFrom llamado cada frame (60 allocs/seg)
+- [x] Agregar botón "Import" con fileImporter → ModelLoadService *(done 2026-07-08, ola 1C beta: ExportView, security-scoped, OBJ/STL/GLTF/FBX/USDZ)*
+- [x] Arreglar export GLTF *(FANTASMA — el .bin sí se escribía; test fuerte añadido 2026-07-08)*
+- [x] BUG1/BUG2/BUG5 render *(auditoría 2026-07-08: los 3 YA estaban resueltos en código; NormalMatrixTests añadido como blindaje — ver BRAIN.md)*
+- [x] BUG3 UInt16→UInt32, BUG7 grab, BUG9 rebuild *(corregidos pre-F0/F0)*
+- [x] Conectar sculpt al touch *(RESUELTO 2026-07-08 Fase D: la causa era que setSculptEngine nunca se llamaba — el path de MetalView estaba bien pero el engine era nil)*
+- [x] Activar botones de HybridMode *(2026-07-08 Fase D: deformers y Remesh cableados; Loop Cut/Bisel ya llamaban executeCADTool; Color/Rellenar eliminados hasta pintura real F3)*
+- [ ] Implementar filleted/chamfered/shelled/extruded/revolved/swept reales en Shape BSP legacy (stubs identidad) — o retirar el path legacy (el real es B-rep vía BRepModeling)
 - Actualizar GOTCHI.md: Stack local dice Satin 0.3.0 pero Package.swift usa 13.0.0
 - Resolver Hi-Rez-Satin/ untracked: es symlink roto, submodule, o archivo corrupto?
 

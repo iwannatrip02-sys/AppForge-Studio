@@ -98,4 +98,94 @@ final class ScenePickingTests: XCTestCase {
         XCTAssertNil(BRepFacePicker.faceIndex(of: shape, nearest: SIMD3<Float>(50, 50, 50)),
                      "un punto lejos de toda cara no debe seleccionar nada")
     }
+
+    // MARK: - Highlight de cara (feedback visual de selección)
+
+    func testHighlightMeshCoversOnlyTheSelectedFace() throws {
+        let model = try makeBoxModel()
+        let shape = try XCTUnwrap(model.cadShape)
+        let displayMesh = try XCTUnwrap(model.meshes.first)
+        let topIdx = try XCTUnwrap(BRepModeling.faceIndex(of: shape,
+                                                          withNormal: SIMD3<Double>(0, 0, 1)))
+
+        let highlight = try XCTUnwrap(BRepFacePicker.highlightMesh(
+            shape: shape, faceIndex: topIdx, displayMesh: displayMesh))
+
+        XCTAssertFalse(highlight.vertices.isEmpty, "la cara superior tiene triángulos")
+        XCTAssertLessThan(highlight.vertices.count, displayMesh.vertices.count,
+                          "el highlight NO es la malla entera")
+        for v in highlight.vertices {
+            XCTAssertEqual(v.position.z, 1.0, accuracy: 0.01,
+                           "todos los vértices del highlight están en el plano de la cara (+offset)")
+        }
+    }
+
+    func testHighlightMeshNilForInvalidFace() throws {
+        let model = try makeBoxModel()
+        let shape = try XCTUnwrap(model.cadShape)
+        let displayMesh = try XCTUnwrap(model.meshes.first)
+        XCTAssertNil(BRepFacePicker.highlightMesh(shape: shape, faceIndex: 999,
+                                                  displayMesh: displayMesh))
+    }
+
+    // MARK: - Picker de aristas (Ola 3, BLUEPRINT S2)
+
+    /// Caja 2×2×2 centrada: el punto medio de la arista superior x=1,z=1 es
+    /// (1, 0, 1). El picker debe encontrar una arista a distancia ~0.
+    func testEdgeIndexFindsNearestEdge() throws {
+        let model = try makeBoxModel()
+        let shape = try XCTUnwrap(model.cadShape)
+
+        let idx = BRepEdgePicker.edgeIndex(of: shape,
+                                           nearest: SIMD3<Float>(1.0, 0.0, 1.0))
+        let edgeIdx = try XCTUnwrap(idx, "el toque sobre la arista debe encontrarla")
+
+        // La arista encontrada contiene de verdad el punto (proyección ≈ 0)
+        let edges = shape.edges()
+        XCTAssertEqual(edges.count, 12, "una caja tiene 12 aristas")
+        let proj = try XCTUnwrap(edges[edgeIdx].project(point: SIMD3<Double>(1, 0, 1)))
+        XCTAssertLessThan(proj.distance, 1e-6, "el punto yace sobre la arista elegida")
+    }
+
+    /// Un toque en el CENTRO de una cara está lejos de toda arista (a 1.0 de
+    /// distancia en una caja 2×2×2) → el picker de aristas debe rechazarlo.
+    func testEdgeIndexRejectsFarPoint() throws {
+        let model = try makeBoxModel()
+        let shape = try XCTUnwrap(model.cadShape)
+        XCTAssertNil(BRepEdgePicker.edgeIndex(of: shape,
+                                              nearest: SIMD3<Float>(0, 0, 1)),
+                     "el centro de la cara no es una arista (selección de cara, no de arista)")
+    }
+
+    func testEdgePolylineSamplesTheCurve() throws {
+        let model = try makeBoxModel()
+        let shape = try XCTUnwrap(model.cadShape)
+        let edgeIdx = try XCTUnwrap(BRepEdgePicker.edgeIndex(
+            of: shape, nearest: SIMD3<Float>(1.0, 0.0, 1.0)))
+
+        let pts = try XCTUnwrap(BRepEdgePicker.polyline(of: shape, edgeIndex: edgeIdx))
+        XCTAssertGreaterThanOrEqual(pts.count, 2, "una polilínea necesita ≥2 puntos")
+        for p in pts {
+            XCTAssertEqual(p.x, 1.0, accuracy: 1e-4, "la arista x=1,z=1 vive en x=1")
+            XCTAssertEqual(p.z, 1.0, accuracy: 1e-4, "la arista x=1,z=1 vive en z=1")
+        }
+        XCTAssertNil(BRepEdgePicker.polyline(of: shape, edgeIndex: 999))
+    }
+
+    // MARK: - Overlays no tocables
+
+    func testHitTestIgnoresUIOverlayModels() throws {
+        let model = try makeBoxModel()
+        let overlay = try makeBoxModel()
+        overlay.name = "__faceHighlight"
+        // Overlay MÁS CERCA de la cámara: si no se ignorara, ganaría el hit
+        for i in overlay.meshes[0].vertices.indices {
+            overlay.meshes[0].vertices[i].position.z += 5
+        }
+        let ray = CameraRay.from(screenPoint: CGPoint(x: 200, y: 200),
+                                 viewSize: CGSize(width: 400, height: 400),
+                                 camera: topDownCamera())
+        let hit = try XCTUnwrap(ScenePicker.hitTest(models: [overlay, model], ray: ray))
+        XCTAssertEqual(hit.modelIndex, 1, "los overlays __ no capturan toques")
+    }
 }

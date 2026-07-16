@@ -60,12 +60,129 @@ struct ToolbarGlowModifier: ViewModifier {
     }
 }
 
+// MARK: Tempered Modifier — firma de identidad (IDENTIDAD_FORGE §6)
+
+/// "El templado": al confirmar una operación, el elemento flashea brasa→acero
+/// en 400ms. Confirmación física sin toasts. Se dispara incrementando `trigger`.
+struct TemperedModifier: ViewModifier {
+    let trigger: Int
+    @State private var glow = false
+
+    func body(content: Content) -> some View {
+        content
+            .overlay(
+                RoundedRectangle(cornerRadius: AppTheme.radiusMD)
+                    .stroke(AppTheme.accentColor, lineWidth: 2)
+                    .opacity(glow ? 0.9 : 0)
+                    .allowsHitTesting(false)
+            )
+            .onChange(of: trigger) { _ in
+                glow = true
+                withAnimation(.easeOut(duration: 0.4)) { glow = false }
+            }
+    }
+}
+
+// MARK: VerticalParamSlider — control lateral de pulgar (BLUEPRINT N1)
+
+/// Slider vertical flotante pegado al borde del viewport: los 2 parámetros que
+/// cambias 200 veces por sesión (radio/fuerza) sin un solo tap de navegación.
+/// Brasa mientras arrastras (estado activo), acero en reposo.
+struct VerticalParamSlider: View {
+    @Binding var value: Float
+    let range: ClosedRange<Float>
+    var icon: String = "circle.dashed"
+    var format: String = "%.2f"
+
+    @State private var dragging = false
+    private let trackHeight: CGFloat = 140
+
+    private var normalized: CGFloat {
+        CGFloat((value - range.lowerBound) / max(range.upperBound - range.lowerBound, 0.0001))
+    }
+
+    var body: some View {
+        VStack(spacing: AppTheme.space2) {
+            Image(systemName: icon)
+                .font(.system(size: 10))
+                .foregroundColor(dragging ? AppTheme.accentColor : AppTheme.textTertiary)
+            ZStack(alignment: .bottom) {
+                Capsule().fill(AppTheme.bgOverlay).frame(width: 5)
+                Capsule()
+                    .fill(dragging ? AppTheme.accentColor : AppTheme.steel)
+                    .frame(width: 5, height: max(6, normalized * trackHeight))
+            }
+            .frame(width: 30, height: trackHeight)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { g in
+                        if !dragging { HapticService.shared.light() }
+                        dragging = true
+                        let t = 1 - min(max(g.location.y / trackHeight, 0), 1)
+                        value = range.lowerBound + Float(t) * (range.upperBound - range.lowerBound)
+                    }
+                    .onEnded { _ in dragging = false }
+            )
+            Text(String(format: format, value))
+                .font(AppTheme.Typography.mono.font)
+                .foregroundColor(dragging ? AppTheme.accentColor : AppTheme.textTertiary)
+                .frame(width: 34)
+        }
+        .padding(.vertical, AppTheme.space2)
+        .padding(.horizontal, 2)
+        .glassPanel()
+    }
+}
+
+// MARK: NumericField — valor vivo EDITABLE (BLUEPRINT S3, precisión CAD)
+
+/// El número junto al slider deja de ser texto: tócalo y escribe el valor
+/// exacto (teclado decimal). Une el feel táctil con la precisión de ingeniería.
+struct NumericField: View {
+    @Binding var value: Double
+    var range: ClosedRange<Double> = 0.001...1000
+    var format: String = "%.2f"
+
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField("", text: $text)
+            .keyboardType(.numbersAndPunctuation)
+            .multilineTextAlignment(.trailing)
+            .font(AppTheme.Typography.monoLarge.font)
+            .foregroundColor(focused ? AppTheme.accentColor : AppTheme.textPrimaryColor)
+            .frame(width: 64)
+            .padding(.vertical, 2).padding(.horizontal, 4)
+            .background(focused ? AppTheme.accentColor.opacity(0.12) : AppTheme.bgOverlay)
+            .cornerRadius(AppTheme.radiusSM)
+            .focused($focused)
+            .onAppear { text = String(format: format, value) }
+            .onChange(of: value) { v in
+                if !focused { text = String(format: format, v) }
+            }
+            .onChange(of: text) { t in
+                guard focused else { return }
+                if let v = Double(t.replacingOccurrences(of: ",", with: ".")) {
+                    value = min(max(v, range.lowerBound), range.upperBound)
+                }
+            }
+            .onSubmit {
+                focused = false
+                text = String(format: format, value)
+            }
+    }
+}
+
 // MARK: View Extensions
 
 extension View {
     func glassPanel() -> some View { modifier(GlassPanelModifier()) }
     func surfaceCard() -> some View { modifier(SurfaceCardModifier()) }
     func toolbarGlow(active: Bool = false) -> some View { modifier(ToolbarGlowModifier(active: active)) }
+    /// Flash brasa→acero al confirmar una operación (incrementa `trigger` para disparar).
+    func tempered(trigger: Int) -> some View { modifier(TemperedModifier(trigger: trigger)) }
 }
 
 // MARK: - ToolButton (Canonical Toolbar Button)

@@ -92,7 +92,7 @@ struct AnimationView: View {
                     ForEach(engine.keyframes.filter { $0.modelName == engine.selectedClipName }) { kf in
                         let pos = currentClipDuration > 0 ? CGFloat(kf.time / currentClipDuration) * timelineWidth : 0
                         Circle()
-                            .fill(selectedKfId == kf.id ? Color.accentColor : Color.blue.opacity(0.8))
+                            .fill(selectedKfId == kf.id ? AppTheme.accentColor : AppTheme.steel.opacity(0.8))
                             .frame(width: selectedKfId == kf.id ? 14 : 10, height: selectedKfId == kf.id ? 14 : 10)
                             .shadow(color: selectedKfId == kf.id ? Color.accentColor.opacity(0.6) : .clear, radius: 4)
                             .offset(x: pos - (selectedKfId == kf.id ? 7 : 5))

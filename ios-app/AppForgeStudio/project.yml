@@ -37,6 +37,7 @@ targets:
       - path: Core/UI
       - path: Core/Managers
       - path: Core/Services/ExportService
+      - path: Features/Home
       - path: Features/CADMode
       - path: Features/SculptMode
       - path: Features/PaintMode
@@ -98,3 +99,47 @@ targets:
     dependencies:
       - target: AppForgeStudio
       - package: OCCTSwift
+
+  # Ola GestureProbe (carril G-A): runner XCUITest que sintetiza gestos REALES
+  # del sistema (tap/drag/2-dedos/pinch) sobre la UI real y modela un engranaje.
+  # Invariantes ci_infra: plist PROPIO (BNDL), bundle id DISTINTO
+  # (com.appforgestudio.app.uitests — compartirlo rompe la instalación con
+  # "Missing bundle ID"), firma ad-hoc idéntica al resto (Manual / - / --deep,
+  # pasada en el xcodebuild test del CI). type bundle.ui-testing hace que
+  # XcodeGen genere el runner XCUITest y, con TEST_TARGET_NAME, cablee la app
+  # bajo prueba (sin TEST_HOST/BUNDLE_LOADER — el runner se inyecta solo).
+  AppForgeStudioUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    settings:
+      base:
+        INFOPLIST_FILE: AppForgeStudioUITests-Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.appforgestudio.app.uitests
+        TEST_TARGET_NAME: AppForgeStudio
+    dependencies:
+      - target: AppForgeStudio
+
+# Schemes EXPLÍCITOS (2026-07-15): sin esto, el scheme auto-generado metía los
+# UI-tests (GearScenario, ~5 min de gestos) al carril sagrado build.yml y lo
+# ponía rojo/lento. AppForgeStudio = build+tests unitarios (build.yml intacto);
+# GearScenario = solo los UI-tests de gestos (los corre ui-probe.yml).
+schemes:
+  AppForgeStudio:
+    build:
+      targets:
+        AppForgeStudio: all
+    test:
+      config: Debug
+      targets:
+        - AppForgeStudioTests
+  GearScenario:
+    build:
+      targets:
+        AppForgeStudio: all
+        AppForgeStudioUITests: [test]
+    test:
+      config: Debug
+      targets:
+        - AppForgeStudioUITests

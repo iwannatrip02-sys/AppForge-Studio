@@ -43,6 +43,9 @@ enum SketchEntity {
 
 enum SketchEngineTool: String, CaseIterable { case select = "Seleccionar"; case point = "Punto"; case line = "Linea"; case circle = "Circulo"; case rectangle = "Rectangulo"; case arc = "Arco" }
 
+// MainActor: encapsula CADHistoryTree (aislado a MainActor) y solo lo consumen
+// vistas SwiftUI y delegates de PencilKit, ambos en el main actor.
+@MainActor
 class CADSketchEngine: ObservableObject {
     @Published var constraintManager = GeometryConstraintManager()
     @Published var historyTree = CADHistoryTree()
@@ -199,11 +202,10 @@ class CADSketchEngine: ObservableObject {
         isDirty = true
     }
 
-    func extrudeSketch(distance: Float) -> Mesh {
-        // TODO(F3): re-wire ExtrusionEngine → CADShapeExtrusionEngine (API changed to Wire/CADShape)
-        // Original ExtrusionEngine.extrude(mesh:faceIndices:direction:distance:) no longer exists.
-        return Mesh()
-    }
+    // NOTA: el antiguo `extrudeSketch(distance:) -> Mesh` era un NO-OP (`return Mesh()`)
+    // que compilaba pero no producía geometría — la mitad del "doble sistema de sketch".
+    // Eliminado: TODO camino de extrude pasa ahora por `SketchController`
+    // (`extrudedShapeForActiveRegion` / `extrudeRegion`), que sí genera sólidos B-rep reales.
 
     private func collectSketchPoints() -> [SketchPoint] {
         var collected: [UUID: SketchPoint] = [:]

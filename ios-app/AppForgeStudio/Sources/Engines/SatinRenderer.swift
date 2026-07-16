@@ -24,6 +24,23 @@ private struct BasicUniforms {
     var lightColor: SIMD3<Float>
     var lightIntensity: Float
     var normalMatrix: simd_float3x3
+    var modelColor: SIMD4<Float>   // espeja Uniforms.modelColor del shader básico
+    var cameraPos: SIMD4<Float>    // posición de cámara (specular/rim)
+}
+
+/// Uniforms del pipeline de LÍNEA (aristas/puntos/dibujos nítidos AA). ESPEJA
+/// exactamente `LineUniforms` en Shaders.metal — el orden y el padding importan.
+/// SIMD3/SIMD2 en Swift + float3/float2 en MSL alinean igual (16/8 bytes) por el
+/// layout estándar de Metal; los escalares finales rellenan hasta múltiplo de 16.
+private struct LineUniforms {
+    var modelMatrix: simd_float4x4
+    var viewMatrix: simd_float4x4
+    var projectionMatrix: simd_float4x4
+    var lineColor: SIMD4<Float>      // núcleo (acero oscuro por defecto, brasa en selección)
+    var haloColor: SIMD4<Float>      // halo claro de contraste
+    var viewportSize: SIMD2<Float>   // px del drawable
+    var halfWidthPx: Float           // media anchura (núcleo+halo) en px
+    var depthBias: Float             // sesgo NDC hacia cámara (line-on-face)
 }
 
 struct GPUPBRMaterial {
@@ -80,6 +97,14 @@ private struct BasicRenderable {
     var modelMatrix: simd_float4x4
     var color: SIMD4<Float>
     var modelId: String  // for lookup during sculpt refresh & transform updates
+    /// Centro del bounding box (espacio del modelo) — pivote del outline de selección.
+    var center: SIMD3<Float> = .zero
+    /// Los overlays de UI (gizmo, highlights "__") no se vuelven translúcidos en rayos X.
+    var opaqueInXray: Bool = false
+    /// Fantasma de preview en vivo (`__livePreview`): SIEMPRE translúcido, sin escribir
+    /// depth, dibujado DESPUÉS de los opacos — independiente de `xrayEnabled`. Ola
+    /// LiveInteraction · L1 · tarea 1 (obstáculo A del RECON: los "__" son opaqueInXray).
+    var forceTranslucent: Bool = false
 }
 
 /// @MainActor: AnimationEngine is @MainActor (ios-app/AppForgeStudio/Sources/Engines/AnimationEngine.swift:184).
@@ -90,6 +115,31 @@ private struct BasicRenderable {
 /// MainActor.assumeIsolated noise.
 @MainActor
 class SatinRenderer: NSObject, ObservableObject {
+
+    // MARK: - Anchos de línea (contrato visual, px)
+    //
+    // Media anchura (núcleo+halo) en píxeles que el shader de línea expande en
+    // pantalla. Constantes = única fuente de verdad (los tests fijan el contrato).
+    // Feedback en device: base era 2.2 ("casi invisible") y brasa 3.0 (apenas
+    // +0.8 sobre la base → la selección "casi no se nota"). Nuevo contrato:
+    //   · base legible/seleccionable, · brasa de selección ≥1.7× la base.
+    static let edgeHalfWidthPx: Float = 3.5        // aristas en reposo (antes 2.2)
+    static let dotHalfWidthPx: Float = 5.5         // vértices/puntos en reposo (antes 4.0)
+    static let emberEdgeHalfWidthPx: Float = 6.0   // arista SELECCIONADA (antes 3.0) — 1.71× base
+    static let emberDotHalfWidthPx: Float = 8.5    // punto SELECCIONADO (antes 5.5) — 1.55× base
+
+    // MARK: - Fantasma de preview en vivo (Ola LiveInteraction · L1)
+    //
+    // El modelo de escena con este NOMBRE es el fantasma del preview (extrude/
+    // push-pull en vivo). L1 lo renderiza SIEMPRE translúcido (contrato). La
+    // convención `__` lo mantiene fuera del picking y del export.
+    static let livePreviewName = "__livePreview"
+    // Tinte ember + alpha del fantasma (design_tokens.json: color.ember.base
+    // #FF7A45 = (1.0, 0.478, 0.271); glow.opacityCenter = 0.45 → alpha 0.40 del
+    // rango 0.35–0.45 del CONTRATO, un pelín más translúcido para que el sólido
+    // detrás lea claro). Fuente única de verdad del material del fantasma.
+    static let ghostTint = SIMD4<Float>(1.0, 0.478, 0.271, 0.40)
+
     let device: MTLDevice
     var scene: Object? = nil
     var camera: PerspectiveCamera
@@ -116,6 +166,10 @@ class SatinRenderer: NSObject, ObservableObject {
     private var lastFrameTime: CFTimeInterval = 0
     private var sceneObjectCount: Int = 0
     private var modelIdToObject: [String: Object] = [:]
+    /// Snapshot `modelId → geometryVersion` de la última reconstrucción. Permite
+    /// detectar que el ÚNICO cambio de geometría fue el del fantasma `__livePreview`
+    /// y refrescarlo en sitio sin rebuild (Ola LiveInteraction · L1 · tarea 2).
+    private var geometryVersionSnapshot: [String: Int] = [:]
 
     func updateAnimation() {
         let now = CACurrentMediaTime()
@@ -235,16 +289,142 @@ class SatinRenderer: NSObject, ObservableObject {
         mtkView.framebufferOnly = false
         mtkView.enableSetNeedsDisplay = true
         mtkView.isPaused = false
+        mtkView.depthStencilPixelFormat = .depth32Float
+        // Carbón profundo coherente (unificado con MetalView) — base del glow
+        // cálido ember→steel que llega en el ticket de estética A2.
+        mtkView.clearColor = MTLClearColor(red: 0.055, green: 0.060, blue: 0.075, alpha: 1.0)
         setup()
     }
 
+    // MARK: - Diagnóstico de render (bisección del viewport negro en device)
+
+    /// Fotografía del estado del render para el HUD de diagnóstico en pantalla.
+    struct RenderDiagnostics {
+        var renderCalls: Int
+        var encodedFrames: Int
+        var rebuilds: Int
+        var libraryOK: Bool
+        var basicPipelineOK: Bool
+        var pbrPipelineOK: Bool
+        var sanityPipelineOK: Bool
+        var basicCount: Int
+        var pbrCount: Int
+        var totalIndices: Int
+        var drawableSize: CGSize
+        var cameraPos: SIMD3<Float>
+        var cameraTarget: SIMD3<Float>
+        var lastGPUError: String?
+    }
+
+    /// HUD y triángulo de sanidad (apagados: eran los marcadores de prototipo
+    /// más visibles; se reactivan si hay que diagnosticar render en device).
+    var diagnosticsEnabled = false
+    private(set) var renderCalls = 0
+    private(set) var encodedFrames = 0
+    private(set) var libraryLoaded = false
+    private(set) var lastDrawableSize: CGSize = .zero
+    private(set) var lastGPUError: String?
+    private var sanityPipeline: MTLRenderPipelineState?
+    private var sanityDepthState: MTLDepthStencilState?
+    /// Grilla universal del piso (referencia espacial permanente).
+    private var gridPipelineState: MTLRenderPipelineState?
+    private var gridDepthState: MTLDepthStencilState?
+    var gridVisible = true
+    /// Fondo con gradiente + viñeta (el negro plano gritaba prototipo).
+    private var bgPipelineState: MTLRenderPipelineState?
+    /// id del modelo con outline de selección (silueta brasa). nil = ninguno.
+    var outlinedModelId: String?
+    /// Rayos X: los cuerpos se dibujan translúcidos; las ARISTAS siguen opacas
+    /// (el look del screenshot de Shapr3D del usuario).
+    var xrayEnabled = false
+    private var basicXrayPipelineState: MTLRenderPipelineState?
+    private var xrayDepthState: MTLDepthStencilState?
+    /// Aristas de sólidos (LÍNEAS nítidas AA por modelo con B-rep) + puntos de vértice.
+    private var edgeRenderables: [BasicRenderable] = []
+    /// Pipeline de LÍNEA: expande cintas planas a grosor constante en píxeles y las
+    /// dibuja con núcleo oscuro + halo claro anti-aliased (look Shapr3D, no tubos 3D).
+    private var edgeLinePipelineState: MTLRenderPipelineState?
+    /// Depth state de líneas: comparan `.lessEqual` (empatan con la cara y ganan por el
+    /// sesgo de profundidad del shader) y NO escriben depth (no ocluyen unas a otras).
+    private var lineDepthState: MTLDepthStencilState?
+    /// IDs de los renderables "__" cuya malla es de LÍNEA (resaltado de arista): se
+    /// saltan en el pase lit (serían invisibles: cintas degeneradas) y se dibujan en
+    /// BRASA con el pipeline de línea. Se reconstruye en cada rebuild de escena.
+    private var lineOverlayModelIds: Set<String> = []
+    /// Ídem para overlays "__" cuya malla es de PUNTO/disco (puntos de medición): brasa,
+    /// pipeline de línea, un poco más gruesos que las líneas.
+    private var dotOverlayModelIds: Set<String> = []
+
+    func diagnostics() -> RenderDiagnostics {
+        RenderDiagnostics(
+            renderCalls: renderCalls,
+            encodedFrames: encodedFrames,
+            rebuilds: rebuildCount,
+            libraryOK: libraryLoaded,
+            basicPipelineOK: basicPipelineState != nil,
+            pbrPipelineOK: pbrPipelineState != nil,
+            sanityPipelineOK: sanityPipeline != nil,
+            basicCount: basicRenderables.count,
+            pbrCount: pbrRenderables.count,
+            totalIndices: basicRenderables.reduce(0) { $0 + $1.indexCount }
+                + pbrRenderables.reduce(0) { $0 + $1.indexCount },
+            drawableSize: lastDrawableSize,
+            cameraPos: scene3D?.camera.position ?? .zero,
+            cameraTarget: scene3D?.camera.target ?? .zero,
+            lastGPUError: lastGPUError
+        )
+    }
+
+    /// Triángulo naranja compilado DESDE FUENTE en runtime: cero dependencia del
+    /// metallib del bundle. Si se ve el triángulo pero no la escena → pipelines/
+    /// buffers/uniforms; si no se ve NI el triángulo → drawable/pass/commandQueue.
+    private func setupSanityPipeline() {
+        let src = """
+        #include <metal_stdlib>
+        using namespace metal;
+        vertex float4 sanity_vertex(uint vid [[vertex_id]]) {
+            float2 p[3] = { float2(-0.95,-0.95), float2(-0.55,-0.95), float2(-0.75,-0.55) };
+            return float4(p[vid], 0.0, 1.0);
+        }
+        fragment float4 sanity_fragment() { return float4(1.0, 0.48, 0.27, 1.0); }
+        """
+        guard let lib = try? device.makeLibrary(source: src, options: nil),
+              let v = lib.makeFunction(name: "sanity_vertex"),
+              let f = lib.makeFunction(name: "sanity_fragment") else {
+            logger.error("[Diag] no se pudo compilar el pipeline de sanidad")
+            return
+        }
+        let d = MTLRenderPipelineDescriptor()
+        d.vertexFunction = v
+        d.fragmentFunction = f
+        d.colorAttachments[0].pixelFormat = mtkView?.colorPixelFormat ?? .bgra8Unorm
+        d.depthAttachmentPixelFormat = .depth32Float
+        sanityPipeline = try? device.makeRenderPipelineState(descriptor: d)
+        let dd = MTLDepthStencilDescriptor()
+        dd.depthCompareFunction = .always
+        dd.isDepthWriteEnabled = false
+        sanityDepthState = device.makeDepthStencilState(descriptor: dd)
+    }
+
     func setup() {
-        guard let library = device.makeDefaultLibrary() else { return }
+        setupSanityPipeline()
+        // Bundle(for:) = el bundle que contiene esta clase (la app) — robusto
+        // también cuando el código corre hosteado en el bundle de tests.
+        let library = (try? device.makeDefaultLibrary(bundle: Bundle(for: SatinRenderer.self)))
+            ?? device.makeDefaultLibrary()
+        guard let library else {
+            logger.error("[Render] makeDefaultLibrary FALLÓ — sin shaders, nada se dibuja")
+            return
+        }
+        libraryLoaded = true
 
         setupBasicPipeline(library: library)
+        setupLinePipeline(library: library)
         setupPBRPipeline(library: library)
         setupPBRIBLPipeline(library: library)
         setupIBLPipeline(library: library)
+        setupGridPipeline(library: library)
+        setupBGPipeline(library: library)
 
         iblComputePipeline = IBLPipeline(device: device, library: library)
 
@@ -313,6 +493,47 @@ class SatinRenderer: NSObject, ObservableObject {
         scene?.add(obj)
     }
 
+    private func setupBGPipeline(library: MTLLibrary) {
+        guard let v = library.makeFunction(name: "bg_vertex"),
+              let f = library.makeFunction(name: "bg_fragment") else { return }
+        let d = MTLRenderPipelineDescriptor()
+        d.vertexFunction = v
+        d.fragmentFunction = f
+        d.colorAttachments[0].pixelFormat = mtkView?.colorPixelFormat ?? .bgra8Unorm
+        d.depthAttachmentPixelFormat = .depth32Float
+        bgPipelineState = try? device.makeRenderPipelineState(descriptor: d)
+    }
+
+    private func setupGridPipeline(library: MTLLibrary) {
+        guard let vertexFn = library.makeFunction(name: "grid_vertex"),
+              let fragmentFn = library.makeFunction(name: "grid_fragment") else {
+            logger.warning("[Render] shaders de grilla no encontrados")
+            return
+        }
+        let d = MTLRenderPipelineDescriptor()
+        d.vertexFunction = vertexFn
+        d.fragmentFunction = fragmentFn
+        // Sin vertex descriptor: los vértices salen de vertex_id
+        d.colorAttachments[0].pixelFormat = mtkView?.colorPixelFormat ?? .bgra8Unorm
+        d.depthAttachmentPixelFormat = .depth32Float
+        d.colorAttachments[0].isBlendingEnabled = true
+        d.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+        d.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        d.colorAttachments[0].sourceAlphaBlendFactor = .one
+        d.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        do {
+            gridPipelineState = try device.makeRenderPipelineState(descriptor: d)
+        } catch {
+            logger.error("[Render] pipeline de grilla falló: \(error.localizedDescription)")
+        }
+        // Depth test SÍ (los objetos ocluyen la grilla), depth write NO
+        // (la grilla nunca oculta nada).
+        let dd = MTLDepthStencilDescriptor()
+        dd.depthCompareFunction = .less
+        dd.isDepthWriteEnabled = false
+        gridDepthState = device.makeDepthStencilState(descriptor: dd)
+    }
+
     private func setupBasicPipeline(library: MTLLibrary) {
         guard let vertexFn = library.makeFunction(name: "vertex_main"),
               let fragmentFn = library.makeFunction(name: "fragment_main") else { return }
@@ -345,6 +566,70 @@ class SatinRenderer: NSObject, ObservableObject {
         } catch {
             logger.info("Failed to create basic pipeline state: \(error)")
         }
+
+        // Variante RAYOS X: mismos shaders + blending (alpha del modelColor).
+        pipelineDescriptor.colorAttachments[0].isBlendingEnabled = true
+        pipelineDescriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+        pipelineDescriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        pipelineDescriptor.colorAttachments[0].sourceAlphaBlendFactor = .one
+        pipelineDescriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        basicXrayPipelineState = try? device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+        let xd = MTLDepthStencilDescriptor()
+        xd.depthCompareFunction = .less
+        xd.isDepthWriteEnabled = false   // translúcido: no ocluye lo de atrás
+        xrayDepthState = device.makeDepthStencilState(descriptor: xd)
+    }
+
+    /// Pipeline de LÍNEAS nítidas (aristas/puntos/dibujos): `edge_line_vertex` expande
+    /// cintas planas a grosor CONSTANTE en píxeles; `edge_line_fragment` pinta núcleo
+    /// oscuro + halo claro con AA. Blending activado (el AA vive en el alpha). Mismo
+    /// buffer de 9 floats que el básico (position/normal/uv reinterpretados: P/Q/lado).
+    private func setupLinePipeline(library: MTLLibrary) {
+        guard let vertexFn = library.makeFunction(name: "edge_line_vertex"),
+              let fragmentFn = library.makeFunction(name: "edge_line_fragment") else {
+            logger.info("[Render] shaders de línea no encontrados — aristas sin pipeline")
+            return
+        }
+
+        let vertexDescriptor = MTLVertexDescriptor()
+        vertexDescriptor.attributes[0].format = .float4      // position → P (xyz), w ignorado
+        vertexDescriptor.attributes[0].offset = 0
+        vertexDescriptor.attributes[0].bufferIndex = 0
+        vertexDescriptor.attributes[1].format = .float3      // normal → Q (otro extremo)
+        vertexDescriptor.attributes[1].offset = MemoryLayout<Float>.size * 4
+        vertexDescriptor.attributes[1].bufferIndex = 0
+        vertexDescriptor.attributes[2].format = .float2      // uv → (lado, isPoint)
+        vertexDescriptor.attributes[2].offset = MemoryLayout<Float>.size * 7
+        vertexDescriptor.attributes[2].bufferIndex = 0
+        vertexDescriptor.layouts[0]?.stride = MemoryLayout<Float>.size * 9
+        vertexDescriptor.layouts[0]?.stepRate = 1
+        vertexDescriptor.layouts[0]?.stepFunction = .perVertex
+
+        let d = MTLRenderPipelineDescriptor()
+        d.vertexFunction = vertexFn
+        d.fragmentFunction = fragmentFn
+        d.vertexDescriptor = vertexDescriptor
+        d.colorAttachments[0].pixelFormat = mtkView?.colorPixelFormat ?? .bgra8Unorm
+        d.depthAttachmentPixelFormat = .depth32Float
+        d.colorAttachments[0].isBlendingEnabled = true
+        d.colorAttachments[0].rgbBlendOperation = .add
+        d.colorAttachments[0].alphaBlendOperation = .add
+        d.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+        d.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        d.colorAttachments[0].sourceAlphaBlendFactor = .one
+        d.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        do {
+            edgeLinePipelineState = try device.makeRenderPipelineState(descriptor: d)
+        } catch {
+            logger.info("Failed to create line pipeline state: \(error)")
+        }
+
+        // Líneas: comparan .lessEqual (para empatar con la cara y ganar por el sesgo
+        // NDC del shader) y NO escriben depth (una línea no debe ocluir a otra).
+        let ld = MTLDepthStencilDescriptor()
+        ld.depthCompareFunction = .lessEqual
+        ld.isDepthWriteEnabled = false
+        lineDepthState = device.makeDepthStencilState(descriptor: ld)
     }
 
     private func setupPBRPipeline(library: MTLLibrary) {
@@ -649,12 +934,67 @@ class SatinRenderer: NSObject, ObservableObject {
         cmdBuf.waitUntilCompleted()
     }
 
+    private var sceneGeometrySignature: Int = -1
+
     func updateScene(_ scene3D: Scene3D) {
-        let structureChanged = scene3D.models.count != sceneObjectCount
+        // Firma = conteo + versiones de geometría: reconstruir buffers cuando
+        // CUALQUIER malla cambió (features, bakes), no solo al añadir/quitar
+        // modelos (antes las operaciones se veían con retraso o nunca).
+        var signature = scene3D.models.count
+        for m in scene3D.models { signature = signature &* 31 &+ m.geometryVersion }
+        let structureChanged = signature != sceneGeometrySignature
         self.scene3D = scene3D
-        if structureChanged {
-            rebuildSceneFrom(scene3D)
+        if !structureChanged { return }
+
+        // FAST-PATH del fantasma (Ola LiveInteraction · L1 · tarea 2): si el único
+        // cambio de geometría respecto al snapshot es el del `__livePreview` (mismo
+        // conjunto de IDs, ninguna otra malla revisó su versión), lo refrescamos en
+        // sitio — sin `rebuildSceneFrom`. Espeja el refresh in-place del sculpt.
+        // Añadir/quitar el fantasma cambia el conjunto de IDs → cae al rebuild
+        // (ocurre 1 vez por gesto, no por frame — dentro del contrato).
+        if canUpdateGhostInPlace(scene3D) {
+            sceneGeometrySignature = signature
+            if let ghost = scene3D.models.first(where: { $0.name == Self.livePreviewName }) {
+                refreshNonPBRObjectGeometry(for: ghost)
+                geometryVersionSnapshot[ghost.id.uuidString] = ghost.geometryVersion
+            }
+            return
         }
+
+        sceneGeometrySignature = signature
+        sceneObjectCount = scene3D.models.count
+        rebuildSceneFrom(scene3D)
+    }
+
+    /// True si el ÚNICO cambio de geometría desde el último rebuild es el del
+    /// fantasma `__livePreview` (misma cardinalidad, mismos IDs, misma versión en
+    /// todos los demás modelos, y el fantasma YA existe como renderable no-PBR con
+    /// un objeto Satin refrescable). Si algo más cambió → false → rebuild completo.
+    private func canUpdateGhostInPlace(_ scene3D: Scene3D) -> Bool {
+        guard scene3D.models.count == geometryVersionSnapshot.count else { return false }
+        var ghostChanged = false
+        for m in scene3D.models {
+            guard let known = geometryVersionSnapshot[m.id.uuidString] else { return false } // ID nuevo
+            if m.geometryVersion == known { continue }
+            // Este modelo cambió de versión: solo se permite si ES el fantasma
+            // y no hemos visto ya otro fantasma cambiar (debe ser el único).
+            if m.name == Self.livePreviewName && !ghostChanged {
+                ghostChanged = true
+            } else {
+                return false
+            }
+        }
+        guard ghostChanged else { return false }
+        // El fantasma debe existir como objeto no-PBR refrescable (buildObject lo
+        // registró en modelIdToObject y basicRenderables). Si es PBR o no se
+        // construyó (p.ej. malla vacía en el rebuild previo) → rebuild seguro.
+        guard let ghost = scene3D.models.first(where: { $0.name == Self.livePreviewName }),
+              !ghost.usesPBR,
+              modelIdToObject[ghost.id.uuidString] != nil,
+              basicRenderables.contains(where: { $0.modelId == ghost.id.uuidString }) else {
+            return false
+        }
+        return true
     }
 
     private func rebuildSceneFrom(_ scene3D: Scene3D) {
@@ -664,9 +1004,19 @@ class SatinRenderer: NSObject, ObservableObject {
         sceneObjectCount = scene3D.models.count
         pbrRenderables.removeAll()
         basicRenderables.removeAll()
+        edgeRenderables.removeAll()
+        lineOverlayModelIds.removeAll()
+        dotOverlayModelIds.removeAll()
         modelIdToObject.removeAll()
 
+        // Snapshot de versiones para el fast-path del fantasma (tarea 2). Cubre
+        // TODOS los modelos (visibles o no), igual que la firma de `updateScene`.
+        geometryVersionSnapshot.removeAll(keepingCapacity: true)
         for model in scene3D.models {
+            geometryVersionSnapshot[model.id.uuidString] = model.geometryVersion
+        }
+
+        for model in scene3D.models where model.isVisible {
             if model.usesPBR {
                 let vb: MTLBuffer
                 let ib: MTLBuffer
@@ -777,16 +1127,81 @@ class SatinRenderer: NSObject, ObservableObject {
             return Satin.Mesh(geometry: Geometry(), material: BasicColorMaterial(color: SIMD4<Float>(1, 0, 1, 1)))
         }
 
-        let materialColor = model.usesPBR ? SIMD4<Float>(model.pbrMaterial.albedo.x, model.pbrMaterial.albedo.y, model.pbrMaterial.albedo.z, 1.0) : model.color
+        // El fantasma `__livePreview` toma su tinte/alpha del token (L1 dueño del
+        // material — CONTRATO), no del color que ponga el código de inyección.
+        let materialColor: SIMD4<Float>
+        if model.name == Self.livePreviewName {
+            materialColor = Self.ghostTint
+        } else {
+            materialColor = model.usesPBR ? SIMD4<Float>(model.pbrMaterial.albedo.x, model.pbrMaterial.albedo.y, model.pbrMaterial.albedo.z, 1.0) : model.color
+        }
         let modelMatrix = model.transform
+        // Centro del bbox (pivote del outline de selección)
+        var minP = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
+        var maxP = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
+        var vi = 0
+        while vi + 2 < vertices.count {
+            let p = SIMD3<Float>(vertices[vi], vertices[vi + 1], vertices[vi + 2])
+            minP = simd_min(minP, p)
+            maxP = simd_max(maxP, p)
+            vi += 9
+        }
+        let bboxCenter = minP.x <= maxP.x ? (minP + maxP) * 0.5 : SIMD3<Float>.zero
         basicRenderables.append(BasicRenderable(
             vertexBuffer: vb,
             indexBuffer: ib,
             indexCount: indices.count,
             modelMatrix: modelMatrix,
             color: materialColor,
-            modelId: model.id.uuidString
+            modelId: model.id.uuidString,
+            center: bboxCenter,
+            opaqueInXray: model.name.hasPrefix("__"),
+            forceTranslucent: model.name == Self.livePreviewName
         ))
+
+        // Overlays "__" cuya geometría es de LÍNEA/PUNTO (resaltado de arista, puntos
+        // de medición): su malla es cinta/disco → invisible bajo el shader lit. Se
+        // marcan para dibujarse en BRASA con el pipeline de línea. `__faceHighlight`
+        // NO se marca: es una superficie 3D real y se sombrea normal.
+        if model.name == "__edgeHighlight" {
+            lineOverlayModelIds.insert(model.id.uuidString)
+        } else if model.name.hasPrefix("__measureDot") {
+            dotOverlayModelIds.insert(model.id.uuidString)
+        }
+
+        // Aristas del B-rep: LÍNEAS nítidas AA (no tubos 3D). La geometría es una
+        // cinta plana; el pipeline de línea la pinta con NÚCLEO acero OSCURO + HALO
+        // claro de contraste (regla dura: legible sobre fondo oscuro Y sobre caras).
+        // El `color` aquí es el núcleo (acero grafito); el halo lo fija el draw loop.
+        // Siempre opaco (también en rayos X, como el screenshot del usuario).
+        if let em = model.edgesMesh {
+            let (evb, eib, eic) = createBuffersFromMeshes([em])
+            if let evb, let eib, eic > 0 {
+                edgeRenderables.append(BasicRenderable(
+                    vertexBuffer: evb, indexBuffer: eib, indexCount: eic,
+                    modelMatrix: modelMatrix,
+                    color: SIMD4<Float>(0.13, 0.17, 0.24, 1.0),  // acero grafito oscuro (núcleo)
+                    modelId: model.id.uuidString + "#edges",
+                    center: bboxCenter, opaqueInXray: true
+                ))
+            }
+        }
+
+        // Puntos de vértice SIEMPRE visibles: las esquinas del B-rep son entidades
+        // reales tocables (base de selección de puntos y snap — device 2026-07-11).
+        // Mismo pipeline de línea; núcleo acero un punto más brillante que las aristas.
+        if let dots = model.vertexDotsMesh() {
+            let (dvb, dib, dic) = createBuffersFromMeshes([dots])
+            if let dvb, let dib, dic > 0 {
+                edgeRenderables.append(BasicRenderable(
+                    vertexBuffer: dvb, indexBuffer: dib, indexCount: dic,
+                    modelMatrix: modelMatrix,
+                    color: SIMD4<Float>(0.20, 0.28, 0.40, 1.0),  // acero (núcleo del punto)
+                    modelId: model.id.uuidString + "#dots",
+                    center: bboxCenter, opaqueInXray: true
+                ))
+            }
+        }
 
         // Build Satin Mesh for scene-graph operations (modelIdToObject, applyTransformsToScene, refreshNonPBRObjectGeometry)
         // Evidence: vendor/Satin/Sources/Satin/Core/Geometry.swift:185 — addAttribute(_:for:)
@@ -911,7 +1326,40 @@ class SatinRenderer: NSObject, ObservableObject {
         return lights
     }
 
+    // MARK: - Matrices de cámara (scene3D.camera es LA fuente de verdad)
+
+    /// Matriz de vista RH (mundo→ojo). Internal para test con oráculo matemático.
+    /// nonisolated: matemática pura sin estado — testeable fuera del MainActor.
+    nonisolated static func viewMatrix(for cam: Scene3D.Camera) -> simd_float4x4 {
+        let f = simd_normalize(cam.target - cam.position)
+        let s = simd_normalize(simd_cross(f, cam.up))
+        let u = simd_cross(s, f)
+        return simd_float4x4(
+            SIMD4<Float>(s.x, u.x, -f.x, 0),
+            SIMD4<Float>(s.y, u.y, -f.y, 0),
+            SIMD4<Float>(s.z, u.z, -f.z, 0),
+            SIMD4<Float>(-simd_dot(s, cam.position), -simd_dot(u, cam.position),
+                         simd_dot(f, cam.position), 1)
+        )
+    }
+
+    /// Proyección perspectiva RH con NDC z∈[0,1] (convención Metal).
+    nonisolated static func projectionMatrix(for cam: Scene3D.Camera, aspect: Float) -> simd_float4x4 {
+        let fovRad = cam.fov * .pi / 180
+        let y = 1 / tan(fovRad * 0.5)
+        let x = y / max(aspect, 0.0001)
+        let zs = cam.farPlane / (cam.nearPlane - cam.farPlane)
+        return simd_float4x4(
+            SIMD4<Float>(x, 0, 0, 0),
+            SIMD4<Float>(0, y, 0, 0),
+            SIMD4<Float>(0, 0, zs, -1),
+            SIMD4<Float>(0, 0, zs * cam.nearPlane, 0)
+        )
+    }
+
     func render(in view: MTKView) {
+        renderCalls += 1
+        lastDrawableSize = view.drawableSize
         if let se = sculptEngine, var scene = self.scene3D {
             var modifiedModelIndices = Set<Int>()
             for i in 0..<scene.models.count {
@@ -953,25 +1401,108 @@ class SatinRenderer: NSObject, ObservableObject {
             cursorObject?.visible = false
         }
 
+        // Los pipelines declaran depthAttachmentPixelFormat = .depth32Float: si la vista
+        // no aporta depth buffer, el pass es incompatible y la GPU descarta TODOS los draws
+        // (viewport negro en device; invisible en tests porque sin drawable no hay pass).
+        if view.depthStencilPixelFormat != .depth32Float {
+            view.depthStencilPixelFormat = .depth32Float
+            logger.warning("[Render] vista sin depth buffer — corregido a depth32Float")
+        }
+
         guard let drawable = view.currentDrawable,
               let descriptor = view.currentRenderPassDescriptor,
               let commandBuffer = commandQueue.makeCommandBuffer(),
               let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else { return }
 
+        encodedFrames += 1
+
+        // ---- Fondo con gradiente (primero, z=0.999, escribe depth máximo) ----
+        if let bg = bgPipelineState {
+            encoder.setRenderPipelineState(bg)
+            if let sd = sanityDepthState { encoder.setDepthStencilState(sd) }
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        }
+
         encoder.setDepthStencilState(depthState)
+
+        // ---- Sincronizar matrices de modelo (preview vivo de transformaciones) ----
+        if let models = scene3D?.models {
+            for i in basicRenderables.indices {
+                if let m = models.first(where: { $0.id.uuidString == basicRenderables[i].modelId }) {
+                    basicRenderables[i].modelMatrix = m.transform
+                }
+            }
+            for i in edgeRenderables.indices {
+                let baseId = edgeRenderables[i].modelId.replacingOccurrences(of: "#edges", with: "")
+                if let m = models.first(where: { $0.id.uuidString == baseId }) {
+                    edgeRenderables[i].modelMatrix = m.transform
+                }
+            }
+        }
+
+        // ---- Cámara real de la escena ----
+        // BUG histórico (pantalla negra en device): se usaba la PerspectiveCamera de
+        // Satin creada en init y JAMÁS actualizada (origen, aspect 1) — la cámara de
+        // la app (orbit/pan/zoom mutan scene3D.camera) nunca llegaba a la GPU.
+        let cam = scene3D?.camera ?? .default
+        let dsz = view.drawableSize
+        let sceneAspect = dsz.height > 0 ? Float(dsz.width / dsz.height) : max(aspectRatio, 0.0001)
+        let sceneViewMatrix = Self.viewMatrix(for: cam)
+        let sceneProjectionMatrix = Self.projectionMatrix(for: cam, aspect: sceneAspect)
 
         // ---- Basic pipeline pass ----
         // Evidence: Satin 13 Object has no draw(encoder:) method.
         // We draw non-PBR objects directly via MTLRenderCommandEncoder from basicRenderables.
         if let basicPS = basicPipelineState, !basicRenderables.isEmpty {
-            encoder.setRenderPipelineState(basicPS)
+            // Rayos X: cuerpos translúcidos (blending, sin escritura de depth);
+            // overlays y aristas siguen opacos.
+            let bodyPS = (xrayEnabled ? basicXrayPipelineState : nil) ?? basicPS
+            encoder.setRenderPipelineState(bodyPS)
+            if xrayEnabled, let xd = xrayDepthState { encoder.setDepthStencilState(xd) }
+
+            // ---- Outline de selección (silueta brasa): la malla agrandada ~3.5%
+            // alrededor de su centro, con culling FRONTAL, dibujada ANTES del
+            // cuerpo — solo queda visible el borde (técnica clásica de contorno).
+            if let outlineId = outlinedModelId,
+               let r = basicRenderables.first(where: { $0.modelId == outlineId }) {
+                let c = r.center
+                let s: Float = 1.035
+                var scaleM = matrix_identity_float4x4
+                scaleM.columns.0.x = s; scaleM.columns.1.y = s; scaleM.columns.2.z = s
+                var toC = matrix_identity_float4x4
+                toC.columns.3 = SIMD4<Float>(c.x, c.y, c.z, 1)
+                var fromC = matrix_identity_float4x4
+                fromC.columns.3 = SIMD4<Float>(-c.x, -c.y, -c.z, 1)
+                let outlineMatrix = r.modelMatrix * toC * scaleM * fromC
+
+                var u = BasicUniforms(
+                    modelMatrix: outlineMatrix,
+                    viewMatrix: sceneViewMatrix,
+                    projectionMatrix: sceneProjectionMatrix,
+                    ambientColor: SIMD3<Float>(1, 1, 1),   // sin sombreado: color puro
+                    lightDirection: SIMD3<Float>(0, -1, 0),
+                    lightColor: .zero, lightIntensity: 0,
+                    normalMatrix: simd_float3x3(1),
+                    modelColor: SIMD4<Float>(1.0, 0.48, 0.27, 1.0),  // brasa
+                    cameraPos: SIMD4<Float>(cam.position.x, cam.position.y, cam.position.z, 1)
+                )
+                encoder.setCullMode(.front)
+                encoder.setFrontFacing(.counterClockwise)
+                encoder.setVertexBytes(&u, length: MemoryLayout<BasicUniforms>.stride, index: 1)
+                encoder.setFragmentBytes(&u, length: MemoryLayout<BasicUniforms>.stride, index: 1)
+                encoder.setVertexBuffer(r.vertexBuffer, offset: 0, index: 0)
+                encoder.drawIndexedPrimitives(type: .triangle, indexCount: r.indexCount,
+                                              indexType: .uint32, indexBuffer: r.indexBuffer,
+                                              indexBufferOffset: 0)
+                encoder.setCullMode(.none)
+            }
 
             let ambientColor = SIMD3<Float>(0.18, 0.18, 0.18)
             let lightDirection = scene3D?.lighting.directionalLight.direction ?? simd_normalize(SIMD3<Float>(0.0, -1.0, -1.0))
             let lightColor = scene3D?.lighting.directionalLight.color ?? SIMD3<Float>(1.0, 1.0, 1.0)
             let lightIntensity = scene3D?.lighting.directionalLight.intensity ?? 0.8
 
-            for renderable in basicRenderables {
+            func drawBasic(_ renderable: BasicRenderable, alpha: Float) {
                 let m = renderable.modelMatrix
                 let normalMatrix3x3 = simd_float3x3(
                     SIMD3<Float>(m.columns.0.x, m.columns.0.y, m.columns.0.z),
@@ -979,22 +1510,24 @@ class SatinRenderer: NSObject, ObservableObject {
                     SIMD3<Float>(m.columns.2.x, m.columns.2.y, m.columns.2.z)
                 ).inverse.transpose
 
+                var color = renderable.color
+                color.w *= alpha
                 var basicUniforms = BasicUniforms(
                     modelMatrix: m,
-                    viewMatrix: camera.viewMatrix,
-                    projectionMatrix: camera.projectionMatrix,
+                    viewMatrix: sceneViewMatrix,
+                    projectionMatrix: sceneProjectionMatrix,
                     ambientColor: ambientColor,
                     lightDirection: lightDirection,
                     lightColor: lightColor,
                     lightIntensity: lightIntensity,
-                    normalMatrix: normalMatrix3x3
+                    normalMatrix: normalMatrix3x3,
+                    modelColor: color,
+                    cameraPos: SIMD4<Float>(cam.position.x, cam.position.y, cam.position.z, 1)
                 )
 
                 encoder.setVertexBytes(&basicUniforms, length: MemoryLayout<BasicUniforms>.stride, index: 1)
                 encoder.setFragmentBytes(&basicUniforms, length: MemoryLayout<BasicUniforms>.stride, index: 1)
-
                 encoder.setVertexBuffer(renderable.vertexBuffer, offset: 0, index: 0)
-
                 encoder.drawIndexedPrimitives(
                     type: .triangle,
                     indexCount: renderable.indexCount,
@@ -1002,6 +1535,121 @@ class SatinRenderer: NSObject, ObservableObject {
                     indexBuffer: renderable.indexBuffer,
                     indexBufferOffset: 0
                 )
+            }
+
+            // Dibuja una CINTA de línea (arista/punto/dibujo) con el pipeline de línea:
+            // núcleo `core` + halo `halo` de contraste, grosor `halfWidthPx` constante en
+            // pantalla. El pipeline/depth de línea deben estar activos ANTES de llamar.
+            let viewportPx = SIMD2<Float>(Float(dsz.width), Float(dsz.height))
+            func drawLine(_ r: BasicRenderable, core: SIMD4<Float>, halo: SIMD4<Float>,
+                          halfWidthPx: Float) {
+                var u = LineUniforms(
+                    modelMatrix: r.modelMatrix,
+                    viewMatrix: sceneViewMatrix,
+                    projectionMatrix: sceneProjectionMatrix,
+                    lineColor: core,
+                    haloColor: halo,
+                    viewportSize: viewportPx,
+                    halfWidthPx: halfWidthPx,
+                    depthBias: 0.00015   // empuja la línea hacia cámara: gana a la cara
+                )
+                encoder.setVertexBytes(&u, length: MemoryLayout<LineUniforms>.stride, index: 1)
+                encoder.setFragmentBytes(&u, length: MemoryLayout<LineUniforms>.stride, index: 1)
+                encoder.setVertexBuffer(r.vertexBuffer, offset: 0, index: 0)
+                encoder.drawIndexedPrimitives(
+                    type: .triangle, indexCount: r.indexCount,
+                    indexType: .uint32, indexBuffer: r.indexBuffer, indexBufferOffset: 0
+                )
+            }
+
+            // Halos de contraste (regla dura de Andrés): un claro sutil separa la línea
+            // oscura de las CARAS claras; el núcleo oscuro se lee sobre el FONDO oscuro.
+            let steelHalo = SIMD4<Float>(0.78, 0.86, 0.96, 0.85)   // halo acero claro
+            let emberCore = SIMD4<Float>(1.00, 0.48, 0.27, 1.0)    // brasa (selección)
+            let emberHalo = SIMD4<Float>(0.15, 0.09, 0.05, 0.80)   // halo oscuro tras la brasa
+
+            // Anchos de línea en PÍXELES (media anchura núcleo+halo; el shader la
+            // expande en pantalla). Feedback en device: las aristas base eran "tan
+            // delgaditas que casi ni se notan" (era 2.2) y la selección "casi no se
+            // nota" (brasa era 3.0, apenas +0.8 sobre la base → imperceptible).
+            // Contrato nuevo: base legible y seleccionable; la BRASA de selección
+            // claramente MÁS ancha que la base (≥1.7×) para que resalte sin ambigüedad.
+            let edgeHalfWidthPx: Float = SatinRenderer.edgeHalfWidthPx        // 3.5
+            let dotHalfWidthPx: Float = SatinRenderer.dotHalfWidthPx          // 5.5
+            let emberEdgeHalfWidthPx: Float = SatinRenderer.emberEdgeHalfWidthPx  // 6.0
+            let emberDotHalfWidthPx: Float = SatinRenderer.emberDotHalfWidthPx    // 8.5
+
+            for renderable in basicRenderables {
+                // Overlays de línea/punto (resaltado de arista + puntos de medición): su
+                // malla es cinta/disco y sería INVISIBLE bajo el shader lit (cintas
+                // degeneradas sin expansión de pantalla). Se saltan aquí y se dibujan en
+                // el pase de línea (brasa) más abajo.
+                if lineOverlayModelIds.contains(renderable.modelId) ||
+                   dotOverlayModelIds.contains(renderable.modelId) { continue }
+                // El fantasma de preview se pinta en su PROPIO pase (translúcido, sin
+                // depth-write) DESPUÉS de los opacos — no aquí (obstáculo A del RECON).
+                if renderable.forceTranslucent { continue }
+                let translucent = xrayEnabled && !renderable.opaqueInXray
+                drawBasic(renderable, alpha: translucent ? 0.30 : 1.0)
+            }
+
+            // ---- Fantasma de preview en vivo (`__livePreview`) ----
+            // SIEMPRE translúcido, independiente de `xrayEnabled` (obstáculo A del
+            // RECON: los "__" son opaqueInXray). Pipeline con blending
+            // (sourceAlpha/oneMinusSourceAlpha) + depth `.less` sin escritura de depth:
+            // el fantasma NO ocluye la geometría real que queda detrás, pero SÍ pasa el
+            // depth-test contra los opacos ya escritos (la parte tapada del fantasma no
+            // se pinta encima). Dibujado tras los opacos → blending correcto sobre ellos.
+            if let ghostPS = basicXrayPipelineState {
+                var drewGhost = false
+                for renderable in basicRenderables where renderable.forceTranslucent {
+                    if !drewGhost {
+                        encoder.setRenderPipelineState(ghostPS)
+                        if let xd = xrayDepthState { encoder.setDepthStencilState(xd) }
+                        drewGhost = true
+                    }
+                    // El alpha ya vive en el color del fantasma (ghostTint); no re-atenuar.
+                    drawBasic(renderable, alpha: 1.0)
+                }
+                // Restaurar pipeline/depth de cuerpos opacos para los pases siguientes.
+                if drewGhost {
+                    encoder.setRenderPipelineState(bodyPS)
+                    encoder.setDepthStencilState(xrayEnabled ? (xrayDepthState ?? depthState) : depthState)
+                }
+            }
+
+            // ---- Aristas y puntos (look Shapr3D): LÍNEAS nítidas AA, opacas SIEMPRE,
+            // dibujadas tras los cuerpos (en rayos X las de atrás se ven). Pipeline de
+            // línea con halo de contraste. Los puntos (#dots) un poco más gruesos.
+            let haveLinePipe = edgeLinePipelineState != nil
+            if !edgeRenderables.isEmpty, let linePS = edgeLinePipelineState {
+                encoder.setRenderPipelineState(linePS)
+                encoder.setDepthStencilState(lineDepthState ?? depthState)
+                for e in edgeRenderables {
+                    let isDot = e.modelId.hasSuffix("#dots")
+                    drawLine(e, core: e.color, halo: steelHalo,
+                             halfWidthPx: isDot ? dotHalfWidthPx : edgeHalfWidthPx)
+                }
+            }
+            // (Sin fallback lit: las aristas ahora son cintas de línea, degeneradas
+            // bajo el shader lit. Si el pipeline de línea no compila es un fallo de
+            // build serio — el log de setupLinePipeline lo delata; no se dibuja basura.)
+
+            // Overlays de línea/punto en BRASA (selección de arista, puntos de medición).
+            if haveLinePipe, let linePS = edgeLinePipelineState,
+               !(lineOverlayModelIds.isEmpty && dotOverlayModelIds.isEmpty) {
+                encoder.setRenderPipelineState(linePS)
+                encoder.setDepthStencilState(lineDepthState ?? depthState)
+                for r in basicRenderables where lineOverlayModelIds.contains(r.modelId) {
+                    drawLine(r, core: emberCore, halo: emberHalo, halfWidthPx: emberEdgeHalfWidthPx)
+                }
+                for r in basicRenderables where dotOverlayModelIds.contains(r.modelId) {
+                    drawLine(r, core: emberCore, halo: emberHalo, halfWidthPx: emberDotHalfWidthPx)
+                }
+            }
+
+            if edgeRenderables.isEmpty, xrayEnabled {
+                encoder.setDepthStencilState(depthState)
             }
         }
 
@@ -1016,9 +1664,9 @@ class SatinRenderer: NSObject, ObservableObject {
 
             let lighting = scene3D?.lighting ?? .default
             var lightUniforms = makeLightUniforms(from: lighting)
-            let viewMatrix = camera.viewMatrix
-            let projectionMatrix = camera.projectionMatrix
-            let cameraPos = camera.position
+            let viewMatrix = sceneViewMatrix
+            let projectionMatrix = sceneProjectionMatrix
+            let cameraPos = cam.position
             let cameraPos4 = SIMD4<Float>(cameraPos.x, cameraPos.y, cameraPos.z, 0)
 
             var iblUniforms = IBLUniforms(
@@ -1080,8 +1728,42 @@ class SatinRenderer: NSObject, ObservableObject {
             }
         }
 
+        // ---- Grilla universal del piso (tras la geometría: depth test la ocluye
+        // correctamente, depth write off para no ocultar nada) ----
+        if gridVisible, let gp = gridPipelineState {
+            encoder.setRenderPipelineState(gp)
+            if let gd = gridDepthState { encoder.setDepthStencilState(gd) }
+            var gridUniforms = BasicUniforms(
+                modelMatrix: matrix_identity_float4x4,
+                viewMatrix: sceneViewMatrix,
+                projectionMatrix: sceneProjectionMatrix,
+                ambientColor: .zero, lightDirection: .zero, lightColor: .zero,
+                lightIntensity: 0, normalMatrix: simd_float3x3(1),
+                modelColor: .zero,
+                cameraPos: SIMD4<Float>(cam.position.x, cam.position.y, cam.position.z, 1)
+            )
+            encoder.setVertexBytes(&gridUniforms, length: MemoryLayout<BasicUniforms>.stride, index: 1)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
+            encoder.setDepthStencilState(depthState)
+        }
+
+        // ---- Triángulo de sanidad (diagnóstico): se dibuja AL FINAL, encima de
+        // todo (depth .always), abajo-izquierda, en brasa. Independiente del
+        // metallib. Ver setupSanityPipeline para la lógica de bisección.
+        if diagnosticsEnabled, let sp = sanityPipeline {
+            encoder.setRenderPipelineState(sp)
+            if let sd = sanityDepthState { encoder.setDepthStencilState(sd) }
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        }
+
         encoder.endEncoding()
         commandBuffer.present(drawable)
+        commandBuffer.addCompletedHandler { [weak self] cb in
+            if let error = cb.error {
+                logger.error("[Render] command buffer falló en GPU: \(error.localizedDescription)")
+                self?.lastGPUError = error.localizedDescription
+            }
+        }
         commandBuffer.commit()
     }
 

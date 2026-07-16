@@ -1,9 +1,56 @@
 # AppForge Studio — BRAIN.md
-> Updated: 2026-07-07
+> Updated: 2026-07-08
 
-## ESTADO ACTUAL — CI VERDE 🟢
+## ESTADO ACTUAL — Fase D olas 1-3.1 + identidad (2026-07-08, todo CI verde)
 
-2026-07-07 — **Primer build verde completo de la historia del repo** (run 28858291026, PR #6 → main `ca2ec00`):
+Sesión larga con 3 capas: (1) reconexión estructural (ola 1, abajo), (2) docs canónicos
+nuevos — `docs/BLUEPRINT_UX_SUPREMACIA.md` (22 mecánicas de Shapr3D/Nomad catalogadas +
+síntesis + olas 2-8) y `docs/IDENTIDAD_FORGE.md` (sistema Acero & Brasa) — y (3) olas
+2 y 3.1 implementadas:
+- OLA 2 "Las manos": undo/redo por tap 2/3 dedos con router dual (BRepHistory en CAD,
+  stack SculptEngine en sculpt, escena como fallback), doble tap encuadre universal,
+  sliders laterales de pulgar (VerticalParamSlider en Components), pincel inverso
+  (strength firmada + test), Pencil nunca-orbita con presión real, modifier tempered().
+- OLA 3.1 "La selección es el menú": BRepEdgePicker + filletEdge SELECTIVO
+  (Shape.filleted(edges:radius:) @v1.8.8 verificado) + EdgeFilletController + barra
+  contextual con tubo de highlight brasa. GOTCHA aprendida: el nombre ViewCube ya
+  existía en ViewportFeatures.swift (build rojo por redeclaración → ViewCubeControl).
+- PENDIENTE PROBAR EN DEVICE: todo lo táctil de las olas 2-3 está construido sin
+  iPad real — calibrar feel (sensibilidad sliders, radio de tolerancia de arista
+  0.03, presión pencil) con la próxima prueba del usuario.
+
+## ESTADO ANTERIOR — Fase D ola 1: la app deja de ser fachada (commit 06e4133)
+
+2026-07-08 (tarde) — **Auditoría UX tras feedback del iPad ("botones que no funcionan, todo desorganizado")** — 3 hallazgos estructurales:
+1. **El chrome era una maqueta.** `WorkspaceView` (AppForgeStudioApp.swift) nunca instanciaba
+   las vistas de Features/: LeftToolbar solo cambiaba un string, FloatingParams mostraba
+   "25.0mm" hardcodeado, RightProperties bindeaba a @State local sin efecto, el pill "60 FPS"
+   era texto fijo. TODA la funcionalidad real (CADModeView con push/pull, drawings, features)
+   era código muerto desde la perspectiva del usuario. FIX: switch selectedMode → vistas reales.
+2. **`renderer.setSculptEngine()` no se llamaba desde ningún sitio** — el pipeline táctil
+   (MetalView.handlePan → pendingStrokes → applySculpt en SatinRenderer:921) estuvo muerto
+   desde el origen del repo. FIX: AppState posee el SculptEngine y lo inyecta en setRenderer.
+   Test de blindaje: AppStateWiringTests. LECCIÓN: un pipeline puede estar completo y
+   correcto en cada pieza y aun así muerto porque nadie conecta la primera pieza.
+3. **Doble manejo de cámara**: ContentView tenía DragGesture/MagnificationGesture SwiftUI
+   orbitando la MISMA cámara que los UIGestureRecognizer de MetalView → navegación errática.
+   FIX: cámara solo en MetalView; SwiftUI solo construye strokes de pintura.
+- Además: picking unificado (raycastForSculpt duplicado eliminado; esculpía sobre overlays
+  `__faceHighlight` porque no filtraba `__`), 10 deformers cableados con displayNameES,
+  Remesh voxel real en Hybrid, init explícitos en vistas de modo (los @State privados hacen
+  privado el init memberwise — patrón que RenderModeView ya usaba), Loft oculto (no-op hasta F3),
+  7 archivos de chrome huérfano eliminados. Neto: −856 líneas.
+
+## ESTADO ANTERIOR — CI VERDE 🟢 (Fase C, 206 tests)
+
+2026-07-08 — **Fase C: capacidades CAD-pro verificadas** (rama `feature/fase-c`, PR #9, 206 tests 0 fallos):
+- Highlight de cara + undo/redo B-rep (BRepHistory) + overlays no-tocables.
+- **Drawings 2D DXF+PDF** (`DrawingExportService`): B-rep → vistas ortográficas → DXF R12 (`Exporter.writeDXF`) y PDF imprimible A4/A3 (`Exporter.writePDF`). Shapr3D lo cobra.
+- **Feature Recognition** (`FeatureRecognitionService`): agujeros/cajeras desde el B-rep vía AAG (`shape.buildAAG` → `detectPockets`/`detectHoles`).
+- BUG corregido (solo detectable por CI): `BRepHistory.swapTop` llamaba `syncCounts()` en un `defer` que leía los arrays `inout` prestados → "Fatal access conflict" crasheaba 4 tests. Fix: `syncCounts()` desde `undo()`/`redo()` tras liberar el borrow.
+- LECCIÓN DE PROCESO: verificar firmas de OCCTSwift contra el **TAG pineado que CI resuelve** (v1.8.8 con `from:"1.0.0"`), NO contra HEAD del clon. HEAD tenía un enum `DXFExporter` que NO existe en 1.8.8 (ahí `writeDXF` está en `extension Exporter`) → build rojo "cannot find DXFExporter in scope". Ver `mem:occtswift_api`.
+
+## ESTADO 2026-07-07 — Primer build verde completo de la historia del repo (run 28858291026, PR #6 → main `ca2ec00`):
 - Build simulador ✓ + **165 tests, 0 fallos** ✓ + archive device ✓ + IPA sin firmar empaquetada ✓
 - 20 olas de iteración: ~60 errores de compilación en ~25 archivos + 6 bugs de infra CI + 9 fallos de test reales
 - Causa raíz dominante: código escrito contra APIs imaginarias (propias y de OCCTSwift) porque nadie podía compilar
@@ -74,13 +121,18 @@ ios-app/AppForgeStudio/
 
 ## BUGS CONOCIDOS PENDIENTES
 
-| Bug | Archivo | Severidad |
-|-----|---------|-----------|
-| BUG1: Layout GPU PBR (float3 padding) | SatinRenderer.swift | CRITICO |
-| BUG2: updateAnimation doble por frame | SatinRenderer.swift | CRITICO |
-| BUG5: Normal matrix escala no-uniforme | Shaders.metal | ALTO |
-| BUG7: Grab deformer direccion contraria | SculptEngine.swift | CORREGIDO F0 — usa dragDelta con fallback |
-| BUG9: rebuildSceneFrom cada frame | SatinRenderer.swift | CORREGIDO F0 — transforms in-place, rebuild solo con structureChanged |
+(vacío 2026-07-08 — auditoría de la tabla: TODAS las entradas eran fantasma)
+
+| Bug | Veredicto auditoría 2026-07-08 |
+|-----|-------------------------------|
+| BUG1: Layout GPU PBR (float3 padding) | YA RESUELTO — GPUPBRMaterial con _pad explícitos (stride 52 = Metal); GPUStructLayoutTests blinda 11 invariantes |
+| BUG2: updateAnimation doble por frame | YA RESUELTO — un solo call site (update() L871); render(in:) no lo llama |
+| BUG5: Normal matrix escala no-uniforme | YA RESUELTO — .inverse.transpose en ambos pipelines (L976-980, L1049-1054); NormalMatrixTests.swift (4 tests) lo blinda ahora |
+| BUG7: Grab deformer direccion contraria | CORREGIDO F0 — usa dragDelta con fallback |
+| BUG9: rebuildSceneFrom cada frame | CORREGIDO F0 — transforms in-place, rebuild solo con structureChanged |
+| "GLTF no escribe .bin" (TODO.md) | FANTASMA — el path escribe el .bin desde hace tiempo; lo débil era el test (reforzado en ExportServiceTests) |
+
+Lección: BRAIN/TODO acumulan entradas obsoletas — VERIFICAR contra el código antes de "corregir" un bug listado.
 
 ## RIESGOS (F2 wave)
 

@@ -9,7 +9,19 @@ enum SketchTool: String, CaseIterable, Identifiable {
     case extend = "Extend"
     
     var id: String { rawValue }
-    
+
+    /// Nombre visible en la UI (convención: español; rawValue queda como id estable).
+    var displayName: String {
+        switch self {
+        case .line: return "Línea"
+        case .arc: return "Arco"
+        case .circle: return "Círculo"
+        case .rectangle: return "Rectángulo"
+        case .trim: return "Recortar"
+        case .extend: return "Extender"
+        }
+    }
+
     var icon: String {
         switch self {
         case .line: return "line.diagonal"

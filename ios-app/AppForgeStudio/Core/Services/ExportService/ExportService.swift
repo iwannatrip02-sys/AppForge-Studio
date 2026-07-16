@@ -4,6 +4,8 @@ import ModelIO
 import MetalKit
 import SceneKit
 import SceneKit.ModelIO
+import UIKit
+import OCCTSwift
 import OSLog
 
 enum ExportFormat: String, CaseIterable {
@@ -232,6 +234,13 @@ class ExportService {
     }
 
     func export(model: Model, format: ExportFormat, to url: URL, skipValidation: Bool = false) -> Result<Void, ExportError> {
+        // Overlays de escena (`__livePreview`, `__faceHighlight`, gizmos, cotas…) NO
+        // son geometría del usuario: nunca se exportan (Ola LiveInteraction · L1 ·
+        // tarea 3). Antes solo `exportUSDZScene` filtraba `__`; las rutas de un solo
+        // modelo (OBJ/STL/STEP/GLTF/FBX) exportarían el fantasma si se les entregaba.
+        guard !model.name.hasPrefix("__") else {
+            return .failure(.invalidModel("Los overlays de escena (\(model.name)) no se exportan"))
+        }
         guard !model.meshes.isEmpty, model.meshes.contains(where: { !$0.vertices.isEmpty }) else {
             return .failure(.invalidModel("El modelo no tiene vertices para exportar"))
         }
@@ -289,49 +298,82 @@ class ExportService {
     }
 
     func exportToUSDZ(model: Model, url: URL) throws {
-        guard let asset = buildMDLAsset(from: model) else {
+        try exportUSDZScene(models: [model], to: url)
+    }
+
+    /// USDZ de VARIOS cuerpos con su material PBR real (AR de escena completa).
+    /// Antes: material nil → AR Quick Look mostraba plástico gris; el color y
+    /// el PBR del modelo se perdían (catálogo §5: "AR realista" pendiente).
+    func exportUSDZScene(models: [Model], to url: URL) throws {
+        let exportables = models.filter { !$0.name.hasPrefix("__") && !$0.meshes.isEmpty }
+        guard !exportables.isEmpty else {
+            throw ExportError.invalidModel("No hay cuerpos exportables para AR")
+        }
+        let master = SCNScene()
+        for model in exportables {
+            guard let asset = buildMDLAsset(from: model) else { continue }
+            // ModelIO no escribe .usdz en iOS ("Unknown extension") — SceneKit sí.
+            let scene = SCNScene(mdlAsset: asset)
+            let material = scnMaterial(for: model)
+            for child in scene.rootNode.childNodes {
+                child.enumerateHierarchy { node, _ in
+                    node.geometry?.materials = [material]
+                }
+                master.rootNode.addChildNode(child)
+            }
+        }
+        guard !master.rootNode.childNodes.isEmpty else {
             throw ExportError.invalidModel("No se pudo construir el asset USDZ")
         }
-        // ModelIO no escribe .usdz en iOS ("Unknown extension") — SceneKit sí.
-        let scene = SCNScene(mdlAsset: asset)
-        let success = scene.write(to: url, options: nil, delegate: nil, progressHandler: nil)
+        let success = master.write(to: url, options: nil, delegate: nil, progressHandler: nil)
         guard success, FileManager.default.fileExists(atPath: url.path) else {
             throw ExportError.writeFailed("USDZ export failed - file was not written to disk")
         }
+    }
+
+    /// Material SceneKit PBR desde el estado real del modelo: albedo/metalness/
+    /// roughness del editor PBR si está activo, si no el color base del cuerpo.
+    private func scnMaterial(for model: Model) -> SCNMaterial {
+        let material = SCNMaterial()
+        material.lightingModel = .physicallyBased
+        if model.usesPBR {
+            let a = model.pbrMaterial.albedo
+            material.diffuse.contents = UIColor(red: CGFloat(a.x), green: CGFloat(a.y),
+                                                blue: CGFloat(a.z), alpha: 1)
+            material.metalness.contents = NSNumber(value: model.pbrMaterial.metalness)
+            material.roughness.contents = NSNumber(value: model.pbrMaterial.roughness)
+            let e = model.pbrMaterial.emission
+            if model.pbrMaterial.emissionIntensity > 0.01 {
+                material.emission.contents = UIColor(red: CGFloat(e.x), green: CGFloat(e.y),
+                                                     blue: CGFloat(e.z), alpha: 1)
+            }
+        } else {
+            let c = model.color
+            material.diffuse.contents = UIColor(red: CGFloat(c.x), green: CGFloat(c.y),
+                                                blue: CGFloat(c.z), alpha: CGFloat(c.w))
+            // Look de sólido CAD: apenas metálico, semi-mate (coincide con el visor)
+            material.metalness.contents = NSNumber(value: 0.1)
+            material.roughness.contents = NSNumber(value: 0.55)
+        }
+        return material
     }
 
     func exportToSTEP(model: Model, url: URL) throws {
         guard !model.meshes.isEmpty else {
             throw ExportError.invalidModel("Model has no meshes for STEP export")
         }
-        // Export via OCCTSwiftIO for B-rep fidelity STEP (AP214)
-        // For now, uses the first mesh triangulated from any OCCT-native shape.
-        // Future: track CADShape alongside Model for native B-rep STEP export.
-        try exportSTEPAsText(model: model, to: url)
-    }
-
-    private func exportSTEPAsText(model: Model, to url: URL) throws {
-        var stepContent = "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('View exchange'),'1');\n"
-        stepContent += "FILE_NAME('\(url.lastPathComponent)','\(ISO8601DateFormatter().string(from: Date()))',('AppForgeStudio'),(''),'','','');\n"
-        stepContent += "FILE_SCHEMA(('AP214'));\nENDSEC;\nDATA;\n"
-        var vertexId = 1
-        var faceId = 1
-        for mesh in model.meshes {
-            for v in mesh.vertices {
-                stepContent += "#\(vertexId)=CARTESIAN_POINT('',(\(v.position.x),\(v.position.y),\(v.position.z)));\n"
-                vertexId += 1
-            }
-            for i in stride(from: 0, to: mesh.indices.count, by: 3) {
-                guard i + 2 < mesh.indices.count else { break }
-                let i1 = Int(mesh.indices[i]) + 1
-                let i2 = Int(mesh.indices[i+1]) + 1
-                let i3 = Int(mesh.indices[i+2]) + 1
-                stepContent += "#\(faceId)=POLYLOOP('',(#\(i1),#\(i2),#\(i3)));\n"
-                faceId += 1
-            }
+        // STEP REAL (AP214) vía kernel OCCT: B-rep exacto con NURBS y topología —
+        // lo que Fusion/SolidWorks esperan abrir. El generador anterior volcaba la
+        // malla triangulada como pseudo-STEP (CARTESIAN_POINT/POLYLOOP inventados)
+        // que ningún CAD abría como sólido: placebo de exportación, retirado.
+        guard let shape = model.cadShape else {
+            throw ExportError.invalidModel(
+                "\(model.name) no tiene B-rep (malla esculpida/importada) — usa STL/OBJ/USDZ")
         }
-        stepContent += "ENDSEC;\nEND-ISO-10303-21;"
-        try stepContent.write(to: url, atomically: true, encoding: .utf8)
+        try Exporter.writeSTEP(shape: shape, to: url)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw ExportError.writeFailed("STEP export failed - file was not written to disk")
+        }
     }
 
     func exportToGLTF(model: Model, url: URL) throws {

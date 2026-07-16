@@ -40,15 +40,19 @@ struct ARQuickLookView: UIViewControllerRepresentable {
 @MainActor
 extension ExportViewModel {
     func prepareUSDZForAR(model: Model, exportService: ExportService) -> URL? {
+        prepareUSDZForAR(models: [model], exportService: exportService)
+    }
+
+    /// AR de ESCENA COMPLETA: todos los cuerpos con sus materiales PBR reales
+    /// (Shapr3D solo muestra un cuerpo a la vez en AR).
+    func prepareUSDZForAR(models: [Model], exportService: ExportService) -> URL? {
         let tempDir = FileManager.default.temporaryDirectory
         let usdzURL = tempDir.appendingPathComponent("ar_preview_\(UUID().uuidString.prefix(8)).usdz")
-        
-        let result = exportService.export(model: model, format: .usdz, to: usdzURL)
-        switch result {
-        case .success:
+        do {
+            try exportService.exportUSDZScene(models: models, to: usdzURL)
             logger.info("USDZ prepared for AR at \(usdzURL.path)")
             return usdzURL
-        case .failure(let error):
+        } catch {
             logger.error("Failed to prepare USDZ for AR: \(error.localizedDescription)")
             return nil
         }

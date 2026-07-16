@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "AppForgeStudio",
+    defaultLocalization: "en",
     platforms: [.iOS(.v17)],
     dependencies: [
         // Satin — Metal/Swift 3D rendering framework

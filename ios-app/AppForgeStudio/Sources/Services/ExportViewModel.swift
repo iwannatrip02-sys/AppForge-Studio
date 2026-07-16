@@ -77,6 +77,13 @@ class ExportViewModel: ObservableObject {
             exportError = "No hay modelo seleccionado para exportar."
             return
         }
+        // Overlays de escena (fantasma `__livePreview`, highlights, gizmos) no son
+        // exportables — cubre también STEP, que no pasa por ExportService.export
+        // (Ola LiveInteraction · L1 · tarea 3).
+        guard !model.name.hasPrefix("__") else {
+            exportError = "Los overlays de escena no se exportan."
+            return
+        }
         isExporting = true
         exportError = nil
         exportProgress = 0.0

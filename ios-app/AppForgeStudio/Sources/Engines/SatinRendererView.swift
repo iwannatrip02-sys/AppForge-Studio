@@ -41,6 +41,8 @@ struct SatinRendererView: UIViewRepresentable {
         let mtkView = MTKView()
         mtkView.device = MTLCreateSystemDefaultDevice()
         mtkView.backgroundColor = metalBackground
+        mtkView.depthStencilPixelFormat = .depth32Float
+        mtkView.clearColor = MTLClearColor(red: 0.09, green: 0.10, blue: 0.12, alpha: 1.0)
         let renderer = SatinRenderer(mtkView: mtkView)
         renderer.updateScene(scene)
         renderer.animationEngine = animationEngine

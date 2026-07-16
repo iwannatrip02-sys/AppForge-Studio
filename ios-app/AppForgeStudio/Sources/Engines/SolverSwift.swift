@@ -12,6 +12,7 @@ struct SolverPoint {
     let id: UUID
     var x: Double
     var y: Double
+    var z: Double = 0  // 0 = 2D, != 0 = 3D constraint solving
     var isFixed: Bool
 }
 
@@ -274,23 +275,35 @@ class SolverSwift {
             }
         }
         for i in 0..<n { A[i][i] += 1e-8 }
-        return gaussSeidel(A, b, n: n)
+        return gaussianSolve(A, b, n: n)
     }
-    
-    private func gaussSeidel(_ A: [[Double]], _ b: [Double], n: Int) -> [Double] {
-        var x = [Double](repeating: 0, count: n)
-        for _ in 0..<50 {
-            var maxDiff = 0.0
-            for i in 0..<n {
-                var s = b[i]
-                for j in 0..<n where j != i { s -= A[i][j] * x[j] }
-                if abs(A[i][i]) > 1e-12 {
-                    let old = x[i]
-                    x[i] = s / A[i][i]
-                    maxDiff = max(maxDiff, abs(x[i] - old))
-                }
+
+    /// Eliminación gaussiana con pivoteo parcial. Las ecuaciones normales JᵀJ
+    /// son casi-singulares en sistemas subdeterminados (menos constraints que
+    /// grados de libertad) — Gauss-Seidel NO converge ahí y producía pasos
+    /// sesgados que hacían diverger el Newton; la solución exacta del sistema
+    /// regularizado sí da el paso de norma mínima.
+    private func gaussianSolve(_ A: [[Double]], _ b: [Double], n: Int) -> [Double] {
+        var a = A
+        var rhs = b
+        for col in 0..<n {
+            var pivot = col
+            for r in (col + 1)..<n where abs(a[r][col]) > abs(a[pivot][col]) { pivot = r }
+            if abs(a[pivot][col]) < 1e-14 { continue }
+            if pivot != col { a.swapAt(pivot, col); rhs.swapAt(pivot, col) }
+            for r in (col + 1)..<n {
+                let factor = a[r][col] / a[col][col]
+                if factor == 0 { continue }
+                for c in col..<n { a[r][c] -= factor * a[col][c] }
+                rhs[r] -= factor * rhs[col]
             }
-            if maxDiff < 1e-10 { break }
+        }
+        var x = [Double](repeating: 0, count: n)
+        for r in stride(from: n - 1, through: 0, by: -1) {
+            guard abs(a[r][r]) > 1e-14 else { x[r] = 0; continue }
+            var s = rhs[r]
+            for c in (r + 1)..<n { s -= a[r][c] * x[c] }
+            x[r] = s / a[r][r]
         }
         return x
     }

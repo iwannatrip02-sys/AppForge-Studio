@@ -19,6 +19,8 @@ final class PushPullController: ObservableObject {
     @Published private(set) var selection: Selection?
     @Published var distance: Double = 0.5
     @Published private(set) var statusMessage: String = "Toca una cara para empezar"
+    /// Malla de resaltado de la cara seleccionada (overlay de la vista; nil = sin selección).
+    @Published private(set) var highlightMesh: Mesh?
 
     var hasSelection: Bool { selection != nil }
 
@@ -33,10 +35,14 @@ final class PushPullController: ObservableObject {
         }
         guard let faceIndex = BRepFacePicker.faceIndex(of: shape, nearest: hit.position) else {
             selection = nil
+            highlightMesh = nil
             statusMessage = "No se encontró una cara bajo el toque"
             return
         }
         selection = Selection(model: model, faceIndex: faceIndex, faceNormal: hit.normal)
+        highlightMesh = model.meshes.first.flatMap {
+            BRepFacePicker.highlightMesh(shape: shape, faceIndex: faceIndex, displayMesh: $0)
+        }
         statusMessage = "Cara seleccionada — ajusta la distancia y aplica"
     }
 
@@ -49,14 +55,17 @@ final class PushPullController: ObservableObject {
             statusMessage = "Distancia cero — nada que aplicar"
             return false
         }
+        BRepHistory.shared.recordChange(of: sel.model)
         let applied = BRepModeling.applyFeature(to: sel.model) { shape in
             BRepModeling.pushPullFace(shape, faceIndex: sel.faceIndex, distance: distance)
         }
         if applied {
             logger.info("[PushPull] cara \(sel.faceIndex) distancia \(self.distance) aplicada")
             selection = nil
+            highlightMesh = nil
             statusMessage = "Push/pull aplicado"
         } else {
+            BRepHistory.shared.discardLast()  // la operación falló sin mutar: descartar snapshot
             statusMessage = "La operación falló en esta cara"
         }
         return applied
@@ -64,6 +73,7 @@ final class PushPullController: ObservableObject {
 
     func clear() {
         selection = nil
+        highlightMesh = nil
         statusMessage = "Toca una cara para empezar"
     }
 }

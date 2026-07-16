@@ -13,6 +13,7 @@ enum CADTool: String, CaseIterable, Identifiable {
     case booleanSubtract = "Boolean Subtract"
     case booleanIntersect = "Boolean Intersect"
     case pushPull = "Push/Pull"
+    case hole = "Hole"
     case fillet = "Fillet"
     case chamfer = "Chamfer"
     case shell = "Shell"
@@ -23,15 +24,51 @@ enum CADTool: String, CaseIterable, Identifiable {
     case line = "Line"
     case circle = "Circle"
     case rectangle = "Rectangle"
+    case spline = "Spline"
     case arc = "Arc"
+    case polygon = "Polygon"
     case dimension = "Dimension"
     case constraint = "Constraint"
 
     var id: String { rawValue }
 
+    /// Nombre visible en la UI (convención: español; rawValue queda como id estable).
+    var displayName: String {
+        switch self {
+        case .select: return "Seleccionar"
+        case .move: return "Mover"
+        case .rotate: return "Rotar"
+        case .scale: return "Escalar"
+        case .extrude: return "Extruir"
+        case .revolve: return "Revolución"
+        case .loopCut: return "Corte"
+        case .bevel: return "Bisel"
+        case .booleanUnion: return "Unir"
+        case .booleanSubtract: return "Restar"
+        case .booleanIntersect: return "Intersecar"
+        case .pushPull: return "Push/Pull"
+        case .hole: return "Agujero"
+        case .fillet: return "Redondear"
+        case .chamfer: return "Chaflán"
+        case .shell: return "Vaciar"
+        case .loft: return "Loft"
+        case .sweep: return "Barrer"
+        case .measure: return "Medir"
+        case .sketch: return "Boceto"
+        case .line: return "Línea"
+        case .circle: return "Círculo"
+        case .rectangle: return "Rectángulo"
+        case .spline: return "Spline"
+        case .arc: return "Arco"
+        case .polygon: return "Polígono"
+        case .dimension: return "Cota"
+        case .constraint: return "Restricción"
+        }
+    }
+
     var isSketchTool: Bool {
         switch self {
-        case .line, .circle, .rectangle, .arc, .dimension, .constraint:
+        case .line, .circle, .rectangle, .spline, .arc, .polygon, .dimension, .constraint:
             return true
         default:
             return false
@@ -52,6 +89,7 @@ enum CADTool: String, CaseIterable, Identifiable {
         case .booleanSubtract: return "square.slash"
         case .booleanIntersect: return "square.on.circle"
         case .pushPull: return "square.stack.3d.up"
+        case .hole: return "circle.circle"
         case .fillet: return "point.topleft.down.curvedto.point.bottomright.up"
         case .chamfer: return "rectangle.and.pencil.and.ellipsis"
         case .shell: return "rectangle.3.group"
@@ -62,7 +100,9 @@ enum CADTool: String, CaseIterable, Identifiable {
         case .line: return "line.diagonal"
         case .circle: return "circle"
         case .rectangle: return "rectangle"
+        case .spline: return "scribble"
         case .arc: return "point.topleft.down.curvedto.point.bottomright.up"
+        case .polygon: return "pentagon"
         case .dimension: return "text.magnifyingglass"
         case .constraint: return "link"
         }

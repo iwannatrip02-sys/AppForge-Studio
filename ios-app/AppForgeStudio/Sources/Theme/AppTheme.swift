@@ -36,9 +36,15 @@ extension Color {
     }
 }
 
-// MARK: - AppForge Unified Design System v1.0 (C10)
-// Replaces: Core/UI/AppTheme.swift, Sources/Theme/AppTheme.swift (old), Core/Theme/AppForgeTheme.swift
-// Principles: dark-first OLED + glass-morphism + 4pt grid + SF Pro + spring animations + single accent
+// MARK: - AppForge Design System v2 — "Acero & Brasa" (docs/IDENTIDAD_FORGE.md)
+// v1 (C10) unificó los tokens pero heredó el alma de Shapr3D (su azul #4DA3FF).
+// v2 define identidad propia: el taller es frío (acero/grafito), lo que trabajas
+// está al rojo (brasa). El color comunica ESTADO, jamás decora:
+//   brasa  = activo/editándose ahora (solo UNA brasa a la vez en pantalla)
+//   acero  = material exacto (B-rep vivo): edges, badges, cotas
+//   arcilla = material libre (malla esculpible)
+// Principios v1 que se conservan: dark-first OLED + un solo material de vidrio +
+// 4pt grid + SF Pro (cifras SIEMPRE monospaced) + springs ≤400ms.
 
 struct AppTheme {
 
@@ -57,19 +63,26 @@ struct AppTheme {
     var error: Color
     var metalBackground: UIColor
 
-    // ── Static Palette (dark-first, OLED-friendly) ──
+    // ── Static Palette — "taller de noche" (fríos, OLED) ──
 
-    static let bgCanvas    = Color(hex: "0A0A0F")   // Deepest: viewport
-    static let bgBase      = Color(hex: "121218")   // Main surfaces
-    static let bgRaised    = Color(hex: "1A1A24")   // Cards, elevated panels
-    static let bgOverlay   = Color(hex: "22222E")   // Hover, active states
-    static let bgGlass     = Color(hex: "1C1C28")   // Glass panels base (pre-blur)
+    static let bgCanvas    = Color(hex: "0A0B10")   // viewport: el negro más profundo — el modelo es el héroe
+    static let bgBase      = Color(hex: "12141A")   // superficies principales
+    static let bgRaised    = Color(hex: "1A1D26")   // cards, paneles elevados
+    static let bgOverlay   = Color(hex: "222630")   // hover, estados activos
+    static let bgGlass     = Color(hex: "1B1E28")   // base de paneles vidrio (pre-blur)
 
-    // ── Static Accent (Shapr3D-inspired #4DA3FF) ──
+    // ── BRASA (accent propio — reemplaza el azul heredado de Shapr3D) ──
+    // Calor = "esto está siendo modificado AHORA". Nada decorativo lleva brasa.
 
-    static let accentColor   = Color(hex: "4DA3FF")
-    static let accentMuted   = Color(hex: "3A7ACC")
-    static let accentGlow    = Color(hex: "6DB9FF")
+    static let accentColor   = Color(hex: "FF7A45")   // ember: acción activa, selección, foco
+    static let accentMuted   = Color(hex: "D9541E")   // ember profunda: destructivo-intencional (pocket, subtract, hornear)
+    static let accentGlow    = Color(hex: "FFA06B")   // glow de presionado / gradiente cálido
+
+    // ── MATERIALES (la dualidad de la app hecha color) ──
+
+    static let steel       = Color(hex: "6FA3D0")   // material exacto (B-rep): edges, badges ⬡, cotas
+    static let steelBright = Color(hex: "8FBCE4")   // acero enfatizado (cara exacta seleccionada)
+    static let clay        = Color(hex: "C79A6B")   // material libre (malla esculpible): badge 〰, tint selección
 
     // ── Static Semantic ──
 
@@ -81,16 +94,16 @@ struct AppTheme {
     static let axisY = Color(hex: "34D399")   // Green
     static let axisZ = Color(hex: "4DA3FF")   // Blue
 
-    // ── Static Text ──
+    // ── Static Text (instrumento, no protagonista) ──
 
-    static let textPrimaryColor   = Color(hex: "F0F0F5")
-    static let textSecondaryColor = Color(hex: "9A9AB0")
-    static let textTertiary       = Color(hex: "5A5A6E")
+    static let textPrimaryColor   = Color(hex: "F0F1F5")
+    static let textSecondaryColor = Color(hex: "9AA0B0")
+    static let textTertiary       = Color(hex: "5A5F6E")
 
     // ── Static Borders ──
 
-    static let borderColor      = Color(hex: "2A2A3A")
-    static let borderLightColor = Color(hex: "1E1E2E")
+    static let borderColor      = Color(hex: "2A2E3A")
+    static let borderLightColor = Color(hex: "1E212E")
 
     // ── Light mode counterparts (for accessibility) ──
 

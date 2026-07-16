@@ -2,7 +2,7 @@ name: Build AppForgeStudio for iPad
 
 on:
   push:
-    branches: ["main", "develop"]
+    branches: ["main", "develop", "feature/*", "fix/*"]
     paths:
       - 'ios-app/AppForgeStudio/**'
       - '.github/workflows/build.yml'
@@ -134,9 +134,10 @@ jobs:
             OTHER_CPLUSPLUSFLAGS='$(inherited) -Wno-c++11-narrowing' \
             2>&1 | tee test.log
 
+      # Sin continue-on-error: si el IPA no sale, el workflow debe quedar rojo
+      # (el IPA es el entregable para AltStore — un verde sin IPA es un botón falso).
       - name: Archive and Package Unsigned IPA (device)
         if: success()
-        continue-on-error: true
         working-directory: ios-app/AppForgeStudio
         run: |
           echo "=== Archiving for device (unsigned) ==="
@@ -165,7 +166,7 @@ jobs:
           else
             echo "=== ERROR: .app not found in xcarchive. Available paths: ==="
             find AppForgeStudio.xcarchive -maxdepth 4 -type d 2>/dev/null || true
-            echo "=== Skipping IPA packaging ==="
+            exit 1
           fi
 
       - name: Upload Unsigned IPA

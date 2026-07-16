@@ -52,6 +52,45 @@ struct MetalView: UIViewRepresentable {
     /// base de la manipulación directa (push/pull, selección de caras).
     var onSurfaceHit: ((SurfaceHit) -> Void)?
     var metalBackground: UIColor = .darkGray
+    /// Contrato de gestos (DISENO_INTERFAZ §3): drag sobre geometría = herramienta,
+    /// drag sobre vacío = orbitar. Solo el modo dueño del sculpt lo activa;
+    /// en CAD/Animation/Render el drag de 1 dedo siempre orbita.
+    var sculptEnabled: Bool = false
+    /// Gestos globales (BLUEPRINT S9/N7): tap 2 dedos = deshacer, 3 = rehacer,
+    /// doble tap = encuadrar. Cada modo enchufa su undo (B-rep, sculpt o escena).
+    var onUndoGesture: (() -> Void)?
+    var onRedoGesture: (() -> Void)?
+    var onFrameGesture: (() -> Void)?
+    /// Transformación directa (Mover/Rotar/Escalar): drag sobre un cuerpo lo
+    /// transforma; drag sobre vacío sigue orbitando (contrato de gestos intacto).
+    var transformEnabled: Bool = false
+    var onTransformBegan: ((SurfaceHit) -> Void)?
+    var onTransformChanged: ((Float, Float) -> Void)?
+    var onTransformEnded: (() -> Void)?
+    /// Tap sobre el vacío (sin hit): deseleccionar (contrato de gestos).
+    var onEmptyTap: (() -> Void)?
+    /// Gizmo de transformación: centro en mundo (nil = sin gizmo) + longitud de
+    /// flecha. El drag que empieza sobre una manija restringe al eje tocado.
+    var gizmoCenter: SIMD3<Float>?
+    var gizmoAxisLength: Float = 1.0
+    /// 0 = flechas (mover/escalar), 1 = anillos (rotar).
+    var gizmoStyle: Int = 0
+    var onGizmoDragBegan: ((SIMD3<Float>) -> Void)?
+    /// Sketch en el plano y=0: taps (dedo/pencil) = puntos; drag de PENCIL =
+    /// trazo vivo. El dedo arrastrado sigue orbitando (contrato intacto).
+    var sketchInputEnabled: Bool = false
+    var onSketchTap: ((SIMD2<Float>) -> Void)?
+    var onSketchDragBegan: ((SIMD2<Float>) -> Void)?
+    var onSketchDragChanged: ((SIMD2<Float>) -> Void)?
+    var onSketchDragEnded: ((SIMD2<Float>) -> Void)?
+    /// Plano de trabajo del boceto (por defecto el piso y=0). Poblado desde
+    /// CADModeView con `sketch.plane` para dibujar SOBRE una cara arbitraria.
+    var sketchPlaneOrigin: SIMD3<Float> = .zero
+    var sketchPlaneNormal: SIMD3<Float> = SIMD3(0, 1, 0)
+    var sketchPlaneU: SIMD3<Float> = SIMD3(1, 0, 0)
+    var sketchPlaneV: SIMD3<Float> = SIMD3(0, 0, 1)
+    /// Tap sobre una cara PLANA con herramienta de dibujo activa → definir el plano.
+    var onSketchFaceTap: ((SurfaceHit) -> Void)?
 
     func makeCoordinator() -> Coordinator {
         let c = Coordinator(
@@ -62,6 +101,29 @@ struct MetalView: UIViewRepresentable {
             animationEngine: animationEngine
         )
         c.onSurfaceHit = onSurfaceHit
+        c.sculptEnabled = sculptEnabled
+        c.onUndoGesture = onUndoGesture
+        c.onRedoGesture = onRedoGesture
+        c.onFrameGesture = onFrameGesture
+        c.transformEnabled = transformEnabled
+        c.onTransformBegan = onTransformBegan
+        c.onTransformChanged = onTransformChanged
+        c.onTransformEnded = onTransformEnded
+        c.onEmptyTap = onEmptyTap
+        c.gizmoCenter = gizmoCenter
+        c.gizmoAxisLength = gizmoAxisLength
+        c.gizmoStyle = gizmoStyle
+        c.onGizmoDragBegan = onGizmoDragBegan
+        c.sketchInputEnabled = sketchInputEnabled
+        c.onSketchTap = onSketchTap
+        c.onSketchDragBegan = onSketchDragBegan
+        c.onSketchDragChanged = onSketchDragChanged
+        c.onSketchDragEnded = onSketchDragEnded
+        c.sketchPlaneOrigin = sketchPlaneOrigin
+        c.sketchPlaneNormal = sketchPlaneNormal
+        c.sketchPlaneU = sketchPlaneU
+        c.sketchPlaneV = sketchPlaneV
+        c.onSketchFaceTap = onSketchFaceTap
         return c
     }
     
@@ -70,9 +132,16 @@ struct MetalView: UIViewRepresentable {
         v.device = MTLCreateSystemDefaultDevice()
         v.delegate = context.coordinator
         v.backgroundColor = metalBackground
+        v.depthStencilPixelFormat = .depth32Float
+        // bgCanvas #0A0B10 (IDENTIDAD_FORGE §3): el viewport es el punto más oscuro
+        // de la app — el modelo iluminado por PBR/IBL es el héroe.
+        v.clearColor = MTLClearColor(red: 0.055, green: 0.060, blue: 0.075, alpha: 1.0)
         v.enableSetNeedsDisplay = true
         v.isPaused = false
         v.isMultipleTouchEnabled = true
+        // ProMotion: la fluidez Shapr3D empieza aquí (iPad Pro M1 = 120 Hz).
+        // Bajo -UIProbeLowFPS (CI sin GPU real): 10fps para no ahogar los cores.
+        v.preferredFramesPerSecond = UIProbeMode.lowFPS ? 10 : 120
         
         renderer.updateScene(scene)
         context.coordinator.setupGestures(v)
@@ -84,6 +153,29 @@ struct MetalView: UIViewRepresentable {
         renderer.updateScene(scene)
         renderer.animationEngine = animationEngine
         renderer.playbackController = playbackController
+        context.coordinator.sculptEnabled = sculptEnabled
+        context.coordinator.onUndoGesture = onUndoGesture
+        context.coordinator.onRedoGesture = onRedoGesture
+        context.coordinator.onFrameGesture = onFrameGesture
+        context.coordinator.transformEnabled = transformEnabled
+        context.coordinator.onTransformBegan = onTransformBegan
+        context.coordinator.onTransformChanged = onTransformChanged
+        context.coordinator.onTransformEnded = onTransformEnded
+        context.coordinator.onEmptyTap = onEmptyTap
+        context.coordinator.gizmoCenter = gizmoCenter
+        context.coordinator.gizmoAxisLength = gizmoAxisLength
+        context.coordinator.gizmoStyle = gizmoStyle
+        context.coordinator.onGizmoDragBegan = onGizmoDragBegan
+        context.coordinator.sketchInputEnabled = sketchInputEnabled
+        context.coordinator.onSketchTap = onSketchTap
+        context.coordinator.onSketchDragBegan = onSketchDragBegan
+        context.coordinator.onSketchDragChanged = onSketchDragChanged
+        context.coordinator.onSketchDragEnded = onSketchDragEnded
+        context.coordinator.sketchPlaneOrigin = sketchPlaneOrigin
+        context.coordinator.sketchPlaneNormal = sketchPlaneNormal
+        context.coordinator.sketchPlaneU = sketchPlaneU
+        context.coordinator.sketchPlaneV = sketchPlaneV
+        context.coordinator.onSketchFaceTap = onSketchFaceTap
         uiView.backgroundColor = metalBackground
         uiView.setNeedsDisplay()
     }
@@ -100,6 +192,36 @@ struct MetalView: UIViewRepresentable {
         var onSculptStroke: ((SculptPoint) -> Void)?
         var onSurfaceHit: ((SurfaceHit) -> Void)?
         var onPinchExtrude: ((Float, Float) -> Void)?  // (distance, taper)
+        var sculptEnabled: Bool = false
+        var onUndoGesture: (() -> Void)?
+        var onRedoGesture: (() -> Void)?
+        var onFrameGesture: (() -> Void)?
+        var transformEnabled: Bool = false
+        var onTransformBegan: ((SurfaceHit) -> Void)?
+        var onTransformChanged: ((Float, Float) -> Void)?
+        var onTransformEnded: (() -> Void)?
+        var onEmptyTap: (() -> Void)?
+        var gizmoCenter: SIMD3<Float>?
+        var gizmoAxisLength: Float = 1.0
+        var gizmoStyle: Int = 0
+        var onGizmoDragBegan: ((SIMD3<Float>) -> Void)?
+        var sketchInputEnabled: Bool = false
+        var onSketchTap: ((SIMD2<Float>) -> Void)?
+        var onSketchDragBegan: ((SIMD2<Float>) -> Void)?
+        var onSketchDragChanged: ((SIMD2<Float>) -> Void)?
+        var onSketchDragEnded: ((SIMD2<Float>) -> Void)?
+        var sketchPlaneOrigin: SIMD3<Float> = .zero
+        var sketchPlaneNormal: SIMD3<Float> = SIMD3(0, 1, 0)
+        var sketchPlaneU: SIMD3<Float> = SIMD3(1, 0, 0)
+        var sketchPlaneV: SIMD3<Float> = SIMD3(0, 0, 1)
+        var onSketchFaceTap: ((SurfaceHit) -> Void)?
+        private var isTransforming = false
+        private var isSketchDragging = false
+        /// Pencil = SIEMPRE herramienta, nunca orbita (BLUEPRINT S1).
+        /// Se captura en shouldReceive porque los recognizers no exponen el touch.
+        private var lastTouchWasPencil = false
+        /// Presión del trazo (pencil: force real; dedo: 1.0) → SculptPoint.pressure.
+        private var strokePressure: Float = 1.0
         
         private var lastPanLocation: CGPoint = .zero
         private var orbitSpherical: (theta: Float, phi: Float, radius: Float) = (0, .pi / 4, 5.0)
@@ -136,18 +258,85 @@ struct MetalView: UIViewRepresentable {
             let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
             pinch.delegate = self
             view.addGestureRecognizer(pinch)
+
+            // Tercer eje de cámara (como Shapr3D): torcer con 2 dedos = ROLL
+            // (girar la vista alrededor del eje de mirada).
+            let roll = UIRotationGestureRecognizer(target: self, action: #selector(handleRoll(_:)))
+            roll.delegate = self
+            view.addGestureRecognizer(roll)
             
             let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
             tap.delegate = self
             view.addGestureRecognizer(tap)
+
+            // Gestos globales (BLUEPRINT S9/N7). El tap simple NO espera al doble
+            // (require(toFail:) metería ~300ms de latencia en cada selección — Shapr3D
+            // selecciona instantáneo); doble tap = seleccionar y encuadrar, inofensivo.
+            let undoTap = UITapGestureRecognizer(target: self, action: #selector(handleUndoTap(_:)))
+            undoTap.numberOfTouchesRequired = 2
+            undoTap.delegate = self
+            view.addGestureRecognizer(undoTap)
+
+            let redoTap = UITapGestureRecognizer(target: self, action: #selector(handleRedoTap(_:)))
+            redoTap.numberOfTouchesRequired = 3
+            redoTap.delegate = self
+            view.addGestureRecognizer(redoTap)
+
+            let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
+            doubleTap.numberOfTapsRequired = 2
+            doubleTap.delegate = self
+            view.addGestureRecognizer(doubleTap)
         }
-        
+
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-            true
+            // Los taps de undo/redo (2/3 dedos) NO se reconocen en simultáneo con
+            // pan/pinch: el inicio de un zoom contaba también como tap → deshacer
+            // SILENCIOSO que "borraba" el trabajo (feedback de device: 'cuando
+            // muevo desaparece lo que había hecho').
+            func isMultiTouchTap(_ g: UIGestureRecognizer) -> Bool {
+                (g as? UITapGestureRecognizer)?.numberOfTouchesRequired ?? 0 >= 2
+            }
+            func isCameraGesture(_ g: UIGestureRecognizer) -> Bool {
+                g is UIPinchGestureRecognizer || g is UIPanGestureRecognizer
+                    || g is UIRotationGestureRecognizer
+            }
+            if isMultiTouchTap(gestureRecognizer) && isCameraGesture(other) { return false }
+            if isMultiTouchTap(other) && isCameraGesture(gestureRecognizer) { return false }
+            return true
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            // Pencil-shim: `-UIProbeForcePencil` fuerza la clasificación pencil en
+            // simulador (donde touch.type nunca es .pencil). Cero costo en producción
+            // porque UIProbeMode.forcePencil es una constante estática evaluada al arranque.
+            lastTouchWasPencil = (touch.type == .pencil) || UIProbeMode.forcePencil
+            if lastTouchWasPencil, touch.maximumPossibleForce > 0 {
+                // force llega a 0 al inicio del toque: clamp para no matar el trazo.
+                strokePressure = max(0.2, Float(touch.force / touch.maximumPossibleForce))
+                if touch.force == 0 { strokePressure = 1.0 }
+            } else {
+                strokePressure = 1.0
+            }
+            return true
         }
         
         // MARK: - Gesture Handlers
-        
+
+        /// Sincroniza el estado esférico de órbita desde la cámara REAL de la escena.
+        /// Sin esto, el primer gesto "salta" a un estado viejo (la cámara pudo moverse
+        /// por el ViewCube, resetView o la posición inicial) — feedback de device:
+        /// "el desplazamiento queda como fijo en el punto anterior".
+        private func syncOrbitFromCamera() {
+            let cam = scene.camera
+            let offset = cam.position - cam.target
+            let r = simd_length(offset)
+            guard r > 0.0001 else { return }
+            orbitSpherical.radius = r
+            orbitSpherical.phi = acos(max(-1, min(1, offset.y / r)))
+            orbitSpherical.theta = atan2(offset.z, offset.x)
+            panTarget = cam.target
+        }
+
         @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
             let location = gesture.location(in: gesture.view)
             let translation = gesture.translation(in: gesture.view)
@@ -155,29 +344,55 @@ struct MetalView: UIViewRepresentable {
             switch gesture.state {
             case .began:
                 lastPanLocation = location
+                syncOrbitFromCamera()
                 let singleFinger = (gesture.numberOfTouches == 1)
-                // Sculpt mode: single finger on mesh → sculpt; otherwise orbit
-                if singleFinger && renderer.sculptEngine != nil {
-                    // Attempt raycast; if we hit a mesh, enter sculpt mode
-                    if let hit = raycastForSculpt(at: location, in: gesture.view) {
+                // Router del contrato de gestos: 1 dedo sobre geometría = herramienta
+                // (sculpt), sobre vacío = orbitar. El hitTest usa ScenePicker (único
+                // camino de picking; ignora overlays "__" como el highlight de cara).
+                if singleFinger && sketchInputEnabled,
+                   let view = gesture.view, let p = planePoint(at: location, in: view) {
+                    // Con una herramienta de sketch ACTIVA, el dedo dibuja en vivo
+                    // sobre el plano igual que el Pencil (feedback device: el dedo
+                    // no debe quedar bloqueado). Sin herramienta de sketch, este
+                    // rama no aplica y el dedo en vacío sigue orbitando (abajo).
+                    isSketchDragging = true
+                    onSketchDragBegan?(p)
+                } else if singleFinger && transformEnabled, let view = gesture.view {
+                    // Prioridad: manija del gizmo → cuerpo → vacío (orbitar).
+                    if let axis = gizmoAxisHit(at: location, in: view) {
+                        isTransforming = true
+                        onGizmoDragBegan?(axis)
+                    } else {
+                        let ray = CameraRay.from(screenPoint: location, viewSize: view.bounds.size,
+                                                 camera: scene.camera)
+                        if let hit = ScenePicker.hitTest(models: scene.models, ray: ray) {
+                            isTransforming = true
+                            onTransformBegan?(hit)
+                        } else if !lastTouchWasPencil {
+                            isOrbiting = true
+                        }
+                    }
+                } else if singleFinger && sculptEnabled && renderer.sculptEngine != nil {
+                    if let hit = sculptHit(at: location, in: gesture.view) {
                         isSculpting = true
                         lastSculptHit = hit.position
                         // Seed first SculptPoint (no drag on first touch)
                         let point = SculptPoint(
                             position: hit.position,
                             normal: hit.normal,
-                            pressure: 1.0,
+                            pressure: strokePressure,
                             dragDelta: .zero
                         )
                         renderer.sculptEngine?.pendingStrokes.append(point)
                         renderer.brushCursorPosition = hit.position
                         renderer.brushCursorRadius = renderer.sculptEngine?.radius ?? 0.05
                         onSculptStroke?(point)
-                    } else {
+                    } else if !lastTouchWasPencil {
+                        // Pencil nunca orbita (S1): dedo en vacío = cámara, pencil = nada.
                         isOrbiting = true
                     }
                 } else if singleFinger {
-                    isOrbiting = true
+                    if !lastTouchWasPencil { isOrbiting = true }
                 } else {
                     isPanning = true
                 }
@@ -186,15 +401,21 @@ struct MetalView: UIViewRepresentable {
                 let dx = Float(translation.x) * 0.005
                 let dy = Float(translation.y) * 0.005
 
-                if isSculpting {
-                    if let hit = raycastForSculpt(at: location, in: gesture.view) {
+                if isSketchDragging {
+                    if let view = gesture.view, let p = planePoint(at: location, in: view) {
+                        onSketchDragChanged?(p)
+                    }
+                } else if isTransforming {
+                    onTransformChanged?(Float(translation.x), Float(translation.y))
+                } else if isSculpting {
+                    if let hit = sculptHit(at: location, in: gesture.view) {
                         let prev = lastSculptHit ?? hit.position
                         let dragDelta = hit.position - prev
                         lastSculptHit = hit.position
                         let point = SculptPoint(
                             position: hit.position,
                             normal: hit.normal,
-                            pressure: 1.0,
+                            pressure: strokePressure,
                             dragDelta: dragDelta
                         )
                         renderer.sculptEngine?.pendingStrokes.append(point)
@@ -208,14 +429,30 @@ struct MetalView: UIViewRepresentable {
                     orbitSpherical.phi = max(0.1, min(.pi - 0.1, orbitSpherical.phi))
                     updateCameraOrbit()
                 } else if isPanning {
-                    panTarget.x -= dx * orbitSpherical.radius * 0.5
-                    panTarget.y += dy * orbitSpherical.radius * 0.5
+                    // Pan relativo a la CÁMARA (right/up del punto de vista actual).
+                    // Antes paneaba en ejes del mundo: tras orbitar, el arrastre se
+                    // sentía "desde donde estaba antes" (feedback de device).
+                    let cam = scene.camera
+                    let forward = simd_normalize(cam.target - cam.position)
+                    let right = simd_normalize(simd_cross(forward, cam.up))
+                    let up = simd_cross(right, forward)
+                    let scale = orbitSpherical.radius * 0.5
+                    panTarget -= right * dx * scale
+                    panTarget += up * dy * scale
                     updateCameraOrbit()
                 }
 
                 gesture.setTranslation(.zero, in: gesture.view)
 
             case .ended, .cancelled:
+                if isSketchDragging {
+                    if let view = gesture.view, let p = planePoint(at: location, in: view) {
+                        onSketchDragEnded?(p)
+                    }
+                    isSketchDragging = false
+                }
+                if isTransforming { onTransformEnded?() }
+                isTransforming = false
                 isOrbiting = false
                 isPanning = false
                 isSculpting = false
@@ -229,6 +466,8 @@ struct MetalView: UIViewRepresentable {
         @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
             let scale = Float(gesture.scale)
             switch gesture.state {
+            case .began:
+                syncOrbitFromCamera()
             case .changed:
                 orbitSpherical.radius /= max(0.1, scale)
                 orbitSpherical.radius = max(0.5, min(50.0, orbitSpherical.radius))
@@ -261,9 +500,60 @@ struct MetalView: UIViewRepresentable {
             }
         }
 
+        @objc private func handleRoll(_ gesture: UIRotationGestureRecognizer) {
+            switch gesture.state {
+            case .changed:
+                let cam = scene.camera
+                let forward = simd_normalize(cam.target - cam.position)
+                let q = simd_quatf(angle: Float(-gesture.rotation), axis: forward)
+                scene.camera.up = simd_normalize(q.act(cam.up))
+                gesture.rotation = 0
+            default: break
+            }
+        }
+
+        @objc private func handleUndoTap(_ gesture: UITapGestureRecognizer) {
+            onUndoGesture?()
+        }
+
+        @objc private func handleRedoTap(_ gesture: UITapGestureRecognizer) {
+            onRedoGesture?()
+        }
+
+        @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+            // Encuadrar SOLO al doble-tocar el VACÍO: sobre geometría chocaba con
+            // la selección múltiple ("al darle dos veces se reencuadra — conflicto").
+            guard let view = gesture.view else { return }
+            let location = gesture.location(in: view)
+            let ray = CameraRay.from(screenPoint: location, viewSize: view.bounds.size,
+                                     camera: scene.camera)
+            if ScenePicker.hitTest(models: scene.models, ray: ray) == nil {
+                onFrameGesture?()
+            }
+        }
+
         @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
             let location = gesture.location(in: gesture.view)
             guard let view = gesture.view as? MTKView else { return }
+
+            // Sketch activo: primero probamos si el tap cae sobre un sólido con
+            // B-rep (una cara donde plantar el plano de trabajo, como Shapr3D).
+            // Si hay hit sobre un cadShape → onSketchFaceTap (NO onSketchTap);
+            // si no → el tap es un PUNTO en el plano de trabajo actual.
+            if sketchInputEnabled {
+                let faceRay = CameraRay.from(screenPoint: location, viewSize: view.bounds.size,
+                                             camera: scene.camera)
+                if let hit = ScenePicker.hitTest(models: scene.models, ray: faceRay),
+                   hit.modelIndex < scene.models.count,
+                   scene.models[hit.modelIndex].cadShape != nil {
+                    onSketchFaceTap?(hit)
+                    return
+                }
+                if let p = planePoint(at: location, in: view) {
+                    onSketchTap?(p)
+                }
+                return
+            }
 
             let ray = CameraRay.from(screenPoint: location, viewSize: view.bounds.size,
                                      camera: scene.camera)
@@ -274,72 +564,105 @@ struct MetalView: UIViewRepresentable {
                 // Punto de impacto REAL (antes se pasaba model.position — bug de precisión)
                 onTouch3D?(hit.position, ray.direction)
                 onSurfaceHit?(hit)
+            } else {
+                onEmptyTap?()
             }
         }
         
-        // MARK: - Sculpt Raycast
+        // MARK: - Sketch (rayo → plano de trabajo arbitrario)
 
-        /// Raycasts from the camera through the given screen point against all scene models.
-        /// Returns the closest hit position and surface normal, or nil if no mesh is intersected.
-        private func raycastForSculpt(at screenPoint: CGPoint, in view: UIView?) -> (position: SIMD3<Float>, normal: SIMD3<Float>)? {
-            guard let view = view else { return nil }
+        /// Intersección rayo–plano estándar y coordenadas locales (u, v) del plano
+        /// de trabajo activo. Con el piso por defecto equivale al viejo raycast a y=0.
+        private func planePoint(at location: CGPoint, in view: UIView) -> SIMD2<Float>? {
+            let ray = CameraRay.from(screenPoint: location, viewSize: view.bounds.size,
+                                     camera: scene.camera)
+            let n = sketchPlaneNormal
+            let denom = simd_dot(ray.direction, n)
+            guard abs(denom) > 1e-6 else { return nil }
+            let t = simd_dot(sketchPlaneOrigin - ray.origin, n) / denom
+            guard t > 0 else { return nil }
+            let w = ray.origin + ray.direction * t
+            let rel = w - sketchPlaneOrigin
+            return SIMD2<Float>(simd_dot(rel, sketchPlaneU), simd_dot(rel, sketchPlaneV))
+        }
+
+        // MARK: - Gizmo (hit-test en PANTALLA: robusto para manijas finas)
+
+        /// Proyecta un punto de mundo a coordenadas de pantalla (puntos).
+        private func projectToScreen(_ p: SIMD3<Float>, in view: UIView) -> CGPoint? {
             let size = view.bounds.size
-
-            let rayOrigin = scene.camera.position
             let aspect = Float(size.width / max(size.height, 1))
-            let ndc = SIMD2<Float>(
-                (2.0 * Float(screenPoint.x) / Float(size.width) - 1.0) * aspect,
-                1.0 - 2.0 * Float(screenPoint.y) / Float(size.height)
-            )
-            let fovRad = scene.camera.fov * .pi / 180
-            let halfH = tan(fovRad * 0.5)
-            let halfW = halfH * aspect
+            let vm = SatinRenderer.viewMatrix(for: scene.camera)
+            let pm = SatinRenderer.projectionMatrix(for: scene.camera, aspect: aspect)
+            let eye = vm * SIMD4<Float>(p.x, p.y, p.z, 1)
+            let clip = pm * eye
+            guard clip.w > 0 else { return nil }   // detrás de la cámara
+            let ndc = SIMD2<Float>(clip.x / clip.w, clip.y / clip.w)
+            return CGPoint(x: CGFloat((ndc.x + 1) * 0.5) * size.width,
+                           y: CGFloat((1 - ndc.y) * 0.5) * size.height)
+        }
 
-            let forward = simd_normalize(scene.camera.target - scene.camera.position)
-            let right = simd_normalize(simd_cross(forward, scene.camera.up))
-            let up = simd_cross(right, forward)
-            let rayDir = simd_normalize(forward + right * ndc.x * halfW + up * ndc.y * halfH)
+        /// Eje del gizmo bajo el toque. Flechas: distancia al segmento centro→punta.
+        /// Anillos: distancia a la circunferencia proyectada (24 muestras).
+        private func gizmoAxisHit(at location: CGPoint, in view: UIView) -> SIMD3<Float>? {
+            guard let center = gizmoCenter else { return nil }
+            let axes: [SIMD3<Float>] = [SIMD3<Float>(1, 0, 0), SIMD3<Float>(0, 1, 0), SIMD3<Float>(0, 0, 1)]
+            var best: (axis: SIMD3<Float>, dist: CGFloat)?
 
-            var closestDist: Float = .greatestFiniteMagnitude
-            var bestHit: (position: SIMD3<Float>, normal: SIMD3<Float>)?
-
-            for model in scene.models {
-                for mesh in model.meshes {
-                    for j in stride(from: 0, to: mesh.indices.count, by: 3) {
-                        guard j + 2 < mesh.indices.count else { break }
-                        let i0 = Int(mesh.indices[j])
-                        let i1 = Int(mesh.indices[j+1])
-                        let i2 = Int(mesh.indices[j+2])
-                        guard i0 < mesh.vertices.count, i1 < mesh.vertices.count, i2 < mesh.vertices.count else { continue }
-                        let v0 = mesh.vertices[i0].position
-                        let v1 = mesh.vertices[i1].position
-                        let v2 = mesh.vertices[i2].position
-                        if let hit = rayTriangleIntersect(
-                            rayOrigin: rayOrigin, rayDir: rayDir,
-                            v0: v0, v1: v1, v2: v2
-                        ) {
-                            let dist = simd_distance(rayOrigin, hit)
-                            if dist < closestDist {
-                                closestDist = dist
-                                // Compute face normal at hit point
-                                let edge1 = v1 - v0
-                                let edge2 = v2 - v0
-                                let faceNormal = simd_normalize(simd_cross(edge1, edge2))
-                                // Use vertex normal interpolation for smoother results
-                                let n0 = mesh.vertices[i0].normal
-                                let n1 = mesh.vertices[i1].normal
-                                let n2 = mesh.vertices[i2].normal
-                                let interpolatedNormal = simd_normalize(n0 + n1 + n2)
-                                let hitNormal = simd_length(interpolatedNormal) > 0.001
-                                    ? interpolatedNormal
-                                    : faceNormal
-                                bestHit = (hit, hitNormal)
+            if gizmoStyle == 1 {
+                // Anillos de rotación: círculo ⊥ eje de radio 0.75·L
+                let r = gizmoAxisLength * 0.75
+                for axis in axes {
+                    let dir = simd_normalize(axis)
+                    let ref: SIMD3<Float> = abs(dir.x) < 0.9 ? SIMD3<Float>(1, 0, 0) : SIMD3<Float>(0, 1, 0)
+                    let u = simd_normalize(simd_cross(dir, ref))
+                    let v = simd_normalize(simd_cross(dir, u))
+                    var prev: CGPoint?
+                    for k in 0...24 {
+                        let t = Float(k) / 24 * 2 * .pi
+                        let world = center + u * cos(t) * r + v * sin(t) * r
+                        guard let p2 = projectToScreen(world, in: view) else { prev = nil; continue }
+                        if let a = prev {
+                            let d = distanceToSegment(location, a: a, b: p2)
+                            if d < 30, d < (best?.dist ?? .greatestFiniteMagnitude) {
+                                best = (axis, d)
                             }
                         }
+                        prev = p2
+                    }
+                }
+            } else {
+                guard let c2 = projectToScreen(center, in: view) else { return nil }
+                for axis in axes {
+                    guard let t2 = projectToScreen(center + axis * gizmoAxisLength, in: view) else { continue }
+                    let d = distanceToSegment(location, a: c2, b: t2)
+                    if d < 34, d < (best?.dist ?? .greatestFiniteMagnitude) {
+                        best = (axis, d)
                     }
                 }
             }
-            return bestHit
+            return best?.axis
+        }
+
+        private func distanceToSegment(_ p: CGPoint, a: CGPoint, b: CGPoint) -> CGFloat {
+            let ab = CGPoint(x: b.x - a.x, y: b.y - a.y)
+            let ap = CGPoint(x: p.x - a.x, y: p.y - a.y)
+            let len2 = ab.x * ab.x + ab.y * ab.y
+            let t = len2 > 0 ? max(0, min(1, (ap.x * ab.x + ap.y * ab.y) / len2)) : 0
+            let proj = CGPoint(x: a.x + ab.x * t, y: a.y + ab.y * t)
+            return hypot(p.x - proj.x, p.y - proj.y)
+        }
+
+        // MARK: - Sculpt Raycast
+
+        /// Hit de superficie para sculpt vía el picking unificado (ScenePicker).
+        /// A diferencia del raycast antiguo, ignora overlays "__" (highlight de cara).
+        private func sculptHit(at screenPoint: CGPoint, in view: UIView?) -> (position: SIMD3<Float>, normal: SIMD3<Float>)? {
+            guard let view = view else { return nil }
+            let ray = CameraRay.from(screenPoint: screenPoint, viewSize: view.bounds.size,
+                                     camera: scene.camera)
+            guard let hit = ScenePicker.hitTest(models: scene.models, ray: ray) else { return nil }
+            return (hit.position, hit.normal)
         }
 
         // MARK: - Camera

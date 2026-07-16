@@ -1,11 +1,15 @@
 #include <metal_stdlib>
 using namespace metal;
 
+// CAUSA RAÍZ del visor negro (2026-07-08): este struct declaraba un 4º atributo
+// `color [[attribute(3)]]` que el vertex descriptor del pipeline NO definía →
+// makeRenderPipelineState fallaba → basicPipelineState = nil → CERO draws.
+// El color del modelo ahora viaja en Uniforms.modelColor (es per-modelo, no
+// per-vértice — el buffer real son 9 floats: pos4+normal3+uv2).
 struct VertexIn {
     float4 position [[attribute(0)]];
     float3 normal [[attribute(1)]];
     float2 uv [[attribute(2)]];
-    float4 color [[attribute(3)]];
 };
 
 struct VertexOut {
@@ -25,6 +29,8 @@ struct Uniforms {
     float3 lightColor;
     float lightIntensity;
     float3x3 normalMatrix;
+    float4 modelColor;   // color per-modelo (debe espejar BasicUniforms en Swift)
+    float4 cameraPos;    // posición de cámara (specular/rim del shading moderno)
 };
 
 vertex VertexOut vertex_main(VertexIn in [[stage_in]], constant Uniforms &uniforms [[buffer(1)]]) {
@@ -33,18 +39,211 @@ vertex VertexOut vertex_main(VertexIn in [[stage_in]], constant Uniforms &unifor
     out.position = uniforms.projectionMatrix * uniforms.viewMatrix * worldPos;
     out.worldNormal = normalize(uniforms.normalMatrix * in.normal);
     out.uv = in.uv;
-    out.color = in.color;
+    out.color = uniforms.modelColor;
     out.worldPosition = worldPos.xyz;
     return out;
 }
 
+// Shading "estudio" (acabado Shapr3D/Nomad, adiós al lambert plano de los 90):
+// half-Lambert (sin negros duros) + ambiente HEMISFÉRICO (cielo frío arriba,
+// suelo oscuro abajo) + especular Blinn suave + rim frío sutil.
 fragment float4 fragment_main(VertexOut in [[stage_in]], constant Uniforms &uniforms [[buffer(1)]]) {
     float3 N = normalize(in.worldNormal);
     float3 L = normalize(-uniforms.lightDirection);
-    float diff = max(dot(N, L), 0.0);
-    float3 lighting = uniforms.ambientColor + uniforms.lightColor * uniforms.lightIntensity * diff;
+    float3 V = normalize(uniforms.cameraPos.xyz - in.worldPosition);
+
+    float ndl = dot(N, L) * 0.5 + 0.5;
+    float diff = ndl * ndl;
+
+    float hemi = N.y * 0.5 + 0.5;
+    float3 ambient = mix(float3(0.15, 0.145, 0.16), float3(0.33, 0.36, 0.42), hemi);
+
+    float3 H = normalize(L + V);
+    float spec = pow(max(dot(N, H), 0.0), 48.0) * 0.30;
+    float rim = pow(1.0 - max(dot(N, V), 0.0), 3.0) * 0.18;
+
     float4 baseColor = in.color;
-    return float4(baseColor.rgb * lighting, baseColor.a);
+    float3 lighting = ambient + uniforms.lightColor * uniforms.lightIntensity * diff;
+    float3 rgb = baseColor.rgb * lighting + float3(spec) + float3(0.55, 0.65, 0.80) * rim;
+    return float4(rgb, baseColor.a);
+}
+
+// MARK: - Fondo con gradiente (el negro plano gritaba prototipo)
+
+struct BGVertexOut {
+    float4 position [[position]];
+    float2 uv;
+};
+
+vertex BGVertexOut bg_vertex(uint vid [[vertex_id]]) {
+    // Triángulo fullscreen
+    float2 p[3] = { float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0) };
+    BGVertexOut out;
+    out.position = float4(p[vid], 0.999, 1.0);
+    out.uv = p[vid] * 0.5 + 0.5;
+    return out;
+}
+
+fragment float4 bg_fragment(BGVertexOut in [[stage_in]]) {
+    // Taller de noche: sutil luz cenital fría que cae a grafito profundo,
+    // con viñeta suave en las esquinas.
+    float3 top = float3(0.085, 0.095, 0.125);
+    float3 bottom = float3(0.035, 0.038, 0.052);
+    float3 c = mix(bottom, top, in.uv.y);
+    float2 d = in.uv - float2(0.5, 0.55);
+    c *= 1.0 - dot(d, d) * 0.55;   // viñeta
+    return float4(c, 1.0);
+}
+
+// MARK: - Grilla universal del piso (procedural, antialiased)
+// Quad gigante en y=0; el fragment dibuja líneas cada 0.5 (menores) y 2.5
+// (mayores) con fade por distancia. Acero frío sutil (IDENTIDAD_FORGE §5:
+// la grilla jamás compite con la geometría).
+
+struct GridVertexOut {
+    float4 position [[position]];
+    float3 worldPos;
+};
+
+vertex GridVertexOut grid_vertex(uint vid [[vertex_id]],
+                                 constant Uniforms &uniforms [[buffer(1)]]) {
+    float2 corners[6] = {
+        float2(-1,-1), float2(1,-1), float2(1,1),
+        float2(-1,-1), float2(1,1), float2(-1,1)
+    };
+    float s = 60.0;
+    float3 world = float3(corners[vid].x * s, 0.0, corners[vid].y * s);
+    GridVertexOut out;
+    out.worldPos = world;
+    out.position = uniforms.projectionMatrix * uniforms.viewMatrix * float4(world, 1.0);
+    return out;
+}
+
+fragment float4 grid_fragment(GridVertexOut in [[stage_in]]) {
+    float2 p = in.worldPos.xz;
+    float2 gMinor = abs(fract(p / 0.5 - 0.5) - 0.5) / fwidth(p / 0.5);
+    float lineMinor = 1.0 - min(min(gMinor.x, gMinor.y), 1.0);
+    float2 gMajor = abs(fract(p / 2.5 - 0.5) - 0.5) / fwidth(p / 2.5);
+    float lineMajor = 1.0 - min(min(gMajor.x, gMajor.y), 1.0);
+    float fade = saturate(1.0 - length(p) / 28.0);
+
+    // Ejes del mundo (convención universal, como Shapr3D): X rojo, Z azul.
+    float axX = 1.0 - min(abs(p.y) / fwidth(p.y) / 1.6, 1.0);   // línea z=0 → eje X
+    float axZ = 1.0 - min(abs(p.x) / fwidth(p.x) / 1.6, 1.0);   // línea x=0 → eje Z
+
+    float a = max(lineMinor * 0.16, lineMajor * 0.32) * fade;
+    float3 color = float3(0.44, 0.64, 0.82);   // steel #6FA3D0
+    if (axX > 0.0) { color = float3(0.97, 0.44, 0.44); a = max(a, axX * 0.55 * fade); }  // axisX #F87171
+    if (axZ > 0.0) { color = float3(0.30, 0.64, 1.00); a = max(a, axZ * 0.55 * fade); }  // axisZ #4DA3FF
+    if (a < 0.01) { discard_fragment(); }
+    return float4(color, a);
+}
+
+// MARK: - Líneas nítidas anti-aliased (aristas / puntos / dibujos) — look Shapr3D
+//
+// PROBLEMA (device): las aristas se construían como TUBOS 3D (prismas barridos) y
+// se sombreaban con el shader lit → leían como cilindros glossy feos. Solución: la
+// geometría ahora es una CINTA plana (ribbon) de 2 triángulos por segmento cuya
+// anchura se expande en ESPACIO DE PANTALLA aquí, dando líneas de grosor CONSTANTE
+// en píxeles (no crecen/encogen con el zoom) — exactamente el comportamiento CAD.
+//
+// Encoding del vértice (reutiliza los 9 floats del buffer básico, sin tocar el
+// vertex descriptor): position.xyz = punto de la espina (P); normal.xyz = el OTRO
+// punto de la espina del segmento (Q) para derivar la dirección en pantalla;
+// uv.x = lado con signo en [-1,+1] (a qué lado expandir + coord transversal AA);
+// uv.y = 0 línea / 1 punto (los puntos usan un disco: expanden en ambos ejes).
+//
+// CONTRASTE GARANTIZADO (regla dura): el fragment dibuja un NÚCLEO oscuro (color
+// de línea) rodeado de un HALO claro sutil y un borde AA transparente. El halo
+// separa la línea de superficies claras; el núcleo oscuro se lee sobre el fondo
+// oscuro. Así la arista NUNCA se confunde ni con el fondo ni con la cara.
+
+struct LineUniforms {
+    float4x4 modelMatrix;
+    float4x4 viewMatrix;
+    float4x4 projectionMatrix;
+    float4 lineColor;      // color del núcleo (acero oscuro por defecto, brasa si selección)
+    float4 haloColor;      // color del halo de contraste (claro sutil)
+    float2 viewportSize;   // px del drawable (para el offset en espacio de pantalla)
+    float halfWidthPx;     // media anchura de la línea en píxeles del núcleo+halo
+    float depthBias;       // sesgo NDC hacia cámara para que la línea gane a la cara
+};
+
+struct LineVertexIn {
+    float4 position [[attribute(0)]];   // P: punto de la espina (o el punto, si disco)
+    float3 other    [[attribute(1)]];   // línea: Q (otro extremo) · punto: normal.x = esquina Y
+    float2 uv       [[attribute(2)]];   // uv.x = lado/esquinaX [-1,+1]; uv.y = 0 línea / 1 punto
+};
+
+struct LineVertexOut {
+    float4 position [[position]];
+    float2 across;         // línea: (transversal[-1,+1], 0) · punto: (cornerX, cornerY)
+    float isPoint;         // 0 línea, 1 punto
+};
+
+vertex LineVertexOut edge_line_vertex(LineVertexIn in [[stage_in]],
+                                      constant LineUniforms &u [[buffer(1)]]) {
+    LineVertexOut out;
+    float4x4 mvp = u.projectionMatrix * u.viewMatrix * u.modelMatrix;
+
+    float4 clipP = mvp * float4(in.position.xyz, 1.0);
+    float2 halfVp = u.viewportSize * 0.5;
+    float2 offsetPx;
+
+    if (in.uv.y > 0.5) {
+        // PUNTO: cuadrado en ejes de PANTALLA (independiente de cámara → nunca colapsa).
+        // uv.x = esquina X, normal.x (in.other.x) = esquina Y, ambos en {-1,+1}.
+        float2 corner = float2(in.uv.x, in.other.x);
+        offsetPx = corner * u.halfWidthPx;
+        out.across = offsetPx;                   // distancia en PÍXELES al centro
+    } else {
+        // LÍNEA: expandir perpendicular a la dirección P→Q en espacio de pantalla,
+        // dando grosor CONSTANTE en píxeles a cualquier zoom.
+        float4 clipQ = mvp * float4(in.other, 1.0);
+        float2 ndcP = clipP.xy / max(clipP.w, 1e-6);
+        float2 ndcQ = clipQ.xy / max(clipQ.w, 1e-6);
+        float2 scrP = ndcP * halfVp;
+        float2 scrQ = ndcQ * halfVp;
+        float2 dir = scrQ - scrP;
+        float len = length(dir);
+        float2 tangent = len > 1e-5 ? dir / len : float2(1.0, 0.0);
+        float2 perp = float2(-tangent.y, tangent.x);
+        float side = in.uv.x;                    // -1 o +1
+        offsetPx = perp * side * u.halfWidthPx;
+        out.across = float2(side * u.halfWidthPx, 0.0);   // distancia en PÍXELES al centro
+    }
+
+    // De vuelta a clip: el offset en píxeles se reescala a NDC y se multiplica por w
+    // (para que sea constante en pantalla tras la división por perspectiva).
+    float2 offsetNdc = offsetPx / halfVp;
+    clipP.xy += offsetNdc * clipP.w;
+    clipP.z  -= u.depthBias * clipP.w;           // sesgo hacia cámara (line-on-face)
+
+    out.position = clipP;
+    out.isPoint = in.uv.y;
+    return out;
+}
+
+fragment float4 edge_line_fragment(LineVertexOut in [[stage_in]],
+                                   constant LineUniforms &u [[buffer(1)]]) {
+    // d = distancia normalizada al centro [0..1]: línea = |transversal|; punto = radio.
+    float d = in.isPoint > 0.5 ? length(in.across) : abs(in.across.x);
+    // Ancho de pluma AA en unidades de 'd' (derivada de pantalla → borde ~1px suave).
+    float aa = fwidth(d) + 1e-4;
+
+    // Núcleo oscuro sólido hasta coreEdge; halo claro entre coreEdge y 1; fuera → fade.
+    float coreEdge = 0.55;
+    float haloEdge = 1.0;
+
+    float core = 1.0 - smoothstep(coreEdge - aa, coreEdge + aa, d);      // 1 dentro del núcleo
+    float within = 1.0 - smoothstep(haloEdge - aa, haloEdge + aa, d);    // 1 dentro del halo
+    float halo = saturate(within - core);                               // anillo del halo
+
+    // Mezcla: núcleo=color de línea, anillo=halo de contraste; alpha = cobertura AA.
+    float3 rgb = mix(u.haloColor.rgb, u.lineColor.rgb, core);
+    float alpha = max(core * u.lineColor.a, halo * u.haloColor.a);
+    if (alpha < 0.003) { discard_fragment(); }
+    return float4(rgb, alpha);
 }
 
 struct StrokeVertexIn {

@@ -40,3 +40,11 @@ credentials*
 ios-app/AppForgeStudio.xcodeproj/project.xcworkspace/
 ios-app/AppForgeStudio.xcodeproj/xcuserdata/
 vendor/Satin/
+
+# Design references — captures of other apps; repo may be public, do NOT commit
+docs/design/moodboard/
+
+# Evidencia local de CI (descargas de artifacts, no se versionan)
+ci-ipa/
+ui-probe-evidence/
+artifacts/
