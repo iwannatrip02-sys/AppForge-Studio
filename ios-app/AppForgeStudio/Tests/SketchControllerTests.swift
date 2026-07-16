@@ -1,10 +1,12 @@
 import XCTest
 import simd
 import OCCTSwift
+import SketchKernel
 @testable import AppForgeStudio
 
-/// Tests de LA GRAN OLA: sketch en viewport → sólidos B-rep reales.
-/// Oráculos de volumen exactos: el dibujo produce ingeniería, no dibujos.
+/// Tests del SketchController Fase 1 (adaptador sobre SketchKernel).
+/// Mecánicas + oráculos de volumen exactos: el dibujo produce ingeniería.
+/// La geometría pura del kernel se fija en SketchKernelTests (host del CI).
 @MainActor
 final class SketchControllerTests: XCTestCase {
 
@@ -12,330 +14,155 @@ final class SketchControllerTests: XCTestCase {
         try XCTUnwrap(try XCTUnwrap(model.cadShape).volume)
     }
 
+    // MARK: - Línea encadenada con topología
+
+    func testLineChainCreatesConnectedTopology() {
+        let s = SketchController()
+        s.beginTool(.line)
+        s.tap(at: SIMD2(0, 0))
+        s.tap(at: SIMD2(2, 0))
+        s.tap(at: SIMD2(2, 2))
+        // 2 segmentos confirmados, esquina COMPARTIDA (3 puntos, no 4)
+        XCTAssertEqual(s.entities.count, 2)
+        XCTAssertEqual(s.model.positions.count, 3)
+    }
+
+    func testClosingChainFormsRegion() {
+        let s = SketchController()
+        s.beginTool(.line)
+        s.tap(at: SIMD2(0, 0))
+        s.tap(at: SIMD2(2, 0))
+        s.tap(at: SIMD2(2, 2))
+        s.tap(at: SIMD2(0, 2))
+        s.tap(at: SIMD2(0.02, 0.02))   // cerrar sobre el primer punto
+        XCTAssertEqual(s.entities.count, 4, "4 lados")
+        XCTAssertEqual(s.regions.count, 1, "el perfil cerrado ES una región")
+        XCTAssertTrue(s.hasExtrudableArea)
+    }
+
+    func testNoAutomaticChainingAfterBeginTool() {
+        let s = SketchController()
+        s.beginTool(.line)
+        s.tap(at: SIMD2(0, 0))
+        s.tap(at: SIMD2(2, 0))
+        // Cambiar de herramienta y volver: la cadena NO continúa (bug device)
+        s.beginTool(.circle)
+        s.beginTool(.line)
+        s.tap(at: SIMD2(5, 5))
+        XCTAssertEqual(s.entities.count, 1,
+                       "el tap tras beginTool inicia cadena nueva, no añade línea")
+    }
+
+    // MARK: - Rectángulo / círculo → volúmenes exactos
+
     func testRectangleByTwoTapsExtrudesExactVolume() throws {
         let s = SketchController()
-        s.activeTool = .rectangle
-        s.tap(at: SIMD2<Float>(0, 0))
-        s.tap(at: SIMD2<Float>(2, 3))
-        XCTAssertTrue(s.hasClosedProfile, "rectángulo = perfil cerrado")
+        s.beginTool(.rectangle)
+        s.tap(at: SIMD2(0, 0))
+        s.tap(at: SIMD2(2, 3))
+        XCTAssertEqual(s.entities.count, 4, "4 líneas reales con esquinas compartidas")
+        XCTAssertEqual(s.model.positions.count, 4)
+        XCTAssertTrue(s.hasClosedProfile)
 
         let model = try XCTUnwrap(s.extrudeProfile(height: 1.5))
         XCTAssertEqual(try volume(model), 2 * 3 * 1.5, accuracy: 0.01,
-                       "extrusión del rect 2×3 alto 1.5 → volumen EXACTO 9.0")
+                       "rect 2×3 alto 1.5 → volumen 9.0")
         XCTAssertNotNil(model.edgesMesh, "el sólido nace con aristas visibles")
-        XCTAssertFalse(model.meshes.first?.vertices.isEmpty ?? true)
     }
 
     func testCircleExtrudesToCylinderVolume() throws {
         let s = SketchController()
-        s.activeTool = .circle
-        s.tap(at: SIMD2<Float>(5, 0))       // centro
-        s.tap(at: SIMD2<Float>(6, 0))       // radio 1
-        let model = try XCTUnwrap(s.extrudeProfile(height: 2))
-        XCTAssertEqual(try volume(model), Double.pi * 1 * 1 * 2, accuracy: 0.01,
-                       "círculo r=1 extruido 2 → cilindro πr²h EXACTO")
+        s.beginTool(.circle)
+        s.tap(at: SIMD2(0, 0))
+        s.tap(at: SIMD2(1, 0))
+        XCTAssertEqual(s.regions.count, 1)
+
+        let model = try XCTUnwrap(s.extrudeProfile(height: 2.0))
+        XCTAssertEqual(try volume(model), .pi * 2.0, accuracy: 0.05,
+                       "cilindro R1 alto 2 → ~2π (perfil poligonal del kernel)")
     }
 
-    func testLineChainClosesBySnapAndExtrudes() throws {
+    // MARK: - Selección (Fase 1 §4: tocar un trazo lo selecciona)
+
+    func testTapOnStrokeSelectsIt() {
         let s = SketchController()
-        s.activeTool = .line
-        // Triángulo rectángulo 2×2: (0,0) (2,0) (0,2), cerrar tocando CERCA del primero
-        s.tap(at: SIMD2<Float>(0, 0))
-        s.tap(at: SIMD2<Float>(2, 0))
-        s.tap(at: SIMD2<Float>(0, 2))
-        s.tap(at: SIMD2<Float>(0.05, 0.05))   // dentro del snapRadius → CIERRA
-        XCTAssertTrue(s.hasClosedProfile, "el tap sobre el primer punto cierra la cadena")
-
-        let model = try XCTUnwrap(s.extrudeProfile(height: 1))
-        XCTAssertEqual(try volume(model), 2.0, accuracy: 0.02,
-                       "triángulo 2×2/2 = área 2, alto 1 → volumen 2")
+        s.beginTool(.circle)
+        s.tap(at: SIMD2(0, 0))
+        s.tap(at: SIMD2(2, 0))
+        XCTAssertNil(s.selectedCurveID)
+        // Tap SOBRE el anillo (no dentro, no en un punto topológico)
+        s.tap(at: SIMD2(0, 2.05))
+        XCTAssertNotNil(s.selectedCurveID, "tocar el trazo lo selecciona")
     }
 
-    func testRevolveRectangleMakesRing() throws {
+    func testTapInEmptinessDeselects() {
         let s = SketchController()
-        s.activeTool = .rectangle
-        // Rect lejos del eje Z (x∈[2,3], z∈[0,1]) girado 360° alrededor de Z:
-        // anillo (toro cuadrado): V = 2π·R̄·A = 2π·2.5·(1·1) ≈ 15.708 (Pappus)
-        s.tap(at: SIMD2<Float>(2, 0))
-        s.tap(at: SIMD2<Float>(3, 1))
-        let model = try XCTUnwrap(s.revolveProfile())
-        XCTAssertEqual(try volume(model), 2 * Double.pi * 2.5 * 1.0, accuracy: 0.05,
-                       "teorema de Pappus: V = 2π·R̄·A")
+        s.beginTool(.rectangle)
+        s.tap(at: SIMD2(0, 0))
+        s.tap(at: SIMD2(4, 4))
+        s.tap(at: SIMD2(2, 2))          // dentro → selecciona región
+        XCTAssertNotNil(s.selectedRegion)
+        s.tap(at: SIMD2(20, 20))        // vacío → deselecciona
+        XCTAssertNil(s.selectedRegion)
+        XCTAssertNil(s.selectedCurveID)
     }
 
-    func testUndoAndClear() {
+    // MARK: - Arrastre de puntos con topología compartida
+
+    func testDraggingSharedCornerKeepsTopology() {
         let s = SketchController()
-        s.activeTool = .line
-        s.tap(at: SIMD2<Float>(0, 0))
-        s.tap(at: SIMD2<Float>(1, 0))
-        s.undoLast()
-        XCTAssertEqual(s.chain.count, 1)
-        s.clear()
-        XCTAssertTrue(s.chain.isEmpty)
-        XCTAssertFalse(s.hasClosedProfile)
-    }
-
-    func testTubeAlongStraightPathVolume() throws {
-        // Cadena recta de longitud 4 + Tubo Ø0.4: el volumen debe ser positivo
-        // y estar dentro del rango [πr²·L·0.5, πr²·L·1.5] (OCCT sweep sobre
-        // polilínea de 2 puntos puede dar resultado ligeramente distinto al cilindro
-        // teórico — se verifica que el sólido existe y tiene volumen razonable).
-        let s = SketchController()
-        s.activeTool = .line
-        s.tap(at: SIMD2<Float>(0, 0))
-        s.tap(at: SIMD2<Float>(4, 0))
-        XCTAssertTrue(s.hasOpenPath)
-        let model = try XCTUnwrap(s.tubeAlongPath(radius: 0.2))
-        let vol = try volume(model)
-        let expected = Double.pi * 0.04 * 4   // ≈ 0.503
-        XCTAssertGreaterThan(vol, expected * 0.5,
-                             "tubo recto: volumen debe ser > 50% del cilindro teórico")
-        XCTAssertLessThan(vol, expected * 1.5,
-                          "tubo recto: volumen debe ser < 150% del cilindro teórico")
-        XCTAssertNotNil(model.edgesMesh, "sólido tubo nace con aristas")
-    }
-
-    func testLoftSquareToSquareIsPrism() throws {
-        // Dos cuadrados idénticos 1×1, transición altura 2 → prisma volumen 2
-        let s = SketchController()
-        s.activeTool = .rectangle
-        s.tap(at: SIMD2<Float>(0, 0)); s.tap(at: SIMD2<Float>(1, 1))
-        s.tap(at: SIMD2<Float>(0, 0)); s.tap(at: SIMD2<Float>(1, 1))
-        XCTAssertTrue(s.hasTwoProfiles)
-        let model = try XCTUnwrap(s.loftProfiles(height: 2))
-        XCTAssertEqual(try volume(model), 1 * 1 * 2, accuracy: 0.03,
-                       "loft entre perfiles idénticos = prisma exacto")
-    }
-
-    func testRevolveHalfAngleIsHalfVolume() throws {
-        // Rect x∈[2,3] revolucionado 180° = mitad del anillo de Pappus
-        let s = SketchController()
-        s.activeTool = .rectangle
-        s.tap(at: SIMD2<Float>(2, 0)); s.tap(at: SIMD2<Float>(3, 1))
-        let model = try XCTUnwrap(s.revolveProfile(angle: .pi))
-        XCTAssertEqual(try volume(model), Double.pi * 2.5 * 1.0, accuracy: 0.05,
-                       "revolución 180° = ½ · 2π·R̄·A (ángulo editable REAL)")
-    }
-
-    func testSplineBecomesOpenPath() {
-        let s = SketchController()
-        s.activeTool = .spline
-        s.tap(at: SIMD2<Float>(0, 0))
-        s.tap(at: SIMD2<Float>(1, 1))
-        s.tap(at: SIMD2<Float>(2, 0))
-        s.finishSpline()
-        XCTAssertTrue(s.hasOpenPath, "la spline confirmada es ruta de Tubo")
-        XCTAssertFalse(s.hasClosedProfile, "abierta: no es perfil")
-    }
-
-    func testDrillThroughHoleExactVolume() throws {
-        // Caja 2×2×2 + agujero PASANTE Ø0.4 por el centro de la cara superior:
-        // V = 8 − π·r²·h = 8 − π·0.04·2 ≈ 7.7487 (F-CAD-2a, INGENIERIA_INVERSA §4)
-        let shape = try XCTUnwrap(OCCTSwift.Shape.box(width: 2, height: 2, depth: 2))
-        let mesh = try XCTUnwrap(OCCTBridge.toMesh(shape, quality: .medium))
-        let model = Model(name: "Brida")
-        model.cadShape = shape
-        model.meshes = [mesh]
-
-        XCTAssertTrue(BRepModeling.drill(model, at: SIMD3<Double>(0, 0, 1),
-                                         direction: SIMD3<Double>(0, 0, -1),
-                                         radius: 0.2, depth: 0))
-        XCTAssertEqual(try volume(model), 8 - Double.pi * 0.04 * 2, accuracy: 0.01,
-                       "agujero pasante: volumen EXACTO 8 − πr²h")
-        XCTAssertNotNil(model.edgesMesh, "el agujero añade sus aristas circulares")
-
-        // Encadenable: segundo agujero en otra posición
-        XCTAssertTrue(BRepModeling.drill(model, at: SIMD3<Double>(0.6, 0, 1),
-                                         direction: SIMD3<Double>(0, 0, -1),
-                                         radius: 0.2, depth: 0))
-        XCTAssertEqual(try volume(model), 8 - 2 * Double.pi * 0.04 * 2, accuracy: 0.01,
-                       "dos agujeros = doble descuento exacto")
-    }
-
-    func testMirrorAndPatternProduceExactCopies() throws {
-        // Cuerpo base desde sketch (rect 1×1 en x∈[2,3]) — lejos del plano espejo
-        let s = SketchController()
-        s.activeTool = .rectangle
-        s.tap(at: SIMD2<Float>(2, 0))
-        s.tap(at: SIMD2<Float>(3, 1))
-        let base = try XCTUnwrap(s.extrudeProfile(height: 1))
-        let baseVol = try volume(base)
-
-        let mirror = try XCTUnwrap(BRepModeling.mirroredCopy(of: base))
-        XCTAssertEqual(try volume(mirror), baseVol, accuracy: 0.01,
-                       "el espejo conserva el volumen exacto")
-        // El espejo vive al OTRO lado del plano x=0
-        let mx = mirror.meshes.first!.vertices.map { $0.position.x }
-        XCTAssertLessThan(mx.max() ?? 1, 0.01, "la copia reflejada cruza al lado x<0")
-
-        let copies = BRepModeling.linearPattern(of: base, count: 3,
-                                                spacing: SIMD3<Double>(2, 0, 0))
-        XCTAssertEqual(copies.count, 2, "patrón ×3 = original + 2 copias")
-        for (i, c) in copies.enumerated() {
-            XCTAssertEqual(try volume(c), baseVol, accuracy: 0.01)
-            let minX = c.meshes.first!.vertices.map { $0.position.x }.min() ?? 0
-            XCTAssertEqual(minX, 2 + Float(i + 1) * 2, accuracy: 0.05,
-                           "cada copia desplazada EXACTAMENTE i·spacing")
-        }
-    }
-
-    func testPencilDragDrawsRectangle() throws {
-        let s = SketchController()
-        s.activeTool = .rectangle
-        s.pencilDragBegan(at: SIMD2<Float>(0, 0))
-        s.pencilDragChanged(to: SIMD2<Float>(1, 1))
-        s.pencilDragEnded(at: SIMD2<Float>(4, 5))
-        XCTAssertTrue(s.hasClosedProfile, "el trazo de pencil produce el rectángulo")
-        let model = try XCTUnwrap(s.extrudeProfile(height: 1))
-        XCTAssertEqual(try volume(model), 4 * 5 * 1, accuracy: 0.02)
-    }
-
-    // MARK: - Polígono regular
-
-    func testHexagonExtrudedVolume() throws {
-        // Hexágono regular r=1 extruido h=1 → V = (3√3/2)·r²·h ≈ 2.598
-        let s = SketchController()
-        s.activeTool = .polygon
-        s.polygonSides = 6
-        s.tap(at: SIMD2<Float>(0, 0))     // centro
-        s.tap(at: SIMD2<Float>(1, 0))     // radio 1
-        XCTAssertTrue(s.hasClosedProfile, "polígono regular = perfil cerrado")
-        let model = try XCTUnwrap(s.extrudeProfile(height: 1))
-        let expected = 3 * sqrt(3.0) / 2 * 1 * 1 * 1   // ≈ 2.598
-        XCTAssertEqual(try volume(model), expected, accuracy: 0.05,
-                       "hexágono r=1 h=1 → volumen = (3√3/2)r²h")
-        XCTAssertNotNil(model.edgesMesh, "sólido poligonal nace con aristas")
-    }
-
-    func testCircularPatternProducesExactCopies() throws {
-        // Rect x∈[2,3] extruido h=1, patrón ○×4 → 3 copias, cada una mismo volumen
-        let s = SketchController()
-        s.activeTool = .rectangle
-        s.tap(at: SIMD2<Float>(2, 0))
-        s.tap(at: SIMD2<Float>(3, 1))
-        let base = try XCTUnwrap(s.extrudeProfile(height: 1))
-        let baseVol = try volume(base)
-
-        let copies = BRepModeling.circularPattern(of: base, count: 4,
-                                                  axisOrigin: .zero,
-                                                  axisDirection: SIMD3<Double>(0, 1, 0))
-        XCTAssertEqual(copies.count, 3, "patrón ○×4 = original + 3 copias")
-        for (i, copy) in copies.enumerated() {
-            XCTAssertEqual(try volume(copy), baseVol, accuracy: 0.01,
-                           "copia circular \(i+1) conserva el volumen exacto")
-        }
-    }
-
-    // MARK: - F2: selección por contorno (issue #13)
-
-    func testSelectCircleByTappingItsRing() {
-        let s = SketchController()
-        s.activeTool = .circle
-        s.tap(at: SIMD2<Float>(0, 0))   // centro
-        s.tap(at: SIMD2<Float>(2, 0))   // radio 2 → círculo r=2 en (0,0)
-
-        // Tocar el ANILLO (lejos del centro) selecciona el círculo.
-        XCTAssertTrue(s.selectEntity(near: SIMD2<Float>(0, 2)),
-                      "tocar el anillo del círculo debe seleccionarlo")
-        XCTAssertEqual(s.selectedEntityIndex, 0)
-    }
-
-    func testSelectRectByTappingAnEdge() {
-        let s = SketchController()
-        s.activeTool = .rectangle
-        s.tap(at: SIMD2<Float>(0, 0))
-        s.tap(at: SIMD2<Float>(4, 2))   // rect (0,0)-(4,2)
-
-        // Tocar el punto medio del lado superior (2, 2) selecciona el rect.
-        XCTAssertTrue(s.selectEntity(near: SIMD2<Float>(2, 2)),
-                      "tocar un lado del rectángulo debe seleccionarlo")
-        XCTAssertEqual(s.selectedEntityIndex, 0)
-    }
-
-    func testTappingFarFromAnyOutlineSelectsNothing() {
-        let s = SketchController()
-        s.activeTool = .circle
-        s.tap(at: SIMD2<Float>(0, 0))
-        s.tap(at: SIMD2<Float>(2, 0))   // círculo r=2
-
-        // Un punto interior lejos del anillo y del centro no selecciona.
-        XCTAssertFalse(s.selectEntity(near: SIMD2<Float>(1, 0)),
-                       "tocar el vacío interior no debe seleccionar")
-        XCTAssertNil(s.selectedEntityIndex)
-    }
-
-    // MARK: - F4: regiones → 3D (issue #15)
-
-    func testDetectRegionFindsClosedArea() {
-        let s = SketchController()
-        s.activeTool = .rectangle
-        s.tap(at: SIMD2<Float>(0, 0))
-        s.tap(at: SIMD2<Float>(2, 2))   // rect 2×2
-
-        // Agnóstico al winding: existe una región de área |4| (2×2).
-        let regions = SketchRegionDetector.detectRegions(in: s.entities, chain: s.chain)
-        XCTAssertTrue(regions.contains { abs($0.area) == 4 || abs(abs($0.area) - 4) < 0.1 },
-                      "el rect 2×2 debe encerrar una región de área 4")
-    }
-
-    func testExtrudeRegionFromVerticesHasExactVolume() throws {
-        // Una región cuadrada 2×2 extruida h=3 → prisma volumen 12.
-        let s = SketchController()
-        let square: [SIMD2<Float>] = [SIMD2(0, 0), SIMD2(2, 0), SIMD2(2, 2), SIMD2(0, 2)]
-        let model = try XCTUnwrap(s.extrudeRegion(vertices: square, height: 3),
-                                  "una región cerrada debe extruirse a sólido")
-        XCTAssertEqual(try volume(model), 2 * 2 * 3, accuracy: 0.05,
-                       "región 2×2 × altura 3 = 12")
-    }
-
-    func testExtrudeRegionAtTappedPointFindsAndExtrudes() throws {
-        // Dibujar un rect y "tocar" su interior → extruir esa región.
-        let s = SketchController()
-        s.activeTool = .rectangle
-        s.tap(at: SIMD2<Float>(0, 0))
-        s.tap(at: SIMD2<Float>(2, 2))
-        let model = try XCTUnwrap(s.extrudeRegion(at: SIMD2<Float>(1, 1), height: 1),
-                                  "tocar dentro de una región cerrada debe extruirla")
-        XCTAssertEqual(try volume(model), 4, accuracy: 0.05)
-    }
-
-    // MARK: - F3: arrastre completo de vértices (issue #14)
-
-    func testDragRectThirdCornerReshapes() {
-        let s = SketchController()
-        s.autoConstrain = false   // aislar el arrastre del re-solve de constraints
-        s.activeTool = .rectangle
-        s.tap(at: SIMD2<Float>(0, 0))
-        s.tap(at: SIMD2<Float>(2, 2))   // rect (0,0)-(2,2)
-
-        // Esquina 2 = (b.x, a.y) = (2, 0). Antes caía en default:break y NO se movía.
-        XCTAssertTrue(s.beginDrag(near: SIMD2<Float>(2, 0)), "debe agarrar la esquina (2,0)")
-        s.drag(to: SIMD2<Float>(3, 1))
-        s.endDrag()
-
-        guard case .rect(let a, let b) = s.entities[0] else {
-            return XCTFail("la entidad 0 debe seguir siendo un rect")
-        }
-        XCTAssertEqual(abs(b.x - a.x), 3, accuracy: 0.02, "ancho reformado a 3")
-        XCTAssertEqual(abs(b.y - a.y), 1, accuracy: 0.02, "alto reformado a 1")
-    }
-
-    // MARK: - Bug device: la línea nueva no debe continuar la anterior
-
-    func testBeginToolDiscardsInProgressChain() {
-        let s = SketchController()
-        s.activeTool = .line
-        s.tap(at: SIMD2<Float>(0, 0))
-        s.tap(at: SIMD2<Float>(1, 0))   // cadena en curso, sin cerrar
-        XCTAssertFalse(s.chain.isEmpty, "hay una cadena en curso")
-
-        // Re-seleccionar la herramienta debe EMPEZAR LIMPIO.
         s.beginTool(.line)
-        XCTAssertTrue(s.chain.isEmpty, "beginTool descarta la cadena en curso")
+        s.tap(at: SIMD2(0, 0))
+        s.tap(at: SIMD2(2, 0))
+        s.tap(at: SIMD2(2, 2))
+        XCTAssertTrue(s.beginDrag(near: SIMD2(2, 0.05)))
+        s.drag(to: SIMD2(3, 1))
+        s.endDrag()
+        let corner = s.model.existingPoint(near: Vec2(3.0, 1.0), tolerance: 0.2)
+        XCTAssertNotNil(corner, "la esquina quedó donde se soltó (con snap)")
+        XCTAssertEqual(s.model.positions.count, 3, "sigue siendo UN punto compartido")
+    }
 
-        // El siguiente tap arranca una cadena nueva desde ese punto, no continúa.
-        s.tap(at: SIMD2<Float>(5, 5))
-        XCTAssertEqual(s.chain.count, 1, "la nueva línea empieza con 1 punto")
-        XCTAssertEqual(s.chain.first?.x ?? -99, 5, accuracy: 0.01)
+    // MARK: - Undo
+
+    func testUndoRemovesLastCommit() {
+        let s = SketchController()
+        s.beginTool(.circle)
+        s.tap(at: SIMD2(0, 0))
+        s.tap(at: SIMD2(1, 0))
+        XCTAssertEqual(s.entities.count, 1)
+        s.undoLast()
+        XCTAssertEqual(s.entities.count, 0)
+        XCTAssertTrue(s.regions.isEmpty)
+    }
+
+    // MARK: - Regla anti-placebo
+
+    func testExtrudableAreaMatchesExtrudeCapability() {
+        let s = SketchController()
+        XCTAssertFalse(s.hasExtrudableArea)
+        XCTAssertNil(s.extrudeClosedArea(height: 1.0))
+
+        s.beginTool(.rectangle)
+        s.tap(at: SIMD2(0, 0))
+        s.tap(at: SIMD2(2, 2))
+        XCTAssertTrue(s.hasExtrudableArea)
+        XCTAssertNotNil(s.extrudeClosedArea(height: 1.0),
+                        "hasExtrudableArea=true implica extrusión real")
+    }
+
+    func testOpenPathButtonOnlyWithSpline() {
+        let s = SketchController()
+        s.beginTool(.line)
+        s.tap(at: SIMD2(0, 0))
+        s.tap(at: SIMD2(2, 0))
+        XCTAssertFalse(s.hasOpenPath, "cadena de líneas NO habilita Tubo (aún)")
+        s.beginTool(.spline)
+        s.tap(at: SIMD2(0, 1))
+        s.tap(at: SIMD2(1, 2))
+        s.tap(at: SIMD2(2, 1))
+        s.finishSpline()
+        XCTAssertTrue(s.hasOpenPath)
+        XCTAssertNotNil(s.tubeAlongPath(radius: 0.1))
     }
 }

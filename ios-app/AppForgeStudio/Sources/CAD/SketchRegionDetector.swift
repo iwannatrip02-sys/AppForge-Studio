@@ -37,49 +37,10 @@ struct SketchRegionDetector {
 
     // MARK: - API Pública
 
-    /// Detecta todas las regiones cerradas en una lista de entidades de sketch.
-    /// Solo considera líneas (polyline, rect, polygon). Círculos y arcos se discretizan.
-    static func detectRegions(in entities: [SketchController.Entity],
-                               chain: [SIMD2<Float>] = []) -> [ClosedRegion] {
-        var segments: [(SIMD2<Float>, SIMD2<Float>)] = []
-
-        for entity in entities {
-            switch entity {
-            case .polyline(let pts, let closed):
-                for i in 0..<(pts.count - 1) {
-                    segments.append((pts[i], pts[i + 1]))
-                }
-                if closed, let first = pts.first, let last = pts.last {
-                    segments.append((last, first))
-                }
-            case .rect(let a, let b):
-                let corners = [a, SIMD2(b.x, a.y), b, SIMD2(a.x, b.y)]
-                for i in 0..<4 {
-                    segments.append((corners[i], corners[(i + 1) % 4]))
-                }
-            case .circle(let c, let r):
-                segments.append(contentsOf: discretizeCircle(center: c, radius: r, segments: 32))
-            case .polygonEnt(let c, let r, let sides):
-                let verts = SketchController.Entity.polygonVerts(center: c, radius: r, sides: sides)
-                for i in 0..<sides {
-                    segments.append((verts[i], verts[(i + 1) % sides]))
-                }
-            case .spline(let pts):
-                for i in 0..<(pts.count - 1) {
-                    segments.append((pts[i], pts[i + 1]))
-                }
-            }
-        }
-
-        // Agregar cadena activa (no confirmada aún)
-        if chain.count >= 2 {
-            for i in 0..<(chain.count - 1) {
-                segments.append((chain[i], chain[i + 1]))
-            }
-        }
-
-        return findClosedRegions(segments: segments)
-    }
+    // NOTA Fase 1: detectRegions(in: [Entity]) fue eliminado — la detección de
+    // regiones vive ahora en SketchKernel.RegionFinder (arreglo plano real con
+    // particion en cruces). Aquí quedan solo ClosedRegion + el render 3D del
+    // relleno (fillMesh/overlay), que consumen los polígonos del kernel.
 
     /// Genera una malla de relleno para las regiones (triángulos semitransparentes
     /// que se renderizan sobre el plano de sketch para mostrar "esto es un sólido potencial")

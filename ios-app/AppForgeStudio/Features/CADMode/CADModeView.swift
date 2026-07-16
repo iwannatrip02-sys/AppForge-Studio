@@ -2,6 +2,7 @@ import SwiftUI
 import OSLog
 import CoreGraphics
 import simd
+import SketchKernel
 
 private let logger = Logger(subsystem: "com.appforgestudio", category: "CADModeView")
 
@@ -260,10 +261,10 @@ struct CADModeView: View {
         gridModel.name = "__workPlaneGrid"
         canvasVM.scene.addModel(gridModel)
 
-        // Regiones cerradas → relleno sombreado tocable
-        let regions = SketchRegionDetector.detectRegions(
-            in: sketch.entities, chain: sketch.chain
-        )
+        // Regiones cerradas → relleno sombreado tocable (Fase 1: del kernel)
+        let regions = sketch.regions.map { region in
+            SketchRegionDetector.ClosedRegion(vertices: region.polygon.map { $0.simd })
+        }
         if !regions.isEmpty {
             let overlay = SketchRegionOverlay()
             let (fill, stroke) = overlay.generate(for: regions, on: sketch.plane)
@@ -518,7 +519,8 @@ struct CADModeView: View {
                             // encadenando geometría encima de la figura.
                             let dPoint = sketch.nearestEditablePointDistance(to: p)
                                 ?? .greatestFiniteMagnitude
-                            if dPoint > SketchController.snapRadius * 0.8,
+                            if !sketch.isDrawingInProgress,
+                               dPoint > SketchController.snapRadius * 0.8,
                                sketch.selectRegion(at: p) {
                                 HapticService.shared.medium()
                                 return
@@ -538,7 +540,7 @@ struct CADModeView: View {
                                 return
                             }
                             // 2) Dentro de una región cerrada → EXTRUIR POR ARRASTRE
-                            if let verts = sketch.region(at: p) {
+                            if !sketch.isDrawingInProgress, let verts = sketch.region(at: p) {
                                 regionDrag = (verts: verts, start: p)
                                 regionDragHeight = 0
                                 sketch.selectRegion(at: p)
@@ -711,8 +713,7 @@ struct CADModeView: View {
         .onChange(of: extrudeDistance) { _ in
             if selectedTool == .extrude { updateExtrudeGhost() }
         }
-        .onChange(of: sketch.entities.count) { _ in rebuildSketchOverlays() }
-        .onChange(of: sketch.chain.count) { _ in rebuildSketchOverlays() }
+        .onChange(of: sketch.revision) { _ in rebuildSketchOverlays() }
         .onChange(of: selectionController.outlinedModelId) { newId in
             renderer.outlinedModelId = newId
             canvasVM.objectWillChange.send()
@@ -3202,18 +3203,12 @@ struct ElementsPanel: View {
         .glassPanel()
     }
 
-    private func sketchIcon(_ e: SketchController.Entity) -> String {
-        switch e {
-        case .circle: return "circle"
-        case .rect: return "rectangle"
-        case .spline: return "scribble.variable"
-        case .polygonEnt: return "pentagon"
-        case .polyline: return "line.diagonal"
-        }
+    private func sketchIcon(_ e: SketchCurve) -> String {
+        e.iconName
     }
 
     @ViewBuilder
-    private func sketchRow(index: Int, entity: SketchController.Entity) -> some View {
+    private func sketchRow(index: Int, entity: SketchCurve) -> some View {
         let isSelected = sketch.selectedEntityIndex == index
         HStack(spacing: AppTheme.space2) {
             Image(systemName: sketchIcon(entity))
@@ -3296,6 +3291,19 @@ struct SketchCanvasOverlay: View {
         // Capturado en body (MainActor): el closure de Canvas es no-aislado
         // y no puede llamar métodos de SketchController directamente.
         let plane = sketch.plane
+        let kernelModel = sketch.model
+        let curves = sketch.entities
+        let regionList = sketch.regions
+        let selectedID = sketch.selectedCurveID
+        let selRegion = sketch.selectedRegion
+        let marker = sketch.snapMarker
+        let guides = sketch.guideSegments
+        let draft = sketch.previewPolyline
+        let chainPts = sketch.chain
+        let splinePts = sketch.splineChain
+        let anchorPt = sketch.anchor
+        let previewPt = sketch.preview
+        let tool = sketch.activeTool
         return Canvas { ctx, size in
             let cam = canvasVM.scene.camera
             let aspect = Float(size.width / max(size.height, 1))
@@ -3396,107 +3404,99 @@ struct SketchCanvasOverlay: View {
                 ctx.stroke(grid, with: .color(steel.opacity(0.15)), lineWidth: 1)
             }
 
-            // ---- Entidades confirmadas (acero) con relleno de perfil + cotas permanentes ----
-            // La entidad seleccionada se pinta en brasa (ember) — feedback de edición.
-            for (entIndex, e) in sketch.entities.enumerated() {
-                let stroke = entIndex == sketch.selectedEntityIndex ? ember : steel
-                switch e {
-                case .polyline(let pts, let closed):
-                    if closed { fillPolyline(pts, color: ember.opacity(0.10)) }
-                    strokePolyline(pts, close: closed, color: stroke, width: 2)
-                    for p in pts { dot(p, color: stroke, r: 3) }
-                    // Cotas: longitud de cada lado en su punto medio (≤6 lados)
-                    if closed && pts.count >= 3 && pts.count <= 6 {
-                        for i in 0..<pts.count {
-                            let a = pts[i], b = pts[(i + 1) % pts.count]
-                            let mid = (a + b) * 0.5
-                            label(String(format: "%.2f", simd_distance(a, b)),
-                                  at: mid, color: steel)
-                        }
+            // ---- Guía punteada de inferencia (H/V, alineación, extensión) ----
+            func strokeDashed(_ a: SIMD2<Float>, _ b: SIMD2<Float>, color: Color) {
+                guard let s1 = proj(a), let s2 = proj(b) else { return }
+                var path = Path()
+                path.move(to: s1); path.addLine(to: s2)
+                ctx.stroke(path, with: .color(color),
+                           style: StrokeStyle(lineWidth: 1, dash: [6, 4]))
+            }
+
+            // ---- Regiones cerradas del kernel: sombreado "esto se extruye" ----
+            for region in regionList {
+                fillPolyline(region.polygon.map { $0.simd }, color: ember.opacity(0.10))
+            }
+            if let sel = selRegion {
+                fillPolyline(sel, color: ember.opacity(0.26))
+                strokePolyline(sel, close: true, color: ember, width: 2)
+            }
+
+            // ---- Curvas confirmadas (kernel): la seleccionada en brasa ----
+            for curve in curves {
+                guard let g = CurveGeometry.resolve(curve, in: kernelModel) else { continue }
+                let pts = g.discretize(maxDeviation: 2e-3).map { $0.simd }
+                let isSel = curve.id == selectedID
+                strokePolyline(pts, close: false,
+                               color: isSel ? ember : steel,
+                               width: isSel ? 3 : 2)
+                switch curve.kind {
+                case .line(let s, let e):
+                    if let a = kernelModel.position(of: s), let b = kernelModel.position(of: e) {
+                        label(String(format: "%.2f", a.distance(to: b)),
+                              at: ((a + b) * 0.5).simd, color: steel)
                     }
-                case .rect(let a, let b):
-                    let corners = [a, SIMD2(b.x, a.y), b, SIMD2(a.x, b.y)]
-                    fillPolyline(corners, color: ember.opacity(0.10))
-                    strokePolyline(corners, close: true, color: steel, width: 2)
-                    for p in corners { dot(p, color: steel, r: 3) }
-                    // Cota rect: "W×H" en el centro
-                    let center2D = (a + b) * 0.5
-                    label(String(format: "%.2f × %.2f", abs(b.x - a.x), abs(b.y - a.y)),
-                          at: center2D, color: steel)
                 case .circle(let c, let r):
-                    fillPolyline(circlePts(c, r), color: ember.opacity(0.10))
-                    strokePolyline(circlePts(c, r), close: true, color: steel, width: 2)
-                    dot(c, color: steel, r: 3)
-                    // Cota círculo: "R x.xx" junto al centro
-                    label(String(format: "R %.2f", r), at: c, color: steel)
-                case .spline(let pts):
-                    strokePolyline(smooth(pts), close: false, color: steel, width: 2)
-                    for p in pts { dot(p, color: steel, r: 3) }
-                case .polygonEnt(let c, let r, let sides):
-                    let verts = SketchController.Entity.polygonVerts(center: c, radius: r, sides: sides)
-                    fillPolyline(verts, color: ember.opacity(0.10))
-                    strokePolyline(verts, close: true, color: steel, width: 2)
-                    for p in verts { dot(p, color: steel, r: 3) }
-                    dot(c, color: steel, r: 2)
-                    // Cota central: "R x.xx · N lados"
-                    label(String(format: "R %.2f · %d lados", r, sides), at: c, color: steel)
-                    // Cotas laterales: longitud de cada lado (≤6 lados)
-                    if sides <= 6 {
-                        for i in 0..<sides {
-                            let pa = verts[i], pb = verts[(i + 1) % sides]
-                            let mid = (pa + pb) * 0.5
-                            label(String(format: "%.2f", simd_distance(pa, pb)),
-                                  at: mid, color: steel)
-                        }
+                    if let cp = kernelModel.position(of: c) {
+                        label(String(format: "R %.2f", r), at: cp.simd, color: steel)
                     }
+                case .arc, .spline:
+                    break
                 }
             }
 
-            // Spline en curso (puntos de control + curva viva en brasa)
-            if sketch.splineChain.count >= 2 {
-                var livePts = sketch.splineChain
-                if let pv = sketch.preview { livePts.append(pv) }
-                strokePolyline(smooth(livePts), close: false, color: ember, width: 2.5)
+            // ---- Puntos topológicos: visibles y tocables (Fase 1 §6) ----
+            for (_, pos) in kernelModel.positions {
+                dot(pos.simd, color: steel, r: 3)
             }
-            for p in sketch.splineChain { dot(p, color: ember) }
 
-            // ---- Cadena en curso + trazo vivo (brasa) con COTAS ----
-            if sketch.chain.count >= 2 {
-                strokePolyline(sketch.chain, close: false, color: ember, width: 2.5)
+            // ---- Guías activas ----
+            for seg in guides {
+                strokeDashed(seg.a, seg.b, color: Color.cyan.opacity(0.7))
             }
-            for p in sketch.chain { dot(p, color: ember) }
-            if let a = sketch.anchor { dot(a, color: ember) }
 
-            if let pv = sketch.preview {
-                let from: SIMD2<Float>? = sketch.chain.last ?? sketch.anchor
+            // ---- Marcador de snap: en qué te enganchaste ----
+            if let m = marker, let s = proj(m.position) {
+                let col: Color
+                switch m.kind {
+                case .endpoint: col = .orange
+                case .intersection: col = .yellow
+                case .midpoint: col = .green
+                case .center, .quadrant: col = .cyan
+                default: col = .white
+                }
+                let r: CGFloat = 7
+                let rect = CGRect(x: s.x - r, y: s.y - r, width: r * 2, height: r * 2)
+                ctx.stroke(Path(ellipseIn: rect), with: .color(col), lineWidth: 2)
+            }
+
+            // ---- Figura en curso (brasa): sigue el dedo con snap ----
+            if draft.count >= 2 {
+                strokePolyline(draft, close: false, color: ember, width: 2.5)
+            }
+            if splinePts.count >= 2 {
+                var live = splinePts
+                if let pv = previewPt { live.append(pv) }
+                strokePolyline(smooth(live), close: false, color: ember, width: 2.5)
+            }
+            for p in splinePts { dot(p, color: ember) }
+            for p in chainPts { dot(p, color: ember) }
+            if let a = anchorPt { dot(a, color: ember) }
+            if let pv = previewPt {
+                let from: SIMD2<Float>? = chainPts.last ?? anchorPt
                 if let f = from, simd_distance(f, pv) > 1e-4 {
-                    switch sketch.activeTool {
-                    case .line:
+                    switch tool {
+                    case .line, .arc:
                         strokePolyline([f, pv], close: false, color: ember, width: 2.5)
                         label(String(format: "%.2f", simd_distance(f, pv)),
                               at: (f + pv) * 0.5)
                     case .rectangle:
-                        let corners = [f, SIMD2(pv.x, f.y), pv, SIMD2(f.x, pv.y)]
-                        strokePolyline(corners, close: true, color: ember, width: 2.5)
                         label(String(format: "%.2f × %.2f",
                                      abs(pv.x - f.x), abs(pv.y - f.y)),
                               at: (f + pv) * 0.5)
-                    case .circle:
-                        let r = simd_distance(f, pv)
-                        strokePolyline(circlePts(f, r), close: true,
-                                       color: ember, width: 2.5)
-                        strokePolyline([f, pv], close: false,
-                                       color: ember.opacity(0.4), width: 1)
-                        label(String(format: "R %.2f", r), at: pv)
-                    case .polygon:
-                        let r = simd_distance(f, pv)
-                        let polyVerts = SketchController.Entity.polygonVerts(
-                            center: f, radius: r, sides: sketch.polygonSides)
-                        fillPolyline(polyVerts, color: ember.opacity(0.10))
-                        strokePolyline(polyVerts, close: true, color: ember, width: 2.5)
-                        label(String(format: "R %.2f · %d lados", r, sketch.polygonSides),
-                              at: pv)
-                    default:
+                    case .circle, .polygon:
+                        label(String(format: "R %.2f", simd_distance(f, pv)), at: pv)
+                    case .spline:
                         break
                     }
                     dot(pv, color: ember)

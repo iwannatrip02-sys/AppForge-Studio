@@ -103,6 +103,7 @@ targets:
     dependencies:
       - target: AppForgeStudio
       - package: OCCTSwift
+      - package: SketchKernel
 
   # Ola GestureProbe (carril G-A): runner XCUITest que sintetiza gestos REALES
   # del sistema (tap/drag/2-dedos/pinch) sobre la UI real y modela un engranaje.
