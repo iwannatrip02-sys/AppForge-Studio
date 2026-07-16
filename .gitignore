@@ -47,3 +47,4 @@ docs/design/moodboard/
 # Evidencia local de CI (descargas de artifacts, no se versionan)
 ci-ipa/
 ui-probe-evidence/
+artifacts/
