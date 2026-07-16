@@ -44,11 +44,17 @@ final class SketchRegionSelectTests: XCTestCase {
         s.tap(at: SIMD2(3, 3))
         XCTAssertEqual(s.regions.count, 2)
 
-        let verts = s.region(at: SIMD2(0.1, 0.1))
-        XCTAssertNotNil(verts)
-        // El polígono del círculo tiene muchos vértices pero área ~π
-        let area = zip(verts!, verts!.dropFirst() + [verts![0]])
-            .reduce(Float(0)) { $0 + ($1.0.x * $1.1.y - $1.1.x * $1.0.y) } / 2
+        guard let verts = s.region(at: SIMD2(0.1, 0.1)) else {
+            return XCTFail("sin región bajo el toque")
+        }
+        // El polígono del círculo tiene muchos vértices pero área ~π (shoelace)
+        var area: Float = 0
+        for i in 0..<verts.count {
+            let a = verts[i]
+            let b = verts[(i + 1) % verts.count]
+            area += a.x * b.y - b.x * a.y
+        }
+        area /= 2
         XCTAssertEqual(abs(area), .pi, accuracy: 0.1,
                        "tocar dentro del círculo elige el círculo, no el rect")
     }
