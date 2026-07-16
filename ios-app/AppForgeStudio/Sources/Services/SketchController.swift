@@ -51,8 +51,51 @@ final class SketchController: ObservableObject {
     private let snapEngine = SketchKernel.SnapEngine()
     private let hitTester = HitTester()
 
-    /// Radio de snap en unidades del plano. La UI puede reducirlo con Pencil.
+    /// Radio de snap FALLBACK en unidades del plano (si aún no hay escala de
+    /// zoom conocida). El radio REAL de trabajo es `snapRadiusPlane`, que se
+    /// deriva de `unitsPerPoint` (adaptativo al zoom) — beta 2026-07-16b: el
+    /// radio fijo "agarraba un poco" porque no se adaptaba al zoom.
     static let snapRadius: Float = 0.14
+
+    // MARK: - Escala adaptativa al zoom (beta 2026-07-16b)
+
+    /// Unidades de plano por PUNTO de pantalla. La calcula CADModeView
+    /// proyectando `plane.origin` y `plane.origin + plane.u` con las MISMAS
+    /// matrices que usa SketchCanvasOverlay.proj. A más zoom → menor valor.
+    @Published var unitsPerPoint: Float = 0.01
+
+    /// Radio de snap del DEDO en unidades de plano, adaptado al zoom: ~22 pt de
+    /// pantalla siempre (con zoom lejano agarra desde más lejos en el plano; con
+    /// zoom cercano exige más precisión). Sustituye a `Self.snapRadius` fijo.
+    var snapRadiusPlane: Float {
+        max(1e-4, 22 * unitsPerPoint)
+    }
+
+    /// Paso de siembra de la spline con Pencil, adaptado al zoom (~8 pt).
+    private var splineSeedStep: Float {
+        max(1e-4, 8 * unitsPerPoint)
+    }
+
+    /// Paso "bonito" de rejilla (1/2/5 × 10^n) tal que la celda mida ~60 pt.
+    /// Lo usa el snap a rejilla y el dibujo de la grilla (CADModeView).
+    var adaptiveGridStep: Double {
+        Self.niceNumber(Double(60 * unitsPerPoint))
+    }
+
+    /// Redondeo a la escala "bonita" 1/2/5·10^n más cercana por arriba — la
+    /// misma progresión de reglas y planos CAD.
+    static func niceNumber(_ raw: Double) -> Double {
+        guard raw > 1e-12 else { return 1 }
+        let exp = floor(log10(raw))
+        let base = pow(10.0, exp)
+        let frac = raw / base
+        let nice: Double
+        if frac <= 1.5 { nice = 1 }
+        else if frac <= 3.5 { nice = 2 }
+        else if frac <= 7.5 { nice = 5 }
+        else { nice = 10 }
+        return nice * base
+    }
 
     // MARK: - Estado de dibujo en curso
 
@@ -61,6 +104,10 @@ final class SketchController: ObservableObject {
     private(set) var chainLast: Vec2? = nil
     private(set) var chainStart: Vec2? = nil
     private(set) var chainCount: Int = 0
+    /// PointID topológico del primer punto de la cadena (para cerrar robusto:
+    /// si el snap engancha ESE punto, cerramos aunque el radio no dé — beta
+    /// 2026-07-16b: "cerrar cadena flojo").
+    private var chainStartPoint: PointID? = nil
     /// Ancla del gesto de 2 taps (rect: esquina A; círculo/polígono: centro;
     /// arco: centro→inicio→fin usa además `arcStart`).
     @Published private(set) var anchor: SIMD2<Float>? = nil
@@ -82,7 +129,18 @@ final class SketchController: ObservableObject {
     @Published var preview: SIMD2<Float>? = nil
 
     @Published private(set) var statusMessage = ""
-    @Published var activeTool: Tool = .line
+
+    /// Herramienta ARMADA (beta 2026-07-16b: paradigma Shapr3D). `nil` = estado
+    /// NEUTRAL: tocar selecciona/mueve, no dibuja. Al confirmar una figura
+    /// cerrada se vuelve a neutral (auto-neutral) — el flujo natural es
+    /// dibujar → tocar el área → extruir.
+    @Published var armedTool: Tool? = nil
+
+    /// Alias de compat: mucho código de UI/render lee `activeTool`. Devuelve la
+    /// armada, o `.line` como neutro visual cuando no hay ninguna (el render de
+    /// preview solo se usa si hay borrador, así que el valor neutro es inocuo).
+    var activeTool: Tool { armedTool ?? .line }
+
     @Published var polygonSides: Int = 6
 
     /// Bump en cada mutación del modelo — CADModeView reconstruye overlays.
@@ -90,8 +148,22 @@ final class SketchController: ObservableObject {
 
     // MARK: - Selección
 
-    /// Curva seleccionada (tocar un trazo lo selecciona — Fase 1 §4).
-    @Published var selectedCurveID: CurveID? = nil
+    /// Selección MÚLTIPLE de trazos (beta 2026-07-16b: en neutral, cada tap
+    /// añade/quita del conjunto — como Shapr3D sin botón de seleccionar).
+    @Published var selectedCurveIDs: Set<CurveID> = []
+
+    /// Compat: el panel de Elementos y el render leen un solo `selectedCurveID`.
+    /// Es el PRIMERO del conjunto (orden de dibujo). Asignarlo reemplaza el set.
+    var selectedCurveID: CurveID? {
+        get {
+            model.curveOrder.first(where: { selectedCurveIDs.contains($0) })
+        }
+        set {
+            if let id = newValue { selectedCurveIDs = [id] }
+            else { selectedCurveIDs = [] }
+        }
+    }
+
     /// Vértices de la región cerrada seleccionada por tap (nil = ninguna).
     @Published private(set) var selectedRegion: [SIMD2<Float>]? = nil
 
@@ -141,10 +213,13 @@ final class SketchController: ObservableObject {
     @discardableResult
     private func snap(_ raw: SIMD2<Float>, reference: Vec2? = nil,
                       excludePoints: Set<PointID> = []) -> SnapResult {
+        // Radio adaptativo al zoom + snap a rejilla adaptativa activo (el kernel
+        // le da PRIORIDAD MÍNIMA: los puntos duros ganan a la rejilla).
         let ctx = SnapContext(cursor: Vec2(raw),
-                              radius: Double(Self.snapRadius),
+                              radius: Double(snapRadiusPlane),
                               referencePoint: reference,
-                              excludedPoints: excludePoints)
+                              excludedPoints: excludePoints,
+                              gridSpacing: adaptiveGridStep)
         let result = snapEngine.snap(ctx, in: model)
         publishFeedback(result)
         return result
@@ -195,19 +270,28 @@ final class SketchController: ObservableObject {
 
     // MARK: - Herramientas (taps)
 
-    /// Selecciona herramienta EMPEZANDO LIMPIO (bug de device: sin esto una
-    /// línea nueva continuaba desde el punto anterior).
+    /// ARMA la herramienta EMPEZANDO LIMPIO (bug de device: sin esto una línea
+    /// nueva continuaba desde el punto anterior).
     func beginTool(_ tool: Tool) {
         cancelDrafts()
-        activeTool = tool
+        armedTool = tool
+        statusMessage = ""
+    }
+
+    /// Vuelve al estado NEUTRAL (sin herramienta armada): tocar selecciona/mueve,
+    /// no dibuja. Cancela cualquier borrador en curso.
+    func disarm() {
+        cancelDrafts()
+        armedTool = nil
         statusMessage = ""
     }
 
     private func cancelDrafts() {
         chainLast = nil; chainStart = nil; chainCount = 0
+        chainStartPoint = nil
         anchor = nil; arcStart = nil
         splineDraft = []
-        selectedCurveID = nil
+        selectedCurveIDs = []
         draggedPoint = nil
         clearFeedback()
     }
@@ -221,42 +305,18 @@ final class SketchController: ObservableObject {
     var isDrawingInProgress: Bool { isDrafting }
 
     func tap(at raw: SIMD2<Float>) {
-        // Sin dibujo en curso: tocar un trazo/punto existente lo SELECCIONA;
-        // tocar dentro de una región la selecciona (drag desde adentro extruye).
-        // El radio de punto es ESTRECHO para no robar el inicio de una figura.
-        if !isDrafting {
-            let hit = hitTester.hitTest(at: Vec2(raw), in: model,
-                                        pointRadius: Double(Self.snapRadius) * 0.8,
-                                        curveRadius: Double(Self.snapRadius) * 0.6,
-                                        regions: regions)
-            switch hit {
-            case .curve(let id, _):
-                selectedCurveID = id
-                selectedRegion = nil
-                statusMessage = "Trazo seleccionado — edita o elimina"
-                clearFeedback()
-                return
-            case .region(let region):
-                selectedRegion = region.polygon.map { $0.simd }
-                selectedCurveID = nil
-                statusMessage = "Región seleccionada — arrastra desde adentro para extruir"
-                clearFeedback()
-                return
-            case .point, .none:
-                // Un punto bajo el dedo NO selecciona al dibujar: es target de
-                // snap para seguir construyendo (dibujar tiene prioridad).
-                break
-            }
-            if selectedCurveID != nil || selectedRegion != nil {
-                // Tap en vacío deselecciona
-                selectedCurveID = nil
-                selectedRegion = nil
-                statusMessage = ""
-                return
-            }
+        // ESTADO NEUTRAL (sin herramienta armada): tocar selecciona/mueve, no
+        // dibuja. Paradigma Shapr3D — sin botón de seleccionar (beta
+        // 2026-07-16b). El hit-test completo decide qué se tocó.
+        guard let tool = armedTool else {
+            neutralTap(raw)
+            return
         }
 
-        switch activeTool {
+        // ESTADO ARMADO: el tap SIEMPRE dibuja (nada de robar el gesto para
+        // seleccionar). El snap del kernel arranca EXACTO desde un punto
+        // existente si estás cerca — así B→C funciona y A→B queda intacta.
+        switch tool {
         case .line: tapLine(raw)
         case .rectangle: tapRectangle(raw)
         case .circle: tapCircle(raw)
@@ -267,20 +327,65 @@ final class SketchController: ObservableObject {
         preview = nil
     }
 
+    /// Tap en NEUTRAL: hit-test completo → punto (selecciona/arrastrable),
+    /// trazo (selección múltiple: añade/quita del set), región (selecciona),
+    /// vacío (deselecciona todo). Radio adaptativo al zoom.
+    private func neutralTap(_ raw: SIMD2<Float>) {
+        let r = Double(snapRadiusPlane)
+        let hit = hitTester.hitTest(at: Vec2(raw), in: model,
+                                    pointRadius: r,
+                                    curveRadius: r * 0.8,
+                                    regions: regions)
+        switch hit {
+        case .curve(let id, _):
+            // Selección MULTI: tap añade/quita del conjunto (toggle).
+            if selectedCurveIDs.contains(id) {
+                selectedCurveIDs.remove(id)
+            } else {
+                selectedCurveIDs.insert(id)
+            }
+            selectedRegion = nil
+            statusMessage = selectedCurveIDs.isEmpty
+                ? ""
+                : "\(selectedCurveIDs.count) trazo(s) — edita o elimina"
+            clearFeedback()
+        case .point:
+            // Un punto seleccionado queda listo para arrastrar (el drag lo mueve).
+            selectedRegion = nil
+            statusMessage = "Punto seleccionado — arrástralo para moverlo"
+            clearFeedback()
+        case .region(let region):
+            selectedRegion = region.polygon.map { $0.simd }
+            selectedCurveIDs = []
+            statusMessage = "Región seleccionada — arrastra desde adentro para extruir"
+            clearFeedback()
+        case .none:
+            // Tap en vacío deselecciona todo.
+            selectedCurveIDs = []
+            selectedRegion = nil
+            statusMessage = ""
+            clearFeedback()
+        }
+    }
+
     private func tapLine(_ raw: SIMD2<Float>) {
         let s = snap(raw, reference: chainLast)
         let p = s.position
 
-        if let start = chainStart, chainCount >= 2,
-           p.distance(to: start) < Double(Self.snapRadius) {
-            // Tap sobre el primer punto = CERRAR el perfil
-            if let last = chainLast {
-                mutate { $0.addLine(from: last, to: start) }
+        if let start = chainStart, chainCount >= 2 {
+            // CERRAR robusto: el snap enganchó el PUNTO inicial (pointID) o el
+            // cursor cayó dentro del radio dinámico (beta 2026-07-16b: antes el
+            // radio fijo hacía "cerrar cadena flojo").
+            let hitStartPoint = (chainStartPoint != nil && s.pointID == chainStartPoint)
+            let withinRadius = p.distance(to: start) < Double(snapRadiusPlane)
+            if hitStartPoint || withinRadius {
+                if let last = chainLast {
+                    mutate { $0.addLine(from: last, to: start) }
+                }
+                endChain()
+                statusMessage = "Perfil cerrado ✓ — tócalo y arrastra para extruir"
+                return
             }
-            chainLast = nil; chainStart = nil; chainCount = 0
-            clearFeedback()
-            statusMessage = "Perfil cerrado ✓ — tócalo y arrastra para extruir"
-            return
         }
 
         if let last = chainLast {
@@ -288,13 +393,31 @@ final class SketchController: ObservableObject {
             mutate { $0.addLine(from: last, to: p) }
             chainCount += 1
             chainLast = p
+            // El punto de arranque ya EXISTE en el modelo tras el primer
+            // segmento: capturamos su pointID para cerrar por identidad
+            // topológica (más robusto que sólo por distancia).
+            if chainStartPoint == nil, let start = chainStart {
+                chainStartPoint = model.existingPoint(near: start, tolerance: Double(snapRadiusPlane) * 0.5)
+            }
             statusMessage = "\(chainCount + 1) puntos · toca el primero para cerrar"
         } else {
             chainStart = p
             chainLast = p
             chainCount = 0
+            // Si arrancamos ENGANCHADOS a un punto existente (topología), ya
+            // tenemos su id; si no, lo tomaremos tras el primer segmento.
+            chainStartPoint = s.pointID
             statusMessage = "Sigue tocando; toca el primer punto para cerrar"
         }
+    }
+
+    /// Termina la cadena en curso → estado NEUTRAL (auto-neutral: cerrar un
+    /// perfil devuelve al usuario a tocar/extruir sin herramienta armada).
+    private func endChain() {
+        chainLast = nil; chainStart = nil; chainCount = 0
+        chainStartPoint = nil
+        armedTool = nil
+        clearFeedback()
     }
 
     private func tapRectangle(_ raw: SIMD2<Float>) {
@@ -303,6 +426,7 @@ final class SketchController: ObservableObject {
             commitRectangle(from: Vec2(a), to: p)
             anchor = nil
             clearFeedback()
+            armedTool = nil   // auto-neutral: figura cerrada confirmada
         } else {
             anchor = p.simd
             statusMessage = "Toca la esquina opuesta"
@@ -336,6 +460,7 @@ final class SketchController: ObservableObject {
             }
             anchor = nil
             clearFeedback()
+            armedTool = nil   // auto-neutral: figura cerrada confirmada
         } else {
             anchor = p.simd
             statusMessage = "Toca un punto del radio"
@@ -364,12 +489,23 @@ final class SketchController: ObservableObject {
     private func tapSpline(_ raw: SIMD2<Float>) {
         let p = snap(raw, reference: splineDraft.last.map { Vec2($0) }).position
         splineDraft.append(p.simd)
+        // La curva se VE crecer tap a tap: muestrea la spline del borrador con el
+        // MISMO evaluador que usará al confirmar (beta 2026-07-16b: antes solo se
+        // veían los puntos y parecía una recta).
+        refreshSplinePreview()
         statusMessage = splineDraft.count < 2
             ? "Sigue añadiendo puntos"
             : "\(splineDraft.count) puntos · «Fin spline» para confirmar"
     }
 
-    /// Confirma la spline en curso.
+    /// Recalcula `previewPolyline` a partir del borrador de spline actual.
+    private func refreshSplinePreview() {
+        guard splineDraft.count >= 2 else { previewPolyline = []; return }
+        let pts = splineDraft.map { Vec2($0) }
+        previewPolyline = SplineEvaluator.sample(points: pts, mode: splineMode).map { $0.simd }
+    }
+
+    /// Confirma la spline en curso → estado NEUTRAL (auto-neutral).
     func finishSpline() {
         guard splineDraft.count >= 2 else { return }
         let pts = splineDraft.map { Vec2($0) }
@@ -377,6 +513,7 @@ final class SketchController: ObservableObject {
         mutate { $0.addSpline(through: pts, mode: mode) }
         splineDraft = []
         clearFeedback()
+        armedTool = nil   // auto-neutral: la spline terminada devuelve a neutral
         statusMessage = "Spline ✓ — tócala para editar sus puntos"
     }
 
@@ -387,6 +524,7 @@ final class SketchController: ObservableObject {
             if r > 1e-3 { commitPolygon(center: c, radius: r) }
             anchor = nil
             clearFeedback()
+            armedTool = nil   // auto-neutral: figura cerrada confirmada
         } else {
             anchor = p.simd
             statusMessage = "Toca un vértice del radio"
@@ -412,7 +550,10 @@ final class SketchController: ObservableObject {
     // MARK: - Trazo por drag (dedo o Pencil): figura en vivo con snap
 
     func pencilDragBegan(at raw: SIMD2<Float>) {
-        if activeTool == .spline {
+        // Solo dibuja si hay herramienta armada (en neutral el drag se enruta a
+        // mover-punto/región desde CADModeView, no aquí).
+        guard let tool = armedTool else { return }
+        if tool == .spline {
             let p = snap(raw).position
             splineDraft = [p.simd]
             preview = p.simd
@@ -424,14 +565,19 @@ final class SketchController: ObservableObject {
     }
 
     func pencilDragChanged(to raw: SIMD2<Float>) {
-        if activeTool == .spline {
-            // El trazo siembra puntos cada ~0.35 (fluido con Pencil)
+        guard let tool = armedTool else { return }
+        if tool == .spline {
+            // El trazo siembra puntos cada `splineSeedStep` (adaptativo al zoom:
+            // beta 2026-07-16b — con paso fijo 0.35 salían 2 puntos y parecía
+            // una recta).
             if let last = splineDraft.last,
-               simd_distance(last, raw) > 0.35 {
+               simd_distance(last, raw) > splineSeedStep {
                 splineDraft.append(raw)
             }
             preview = raw
-            previewPolyline = splineDraft + [raw]
+            previewPolyline = SplineEvaluator.sample(
+                points: (splineDraft + [raw]).map { Vec2($0) }, mode: splineMode
+            ).map { $0.simd }
             return
         }
         guard let a = anchor.map({ Vec2($0) }) else { return }
@@ -441,34 +587,51 @@ final class SketchController: ObservableObject {
     }
 
     func pencilDragEnded(at raw: SIMD2<Float>) {
-        if activeTool == .spline {
+        guard let tool = armedTool else { return }
+        if tool == .spline {
             splineDraft.append(raw)
-            finishSpline()   // el trazo ES la spline
+            finishSpline()   // el trazo ES la spline (finishSpline hace auto-neutral)
             return
         }
         guard let a = anchor.map({ Vec2($0) }) else { return }
         let end = snap(raw, reference: a).position
-        switch activeTool {
+        switch tool {
         case .line:
             if end.distance(to: a) > 1e-6 {
                 mutate { $0.addLine(from: a, to: end) }
-                // El drag continúa la cadena: siguiente segmento desde el fin
-                if chainStart == nil { chainStart = a }
+                // El drag continúa la cadena: siguiente segmento desde el fin.
+                // La línea NO hace auto-neutral: sigue armada hasta cerrar.
+                if chainStart == nil {
+                    chainStart = a
+                    chainStartPoint = model.existingPoint(near: a, tolerance: Double(snapRadiusPlane) * 0.5)
+                }
                 chainLast = end
                 chainCount += 1
                 statusMessage = "Sigue con más segmentos o toca el primero para cerrar"
             }
         case .rectangle:
             commitRectangle(from: a, to: end)
+            anchor = nil
+            clearFeedback()
+            armedTool = nil   // auto-neutral
+            return
         case .circle:
             let r = end.distance(to: a)
             if r > 1e-3 {
                 mutate { $0.addCircle(center: a, radius: r) }
                 statusMessage = "Círculo ✓ — tócalo y arrastra para extruir"
             }
+            anchor = nil
+            clearFeedback()
+            armedTool = nil   // auto-neutral
+            return
         case .polygon:
             let r = end.distance(to: a)
             if r > 1e-3 { commitPolygon(center: a, radius: r) }
+            anchor = nil
+            clearFeedback()
+            armedTool = nil   // auto-neutral
+            return
         case .arc:
             // Drag de arco: ancla = centro, fin del drag = inicio; el fin llega
             // con un tap posterior (flujo centro→inicio→fin).
@@ -522,7 +685,7 @@ final class SketchController: ObservableObject {
     @discardableResult
     func beginDrag(near raw: SIMD2<Float>) -> Bool {
         guard let pid = model.existingPoint(near: Vec2(raw),
-                                            tolerance: Double(Self.snapRadius) * 2) else {
+                                            tolerance: Double(snapRadiusPlane)) else {
             return false
         }
         undoStack.append(model)   // un snapshot por gesto, no por frame
@@ -580,10 +743,10 @@ final class SketchController: ObservableObject {
             if let prev = undoStack.popLast() {
                 model = prev
                 chainCount = max(0, chainCount - 1)
-                if chainCount == 0 { chainLast = nil; chainStart = nil }
+                if chainCount == 0 { chainLast = nil; chainStart = nil; chainStartPoint = nil }
                 modelDidChange()
             } else {
-                chainLast = nil; chainStart = nil; chainCount = 0
+                chainLast = nil; chainStart = nil; chainCount = 0; chainStartPoint = nil
             }
             return
         }
@@ -613,8 +776,8 @@ final class SketchController: ObservableObject {
     @discardableResult
     func selectEntity(near p: SIMD2<Float>, centersOnly: Bool = false) -> Bool {
         let hit = hitTester.hitTest(at: Vec2(p), in: model,
-                                    pointRadius: Double(Self.snapRadius),
-                                    curveRadius: Double(Self.snapRadius),
+                                    pointRadius: Double(snapRadiusPlane),
+                                    curveRadius: Double(snapRadiusPlane),
                                     regions: [])
         if case .curve(let id, _) = hit {
             selectedCurveID = id
@@ -628,16 +791,20 @@ final class SketchController: ObservableObject {
     func deselectEntity() { selectedCurveID = nil }
 
     func deleteEntity(at index: Int? = nil) {
-        let id: CurveID?
+        // Con índice explícito: borra ese trazo. Sin índice: borra TODO el
+        // conjunto seleccionado (selección múltiple en neutral).
         if let i = index, i >= 0, i < model.curveOrder.count {
-            id = model.curveOrder[i]
-        } else {
-            id = selectedCurveID
+            let target = model.curveOrder[i]
+            mutate { $0.removeCurve(target) }
+            selectedCurveIDs.remove(target)
+            statusMessage = "Trazo eliminado"
+            return
         }
-        guard let target = id else { return }
-        mutate { $0.removeCurve(target) }
-        selectedCurveID = nil
-        statusMessage = "Trazo eliminado"
+        let targets = selectedCurveIDs
+        guard !targets.isEmpty else { return }
+        mutate { m in for t in targets { m.removeCurve(t) } }
+        selectedCurveIDs = []
+        statusMessage = targets.count > 1 ? "\(targets.count) trazos eliminados" : "Trazo eliminado"
     }
 
     func selectEntity(at index: Int) {

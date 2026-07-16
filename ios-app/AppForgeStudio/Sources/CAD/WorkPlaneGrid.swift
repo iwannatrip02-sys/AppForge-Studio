@@ -124,7 +124,14 @@ extension Model {
     static func workPlaneGrid(name: String = "__workPlaneGrid",
                                plane: SketchController.WorkPlane,
                                step: Float = 10) -> Model {
-        let grid = WorkPlaneGrid(majorStep: step, minorStep: 1)
+        // Paso ADAPTATIVO al zoom (beta 2026-07-16b): `step` es la celda menor
+        // "bonita" (~60 pt); la mayor es 5×, y la extensión ±10 celdas mayores.
+        // Así la grilla se ve con densidad constante a cualquier zoom (antes:
+        // paso fijo 1, densísima al alejar).
+        let minor = max(step, 1e-4)
+        let major = minor * 5
+        let extent = major * 20
+        let grid = WorkPlaneGrid(extent: extent, majorStep: major, minorStep: minor)
         let mesh = grid.generate(in: plane)
         let model = Model(name: name)
         model.meshes = [mesh]

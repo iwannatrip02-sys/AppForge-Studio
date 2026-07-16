@@ -18,7 +18,7 @@ final class SketchRegionExtrudeTests: XCTestCase {
     /// Dibuja un rectángulo cerrado W×H (dos taps) en un SketchController limpio.
     private func makeRectSketch(width w: Float, height h: Float) -> SketchController {
         let s = SketchController()
-        s.activeTool = .rectangle
+        s.beginTool(.rectangle)
         s.tap(at: SIMD2<Float>(0, 0))
         s.tap(at: SIMD2<Float>(w, h))
         return s
@@ -52,7 +52,7 @@ final class SketchRegionExtrudeTests: XCTestCase {
     func testExtrudeActiveRegionNilWithoutClosedRegion() {
         // Sketch abierto (una sola línea): no hay región cerrada → nil, sin geometría falsa.
         let s = SketchController()
-        s.activeTool = .line
+        s.beginTool(.line)
         s.tap(at: SIMD2<Float>(0, 0))
         s.tap(at: SIMD2<Float>(3, 0))
         XCTAssertFalse(s.hasClosedProfile)
@@ -86,7 +86,7 @@ final class SketchRegionExtrudeTests: XCTestCase {
     func testActiveRegionProfileNilForOpenSketch() {
         // Sketch abierto → sin perfil planar (nil honesto, no cara degenerada).
         let s = SketchController()
-        s.activeTool = .line
+        s.beginTool(.line)
         s.tap(at: SIMD2<Float>(0, 0))
         s.tap(at: SIMD2<Float>(3, 0))
         XCTAssertNil(s.activeRegionProfile(),

@@ -123,6 +123,8 @@ struct CADModeView: View {
     /// Drag de REGIÓN de sketch activo (extruir por arrastre — LA mecánica).
     @State private var regionDrag: (verts: [SIMD2<Float>], start: SIMD2<Float>)? = nil
     @State private var regionDragHeight: Double = 0
+    /// Tamaño del viewport (para la escala adaptativa al zoom del sketch).
+    @State private var viewportSize: CGSize = .zero
     /// Altura de extrusión del perfil de sketch (editable).
     @State private var sketchExtrudeHeight: Double = 1.0
     /// Panel de Elementos visible (anatomía Shapr3D).
@@ -255,9 +257,16 @@ struct CADModeView: View {
 
         guard isSketchTool else { return }
 
-        // Grid del plano de trabajo activo
+        // Mantener la escala del sketch al día antes de reconstruir (el paso de
+        // rejilla adaptativo depende de `unitsPerPoint`).
+        updateUnitsPerPoint()
+
+        // Grid del plano de trabajo activo. El paso ya NO lo manda
+        // `projectSettings.config.gridStep` (queda como preferencia futura):
+        // usa el paso "bonito" adaptativo al zoom para que la celda mida ~60 pt
+        // (beta 2026-07-16b: "la grilla no escala con el zoom").
         let gridModel = Model.workPlaneGrid(plane: sketch.plane,
-                                             step: Float(projectSettings.config.gridStep))
+                                             step: Float(sketch.adaptiveGridStep))
         gridModel.name = "__workPlaneGrid"
         canvasVM.scene.addModel(gridModel)
 
@@ -278,6 +287,40 @@ struct CADModeView: View {
         }
 
         canvasVM.objectWillChange.send()
+    }
+
+    /// Recalcula `sketch.unitsPerPoint` (unidades de plano por punto de pantalla)
+    /// proyectando `origin` y `origin + u` del plano con las MISMAS matrices que
+    /// usa SketchCanvasOverlay.proj — así el snap, la grilla y la siembra de
+    /// spline escalan con el zoom (beta 2026-07-16b). Se llama al reconstruir
+    /// overlays y en cada cambio de cámara (zoom/orbit/pan).
+    private func updateUnitsPerPoint() {
+        let size = viewportSize == .zero
+            ? UIScreen.main.bounds.size   // aproximación antes del primer layout
+            : viewportSize
+        guard size.width > 1, size.height > 1 else { return }
+        let vm = canvasVM.viewMatrix
+        let pm = canvasVM.projectionMatrix(for: size)
+
+        func project(_ w: SIMD3<Float>) -> CGPoint? {
+            let clip = pm * (vm * SIMD4<Float>(w.x, w.y, w.z, 1))
+            guard clip.w > 0.001 else { return nil }
+            return CGPoint(x: CGFloat((clip.x / clip.w + 1) * 0.5) * size.width,
+                           y: CGFloat((1 - clip.y / clip.w) * 0.5) * size.height)
+        }
+
+        let plane = sketch.plane
+        guard let a = project(plane.origin),
+              let b = project(plane.origin + plane.u) else { return }
+        let dx = a.x - b.x, dy = a.y - b.y
+        let distPoints = Float((dx * dx + dy * dy).squareRoot())
+        guard distPoints > 1e-3 else { return }
+        // |u| = 1 unidad de plano ocupa `distPoints` puntos → unidades/punto.
+        let upp = 1 / distPoints
+        // Evita re-publicar (y re-render) por ruido de subpíxel.
+        if abs(upp - sketch.unitsPerPoint) > sketch.unitsPerPoint * 0.02 {
+            sketch.unitsPerPoint = upp
+        }
     }
 
     private var isSketchTool: Bool {
@@ -514,45 +557,41 @@ struct CADModeView: View {
                         sketchInputEnabled: isSketchTool,
                         onSketchTap: { p in
                             HapticService.shared.light()
-                            // LA mecánica Shapr3D (device 2026-07-13): tap DENTRO
-                            // de una región cerrada la SELECCIONA — antes seguía
-                            // encadenando geometría encima de la figura.
-                            let dPoint = sketch.nearestEditablePointDistance(to: p)
-                                ?? .greatestFiniteMagnitude
-                            if !sketch.isDrawingInProgress,
-                               dPoint > SketchController.snapRadius * 0.8,
-                               sketch.selectRegion(at: p) {
-                                HapticService.shared.medium()
-                                return
-                            }
+                            // El controlador decide: ARMADO dibuja, NEUTRAL
+                            // selecciona (trazo/región/punto) o deselecciona
+                            // (paradigma Shapr3D sin botón de seleccionar, beta
+                            // 2026-07-16b). Ya no se roba el tap aquí.
                             sketch.tap(at: p)
                         },
                         onSketchDragBegan: { p in
                             regionDrag = nil
+                            // ARMADO: el drag SIEMPRE dibuja. Nada de secuestrar
+                            // el gesto para mover un punto (bug crítico beta
+                            // 2026-07-16b: trazar A→B y arrastrar desde B movía B
+                            // en vez de crear B→C). El snap del kernel arranca
+                            // EXACTO desde B si estás cerca → B→C funciona y A→B
+                            // queda intacta.
+                            if sketch.armedTool != nil {
+                                sketch.pencilDragBegan(at: p)
+                                return
+                            }
+                            // NEUTRAL: 1) punto cerca → ajuste fino (mover punto).
                             let dPoint = sketch.nearestEditablePointDistance(to: p)
                                 ?? .greatestFiniteMagnitude
-                            // 1) Punto MUY cerca → ajuste fino (radio estrecho: antes
-                            //    el centro del círculo robaba el drag de toda el área
-                            //    y "picarlo adentro lo deformaba").
-                            if dPoint < SketchController.snapRadius * 0.8,
+                            if dPoint < sketch.snapRadiusPlane,
                                sketch.beginDrag(near: p) {
                                 HapticService.shared.medium()
                                 return
                             }
-                            // 2) Dentro de una región cerrada → EXTRUIR POR ARRASTRE
-                            if !sketch.isDrawingInProgress, let verts = sketch.region(at: p) {
+                            // NEUTRAL: 2) dentro de región cerrada → EXTRUIR por arrastre.
+                            if let verts = sketch.region(at: p) {
                                 regionDrag = (verts: verts, start: p)
                                 regionDragHeight = 0
                                 sketch.selectRegion(at: p)
                                 HapticService.shared.medium()
                                 return
                             }
-                            // 3) Punto cercano (radio normal) o trazo libre
-                            if sketch.beginDrag(near: p) {
-                                HapticService.shared.medium()
-                            } else {
-                                sketch.pencilDragBegan(at: p)
-                            }
+                            // NEUTRAL: 3) sobre nada → sin acción (no dibuja).
                         },
                         onSketchDragChanged: { p in
                             if let rd = regionDrag {
@@ -673,6 +712,19 @@ struct CADModeView: View {
                     }
                     .animation(AppTheme.animDefault, value: showElements)
                     .animation(AppTheme.animSnappy, value: expandedGroup)
+                    // Tamaño del viewport para la escala adaptativa del sketch:
+                    // el mismo rect que ve SketchCanvasOverlay (beta 2026-07-16b).
+                    .background(GeometryReader { geo in
+                        Color.clear
+                            .onAppear {
+                                viewportSize = geo.size
+                                updateUnitsPerPoint()
+                            }
+                            .onChange(of: geo.size) { newSize in
+                                viewportSize = newSize
+                                updateUnitsPerPoint()
+                            }
+                    })
                     // (El doble tap = encuadrar vive en MetalView — gesto universal.)
                     bottomBar
             } else {
@@ -698,8 +750,10 @@ struct CADModeView: View {
             case .line: sketch.beginTool(.line)
             case .rectangle: sketch.beginTool(.rectangle)
             case .circle: sketch.beginTool(.circle)
+            case .arc: sketch.beginTool(.arc)
             case .spline: sketch.beginTool(.spline)
             case .polygon: sketch.beginTool(.polygon)
+            case .sketch: sketch.disarm()   // modo boceto NEUTRAL (sin herramienta armada)
             default: break
             }
             executeCADTool(newTool, canvasVM: canvasVM, toolVM: toolVM)
@@ -714,6 +768,26 @@ struct CADModeView: View {
             if selectedTool == .extrude { updateExtrudeGhost() }
         }
         .onChange(of: sketch.revision) { _ in rebuildSketchOverlays() }
+        // Zoom/orbit/pan mueven la cámara → re-derivar la escala del sketch. Si
+        // el paso "bonito" de rejilla cambió de bucket, reconstruye la grilla
+        // (beta 2026-07-16b: la grilla y el snap ahora escalan con el zoom).
+        .onChange(of: canvasVM.scene.camera.position) { _ in
+            guard isSketchTool else { return }
+            let prevStep = sketch.adaptiveGridStep
+            updateUnitsPerPoint()
+            if sketch.adaptiveGridStep != prevStep {
+                rebuildSketchOverlays()
+            }
+        }
+        // Auto-neutral: al confirmar una figura cerrada el controlador pone
+        // `armedTool = nil`; la barra debe reflejar el modo boceto NEUTRAL para
+        // que el input siga vivo y el usuario pueda tocar el área y extruir.
+        .onChange(of: sketch.armedTool) { armed in
+            if armed == nil, isSketchTool, selectedTool != .sketch {
+                selectedTool = .sketch
+                toolVM.selectedTool = .sketch
+            }
+        }
         .onChange(of: selectionController.outlinedModelId) { newId in
             renderer.outlinedModelId = newId
             canvasVM.objectWillChange.send()
@@ -1760,6 +1834,16 @@ struct CADModeView: View {
     /// Activación central de herramienta (rail y flyouts): un solo camino.
     private func activate(_ tool: CADTool) {
         HapticService.shared.light()
+        // TOGGLE de herramienta de dibujo (beta 2026-07-16b): tocar la que ya
+        // está armada la DESARMA → modo boceto NEUTRAL. La cadena de línea
+        // abierta se conserva (disarm no borra geometría, solo el borrador en
+        // curso; una cadena confirmada ya es geometría real).
+        if tool.isSketchTool, selectedTool == tool, sketch.armedTool != nil {
+            selectedTool = .sketch
+            toolVM.selectedTool = .sketch
+            expandedGroup = nil
+            return
+        }
         selectedTool = tool
         toolVM.selectedTool = tool
         if [.booleanUnion, .booleanSubtract, .booleanIntersect].contains(tool) {
@@ -3294,16 +3378,19 @@ struct SketchCanvasOverlay: View {
         let kernelModel = sketch.model
         let curves = sketch.entities
         let regionList = sketch.regions
-        let selectedID = sketch.selectedCurveID
+        let selectedIDs = sketch.selectedCurveIDs
         let selRegion = sketch.selectedRegion
         let marker = sketch.snapMarker
         let guides = sketch.guideSegments
         let draft = sketch.previewPolyline
         let chainPts = sketch.chain
+        let chainStartPt = sketch.chainStart?.simd    // primer punto de la cadena (para el anillo "cerrar aquí")
+        let chainSegments = sketch.chainCount         // segmentos confirmados (≥2 → cerrar da región)
         let splinePts = sketch.splineChain
         let anchorPt = sketch.anchor
         let previewPt = sketch.preview
         let tool = sketch.activeTool
+        let uPerPt = sketch.unitsPerPoint
         return Canvas { ctx, size in
             let cam = canvasVM.scene.camera
             let aspect = Float(size.width / max(size.height, 1))
@@ -3387,9 +3474,11 @@ struct SketchCanvasOverlay: View {
             }
 
             // ---- Retícula ligera del plano de trabajo (solo si no es el suelo) ----
-            // 11×11 líneas locales, paso 0.5, extensión ±2.5 alrededor del origen.
+            // Paso adaptativo al zoom (~60 pt por celda) y extensión proporcional
+            // (beta 2026-07-16b: antes paso fijo 0.5 no escalaba con el zoom).
             if plane != .floor {
-                let ext: Float = 2.5, step: Float = 0.5
+                let step = Float(SketchController.niceNumber(Double(60 * uPerPt)))
+                let ext = step * 5
                 var grid = Path()
                 var k: Float = -ext
                 while k <= ext + 1e-3 {
@@ -3426,7 +3515,8 @@ struct SketchCanvasOverlay: View {
             for curve in curves {
                 guard let g = CurveGeometry.resolve(curve, in: kernelModel) else { continue }
                 let pts = g.discretize(maxDeviation: 2e-3).map { $0.simd }
-                let isSel = curve.id == selectedID
+                // Selección MÚLTIPLE en brasa (beta 2026-07-16b: el set completo).
+                let isSel = selectedIDs.contains(curve.id)
                 strokePolyline(pts, close: false,
                                color: isSel ? ember : steel,
                                width: isSel ? 3 : 2)
@@ -3481,6 +3571,17 @@ struct SketchCanvasOverlay: View {
             }
             for p in splinePts { dot(p, color: ember) }
             for p in chainPts { dot(p, color: ember) }
+            // Primer punto de la cadena en curso: anillo DOBLE/mayor para
+            // señalar "toca aquí para cerrar" (beta 2026-07-16b: antes no se
+            // distinguía y cerrar era a ciegas). Solo con ≥2 segmentos, que es
+            // cuando cerrar produce una región.
+            if let start = chainStartPt, chainSegments >= 2, let s = proj(start) {
+                let r1: CGFloat = 9, r2: CGFloat = 5
+                ctx.stroke(Path(ellipseIn: CGRect(x: s.x - r1, y: s.y - r1, width: r1 * 2, height: r1 * 2)),
+                           with: .color(ember), lineWidth: 2)
+                ctx.stroke(Path(ellipseIn: CGRect(x: s.x - r2, y: s.y - r2, width: r2 * 2, height: r2 * 2)),
+                           with: .color(ember.opacity(0.6)), lineWidth: 1.5)
+            }
             if let a = anchorPt { dot(a, color: ember) }
             if let pv = previewPt {
                 let from: SIMD2<Float>? = chainPts.last ?? anchorPt

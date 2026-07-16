@@ -165,4 +165,120 @@ final class SketchControllerTests: XCTestCase {
         XCTAssertTrue(s.hasOpenPath)
         XCTAssertNotNil(s.tubeAlongPath(radius: 0.1))
     }
+
+    // MARK: - Estado NEUTRAL vs ARMADO (beta 2026-07-16b)
+
+    /// BUG crítico: trazar A→B con la herramienta línea ARMADA y arrastrar desde
+    /// B debe crear una NUEVA línea B→C, sin mover B (antes el drag secuestraba
+    /// el gesto para mover el punto). A y B quedan intactas.
+    func testArmedDragFromEndpointDrawsNewLineKeepingPreviousIntact() {
+        let s = SketchController()
+        s.beginTool(.line)
+        // A→B por drag
+        s.pencilDragBegan(at: SIMD2(0, 0))
+        s.pencilDragEnded(at: SIMD2(2, 0))
+        XCTAssertEqual(s.entities.count, 1)
+        // Drag DESDE B (extremo) hacia C: armada → dibuja, no mueve B
+        s.pencilDragBegan(at: SIMD2(2.02, 0.01))   // el snap arranca EXACTO en B
+        s.pencilDragEnded(at: SIMD2(2, 2))
+        XCTAssertEqual(s.entities.count, 2, "se creó una línea NUEVA B→C")
+        XCTAssertEqual(s.model.positions.count, 3,
+                       "A, B (compartido) y C — B no se movió, se reusó")
+        // A sigue en (0,0), B sigue en (2,0)
+        XCTAssertNotNil(s.model.existingPoint(near: Vec2(0, 0), tolerance: 0.05),
+                        "A intacto en (0,0)")
+        XCTAssertNotNil(s.model.existingPoint(near: Vec2(2, 0), tolerance: 0.05),
+                        "B intacto en (2,0) — NO se arrastró")
+        XCTAssertNotNil(s.model.existingPoint(near: Vec2(2, 2), tolerance: 0.05),
+                        "C creado en (2,2)")
+    }
+
+    /// NEUTRAL: tap sobre un trazo lo AÑADE al set; segundo tap lo QUITA; tap a
+    /// otro con uno ya seleccionado → los dos en el set (selección múltiple).
+    func testNeutralTapTogglesMultiSelection() {
+        let s = SketchController()
+        // Dos líneas separadas, luego a neutral
+        s.beginTool(.line)
+        s.pencilDragBegan(at: SIMD2(0, 0))
+        s.pencilDragEnded(at: SIMD2(2, 0))       // línea 1: y≈0
+        s.beginTool(.line)
+        s.pencilDragBegan(at: SIMD2(0, 3))
+        s.pencilDragEnded(at: SIMD2(2, 3))       // línea 2: y≈3
+        s.disarm()
+        XCTAssertNil(s.armedTool, "en neutral no hay herramienta armada")
+
+        s.tap(at: SIMD2(1, 0))                   // sobre línea 1
+        XCTAssertEqual(s.selectedCurveIDs.count, 1)
+        s.tap(at: SIMD2(1, 3))                   // sobre línea 2 → ambas
+        XCTAssertEqual(s.selectedCurveIDs.count, 2, "selección múltiple")
+        s.tap(at: SIMD2(1, 0))                   // de nuevo sobre línea 1 → sale
+        XCTAssertEqual(s.selectedCurveIDs.count, 1, "segundo tap deselecciona ese trazo")
+    }
+
+    /// NEUTRAL: tap dentro de una región cerrada la selecciona SIN herramienta.
+    func testNeutralTapInsideRegionSelectsIt() {
+        let s = SketchController()
+        s.beginTool(.rectangle)
+        s.tap(at: SIMD2(0, 0))
+        s.tap(at: SIMD2(4, 4))                   // rect cerrado → auto-neutral
+        XCTAssertNil(s.armedTool, "auto-neutral tras cerrar el rectángulo")
+        s.tap(at: SIMD2(2, 2))                   // dentro, en neutral
+        XCTAssertNotNil(s.selectedRegion, "tap dentro de región la selecciona sin herramienta")
+    }
+
+    /// AUTO-NEUTRAL: cerrar un rectángulo por dos taps con `.rectangle` armado
+    /// deja el controlador en neutral (`armedTool == nil`).
+    func testRectangleAutoDisarmsAfterClose() {
+        let s = SketchController()
+        s.beginTool(.rectangle)
+        XCTAssertEqual(s.armedTool, .rectangle)
+        s.tap(at: SIMD2(0, 0))
+        s.tap(at: SIMD2(2, 3))
+        XCTAssertNil(s.armedTool, "figura cerrada confirmada → neutral")
+        XCTAssertEqual(s.entities.count, 4)
+    }
+
+    /// AUTO-NEUTRAL: cerrar una cadena de líneas también vuelve a neutral y la
+    /// línea permanece armada hasta ese cierre.
+    func testLineChainStaysArmedUntilClose() {
+        let s = SketchController()
+        s.beginTool(.line)
+        s.tap(at: SIMD2(0, 0))
+        s.tap(at: SIMD2(2, 0))
+        s.tap(at: SIMD2(2, 2))
+        XCTAssertEqual(s.armedTool, .line, "la cadena abierta sigue armada")
+        s.tap(at: SIMD2(0, 2))
+        s.tap(at: SIMD2(0.02, 0.02))             // cerrar sobre el primero
+        XCTAssertNil(s.armedTool, "cerrar la cadena → neutral")
+        XCTAssertEqual(s.regions.count, 1)
+    }
+
+    // MARK: - Radio de snap adaptativo al zoom
+
+    /// Con `unitsPerPoint` grande (zoom lejano) el snap agarra desde MÁS lejos;
+    /// con `unitsPerPoint` pequeño (zoom cercano) exige más precisión.
+    func testDynamicSnapRadiusScalesWithZoom() {
+        let s = SketchController()
+        s.beginTool(.line)
+        s.tap(at: SIMD2(0, 0))
+        s.tap(at: SIMD2(2, 0))                   // extremo en (2,0)
+        s.beginTool(.line)
+
+        // Zoom CERCANO: radio pequeño → un cursor a 0.3 del extremo NO engancha.
+        s.unitsPerPoint = 0.005                  // radio = 22*0.005 = 0.11
+        s.tap(at: SIMD2(2.3, 0))
+        XCTAssertNotEqual(s.snapMarker?.kind, .endpoint,
+                          "con zoom cercano el snap NO llega a 0.3 de distancia")
+
+        // Zoom LEJANO: radio grande → el mismo cursor SÍ engancha el extremo.
+        let s2 = SketchController()
+        s2.beginTool(.line)
+        s2.tap(at: SIMD2(0, 0))
+        s2.tap(at: SIMD2(2, 0))
+        s2.beginTool(.line)
+        s2.unitsPerPoint = 0.05                  // radio = 22*0.05 = 1.1
+        s2.tap(at: SIMD2(2.3, 0))
+        XCTAssertEqual(s2.snapMarker?.kind, .endpoint,
+                       "con zoom lejano el snap agarra desde más lejos")
+    }
 }

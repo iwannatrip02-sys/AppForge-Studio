@@ -68,7 +68,10 @@ enum CADTool: String, CaseIterable, Identifiable {
 
     var isSketchTool: Bool {
         switch self {
-        case .line, .circle, .rectangle, .spline, .arc, .polygon, .dimension, .constraint:
+        // `.sketch` = modo boceto NEUTRAL (beta 2026-07-16b): sin herramienta de
+        // dibujo armada, pero el input de sketch y los overlays siguen VIVOS —
+        // tocar selecciona (paradigma Shapr3D sin botón de seleccionar).
+        case .sketch, .line, .circle, .rectangle, .spline, .arc, .polygon, .dimension, .constraint:
             return true
         default:
             return false
