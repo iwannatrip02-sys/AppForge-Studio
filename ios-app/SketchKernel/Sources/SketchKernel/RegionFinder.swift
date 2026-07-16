@@ -195,10 +195,13 @@ struct WeldedGraph {
                     visited.insert(pack(from, to))
                     polygon.append(from)
                     // En `to`, la arista de llegada es (from→to); la siguiente
-                    // en CCW DESPUÉS de la inversa (to→from):
+                    // de la cara es la ANTERIOR a la inversa (to→from) en orden
+                    // CCW — el "giro más cerrado a favor de las manecillas".
+                    // Con grado 2 ambas reglas coinciden; con cruces (grado 3+)
+                    // tomar la siguiente fusionaba caras en la unión.
                     let neighbors = sorted[to]
                     guard let idx = neighbors.firstIndex(of: from) else { break }
-                    let nextNeighbor = neighbors[(idx + 1) % neighbors.count]
+                    let nextNeighbor = neighbors[(idx - 1 + neighbors.count) % neighbors.count]
                     from = to
                     to = nextNeighbor
                     steps += 1
