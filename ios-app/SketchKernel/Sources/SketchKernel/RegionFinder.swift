@@ -137,8 +137,8 @@ struct WeldedGraph {
         let s = 1.0 / (tolerance * 2)
         let ix = Int64((p.x * s).rounded())
         let iy = Int64((p.y * s).rounded())
-        for dx in -1...1 as ClosedRange<Int64> {
-            for dy in -1...1 as ClosedRange<Int64> {
+        for dx: Int64 in -1...1 {
+            for dy: Int64 in -1...1 {
                 let k = (ix + dx) &* 0x9E3779B9 &+ (iy + dy)
                 for idx in buckets[k] ?? [] where nodes[idx].distance(to: p) <= tolerance {
                     return idx

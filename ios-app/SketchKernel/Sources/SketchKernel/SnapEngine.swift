@@ -255,10 +255,19 @@ public struct SnapEngine: Sendable {
             }
         }
 
-        // Alineación con puntos existentes (el punto NO está bajo el cursor,
-        // pero comparte x o y — la punteada clásica de Shapr3D)
+        // Alineación con puntos NOTABLES (el punto no está bajo el cursor, pero
+        // comparte x o y — la punteada clásica de Shapr3D). Fuentes: puntos
+        // topológicos + medios y centros de curvas — así el CENTRO de una cara
+        // cuadrada se encuentra por el cruce de las alineaciones de los medios.
+        var alignmentSources: [Vec2] = model.positions
+            .filter { !ctx.excludedPoints.contains($0.key) }
+            .map { $0.value }
+        for g in geometries {
+            if let m = g.midpoint { alignmentSources.append(m) }
+            if let c = g.center { alignmentSources.append(c) }
+        }
         var sources = 0
-        for (pid, pos) in model.positions where !ctx.excludedPoints.contains(pid) {
+        for pos in alignmentSources {
             if sources >= maxAlignmentSources { break }
             // Ignorar puntos demasiado cerca del cursor (ya son snap endpoint)
             guard pos.distance(to: ctx.cursor) > r * 2 else { continue }

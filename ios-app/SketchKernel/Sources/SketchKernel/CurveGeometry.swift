@@ -84,7 +84,7 @@ public struct CurveGeometry: Sendable {
         switch shape {
         case .line(let a, let b):
             return (b - a).normalized
-        case .arc(let _, _, let a0, let sweep, let ccw):
+        case .arc(_, _, let a0, let sweep, let ccw):
             let ang = ccw ? a0 + sweep * t : a0 - sweep * t
             let radial = Vec2(cos(ang), sin(ang))
             return ccw ? radial.perpendicular : -radial.perpendicular
