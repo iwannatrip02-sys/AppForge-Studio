@@ -54,6 +54,17 @@ enum UIProbeMode {
     /// Evaluado UNA VEZ en el seam `gestureRecognizer(_:shouldReceive:)`.
     static let forcePencil: Bool = ProcessInfo.processInfo.arguments.contains("-UIProbeForcePencil")
 
+    /// Launch-argument que limita los FPS del viewport a 10 en sesiones de probe.
+    /// Motivo (corrida 8 del GearScenario): los runners de CI virtualizan Metal
+    /// SIN GPU — render por software. A 120fps el draw loop satura los cores y
+    /// los hilos de automatización de XCUITest dentro de la app se degradan de
+    /// 17s a 395s por query. 10fps = mismo pipeline real, 12× de headroom.
+    /// Cero efecto sin el flag (producción: 120fps ProMotion intactos).
+    static let lowFPSFlag = "-UIProbeLowFPS"
+
+    /// true ↔ la app fue lanzada con `-UIProbeLowFPS`. Evaluado UNA VEZ.
+    static let lowFPS: Bool = ProcessInfo.processInfo.arguments.contains("-UIProbeLowFPS")
+
     /// Launch-argument del visualizador de toques (TouchVisualizer).
     /// Activa el overlay de círculos ember SOLO para sesiones XCUITest/tutorial.
     static let touchVizFlag = "-UIProbeTouchViz"

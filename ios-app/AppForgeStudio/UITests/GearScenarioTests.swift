@@ -70,7 +70,10 @@ final class GearScenarioTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
-        app.launchArguments += ["-UIProbeSkipOnboarding", "-UIProbeTouchViz"]
+        // -UIProbeLowFPS: los runners de CI renderizan Metal por software; a
+        // 120fps el draw loop ahoga los hilos de automatización (corrida 8:
+        // queries de 17s→395s). 10fps = mismo pipeline, CPU libre.
+        app.launchArguments += ["-UIProbeSkipOnboarding", "-UIProbeTouchViz", "-UIProbeLowFPS"]
         app.launch()
     }
 
@@ -168,9 +171,9 @@ final class GearScenarioTests: XCTestCase {
         tapButton(ID.homeNewProject, timeout: longTimeout)
 
         // El CAD chrome debe montar: el menú de primitivas es el ancla más temprana.
-        let primitivesMenu = require(app.buttons, ID.primitivesMenu, timeout: longTimeout)
-        XCTAssertTrue(primitivesMenu.exists,
-                      "Tras 'nuevo proyecto' el chrome CAD (menú primitivas) no montó.")
+        // require() garantiza existencia o falla — sin `.exists` extra después:
+        // cada re-evaluación es un snapshot completo (la corrida 8 murió en uno).
+        require(app.buttons, ID.primitivesMenu, timeout: longTimeout)
 
         // --- Paso 2: crear cilindro (el disco base) --------------------------
         step("Primitivas/Cilindro", "abrir flyout y crear cilindro (disco)")
@@ -187,8 +190,7 @@ final class GearScenarioTests: XCTestCase {
         openFlyout(group: ID.primitivesMenu, expecting: ID.primitiveBox)
         tapButton(ID.primitiveBox, timeout: midTimeout)
         // Assert: la herramienta mover debe existir para poder colocar el diente.
-        let moveTool = require(app.buttons, ID.toolMove, timeout: midTimeout)
-        XCTAssertTrue(moveTool.exists, "La herramienta Mover no está disponible tras crear la caja.")
+        require(app.buttons, ID.toolMove, timeout: midTimeout)
 
         // --- Paso 4: mover el diente al borde del disco (drag de gizmo) -------
         step("Mover", "activar mover y arrastrar el diente al borde por gizmo")
@@ -214,9 +216,7 @@ final class GearScenarioTests: XCTestCase {
         step("Cuerpo", "escalar la selección de cara a cuerpo entero")
         tapButton(ID.selectionBody, timeout: midTimeout)
         // Assert: el menú de patrón (parte del selectionBar de cuerpo) ya debe existir.
-        let patternMenu = require(app.buttons, ID.patternMenu, timeout: midTimeout)
-        XCTAssertTrue(patternMenu.exists,
-                      "El menú Patrón ○ (selectionBar) no apareció: ¿hay selección de cuerpo activa?")
+        require(app.buttons, ID.patternMenu, timeout: midTimeout)
 
         // --- Paso 6: patrón circular count=8 ---------------------------------
         step("Patrón circular", "abrir panel de patrón y fijar copias=5")
@@ -228,10 +228,9 @@ final class GearScenarioTests: XCTestCase {
         // de XCUITest pasa de segundos a minutos y el allowance muere en la
         // unión. 5 dientes = 6 cuerpos y el engranaje sigue siendo real; el
         // barrido en device usará 8+.
-        let countField = require(app.descendants(matching: .any),
-                                 ID.patternCircularCount, timeout: midTimeout)
+        require(app.descendants(matching: .any),
+                ID.patternCircularCount, timeout: midTimeout)
         setStepper(id: ID.patternCircularCount, from: 6, to: 5)
-        XCTAssertTrue(countField.exists, "El control de conteo del patrón circular no existe.")
 
         // --- Paso 7: aplicar el patrón (8 dientes) ---------------------------
         step("Patrón circular", "aplicar patrón circular (5 dientes)")
@@ -288,10 +287,7 @@ final class GearScenarioTests: XCTestCase {
         attach(name: "\(String(format: "%02d", stepIndex))-assert-inspection")
 
         // --- Cierre: el engranaje existe. Export como sello final (opcional) -
-        let exportBtn = app.buttons[ID.exportButton]
-        if exportBtn.waitForExistence(timeout: shortTimeout) {
-            XCTAssertTrue(exportBtn.exists, "El botón de exportar del chrome CAD no existe.")
-        }
+        _ = app.buttons[ID.exportButton].waitForExistence(timeout: shortTimeout)
         attach(name: "\(String(format: "%02d", stepIndex + 1))-gear-final")
         os_log("GESTURE-STEP %{public}d: Fin — engranaje construido por gestos reales",
                log: log, type: .default, stepIndex + 1)

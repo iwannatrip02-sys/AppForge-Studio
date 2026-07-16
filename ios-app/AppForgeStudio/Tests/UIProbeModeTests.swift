@@ -70,10 +70,19 @@ final class UIProbeModeTests: XCTestCase {
                        "La suite de tests NO debe correr con -UIProbeSkipOnboarding")
     }
 
+    /// Sin `-UIProbeLowFPS`, el viewport conserva sus 120fps de producción.
+    func testLowFPSInactiveWithoutFlag() {
+        XCTAssertFalse(ProcessInfo.processInfo.arguments.contains(UIProbeMode.lowFPSFlag),
+                       "La suite de tests NO debe correr con -UIProbeLowFPS")
+        XCTAssertFalse(UIProbeMode.lowFPS,
+                       "lowFPS debe ser false sin el launch-argument (120fps intactos)")
+    }
+
     /// Los strings de los flags del contrato son los exactos que usa G-A (XCUITest).
     func testGestureProbeContractFlags() {
         XCTAssertEqual(UIProbeMode.forcePencilFlag, "-UIProbeForcePencil")
         XCTAssertEqual(UIProbeMode.touchVizFlag, "-UIProbeTouchViz")
         XCTAssertEqual(UIProbeMode.skipOnboardingFlag, "-UIProbeSkipOnboarding")
+        XCTAssertEqual(UIProbeMode.lowFPSFlag, "-UIProbeLowFPS")
     }
 }
