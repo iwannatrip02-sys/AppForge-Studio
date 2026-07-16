@@ -898,8 +898,10 @@ struct CADModeView: View {
                          range: 0.02...4)
             .accessibilityIdentifier("cad.numeric.field")
             Text("Prof.").font(.caption2).foregroundColor(theme.textSecondary)
+            // Identifier propio: dos campos con "cad.numeric.field" rompían el
+            // contrato (identifier único) y el tap de XCUITest (multiple matches).
             NumericField(value: $holeDepth, range: 0...20)
-            .accessibilityIdentifier("cad.numeric.field")
+            .accessibilityIdentifier("cad.numeric.field.depth")
             Text(holeDepth == 0 ? "pasante" : "ciego")
                 .font(.caption2)
                 .foregroundColor(AppTheme.steel)

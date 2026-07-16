@@ -267,7 +267,9 @@ final class GearScenarioTests: XCTestCase {
         openFlyout(group: "cad.group.formar", expecting: ID.toolHole)
         tapButton(ID.toolHole, timeout: midTimeout)
         // Parámetros del agujero via NumericField genérico (el activo), si está.
-        let numeric = app.textFields[ID.numericField]
+        // firstMatch: cinturón ante identifiers duplicados (corrida 9: el tap
+        // reventó con 'Multiple matching elements' — Ø y Prof. compartían id).
+        let numeric = app.textFields[ID.numericField].firstMatch
         if numeric.waitForExistence(timeout: shortTimeout) {
             numeric.tap()
             // Dejar valor por defecto es válido; solo verificamos que el panel montó.
