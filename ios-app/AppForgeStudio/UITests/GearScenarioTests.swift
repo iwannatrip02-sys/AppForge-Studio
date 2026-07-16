@@ -273,6 +273,10 @@ final class GearScenarioTests: XCTestCase {
         if numeric.waitForExistence(timeout: shortTimeout) {
             numeric.tap()
             // Dejar valor por defecto es válido; solo verificamos que el panel montó.
+            // Enter cierra el teclado (onSubmit → pierde foco): abierto tapa medio
+            // viewport y el toque de perforación cae SOBRE el teclado (corrida 10:
+            // el agujero nunca ocurrió — visible en 10-assert-hole).
+            numeric.typeText("\n")
         }
         // Perforar: tocar el centro de la cara superior del engranaje.
         viewportPoint(0.50, 0.50).tap()
