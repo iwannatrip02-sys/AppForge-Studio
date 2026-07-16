@@ -403,6 +403,25 @@ jobs:
           fi
           ls -laR "$OUT" || true
 
+      # TEARDOWN ANTES de segmentar (corrida 11: con el video aún grabándose el
+      # mp4 no tiene moov atom → ffprobe falla → manifest degraded y cero clips).
+      - name: Stop recording and log stream
+        if: always()
+        continue-on-error: true
+        run: |
+          set -x
+          # kill -INT al grabador para que cierre el mp4 con moov atom válido
+          if [ -f /tmp/videopid ]; then
+            kill -INT "$(cat /tmp/videopid)" 2>/dev/null || true
+          fi
+          if [ -f /tmp/logpid ]; then
+            kill -INT "$(cat /tmp/logpid)" 2>/dev/null || true
+          fi
+          # dar tiempo a que ffmpeg/simctl finalice el archivo
+          sleep 4
+          echo "=== Artifacts recolectados ==="
+          ls -laR "$GITHUB_WORKSPACE/${WORKDIR}/artifacts" || true
+
       # Cortar el video en clips-tutorial por paso (parseando GESTURE-STEP del log).
       # Degradación elegante: si ffmpeg o el log fallan, sube el video completo +
       # manifest igual (segment_video.py lo maneja y siempre exit 0).
@@ -420,26 +439,6 @@ jobs:
             ${VIDEO_START:+--video-start "$VIDEO_START"} \
             || echo "segment_video.py devolvió no-cero (degradado; video completo igual sube)"
           ls -laR artifacts/tutorials || true
-
-      # ---------------------------------------------------------------------
-      # TEARDOWN — cerrar video/log limpiamente ANTES de empaquetar
-      # ---------------------------------------------------------------------
-      - name: Stop recording and log stream
-        if: always()
-        continue-on-error: true
-        run: |
-          set -x
-          # kill -INT al grabador para que cierre el mp4 con moov atom válido
-          if [ -f /tmp/videopid ]; then
-            kill -INT "$(cat /tmp/videopid)" 2>/dev/null || true
-          fi
-          if [ -f /tmp/logpid ]; then
-            kill -INT "$(cat /tmp/logpid)" 2>/dev/null || true
-          fi
-          # dar tiempo a que ffmpeg/simctl finalice el archivo
-          sleep 4
-          echo "=== Artifacts recolectados ==="
-          ls -laR "$GITHUB_WORKSPACE/${WORKDIR}/artifacts" || true
 
       # ---------------------------------------------------------------------
       # EMPAQUETAR el .app de simulador (para Appetize.io)
