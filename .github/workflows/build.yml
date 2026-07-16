@@ -2,9 +2,10 @@ name: Build AppForgeStudio for iPad
 
 on:
   push:
-    branches: ["main", "develop", "feature/*", "fix/*"]
+    branches: ["main", "develop", "feature/*", "fix/*", "fase-*"]
     paths:
       - 'ios-app/AppForgeStudio/**'
+      - 'ios-app/SketchKernel/**'
       - '.github/workflows/build.yml'
   pull_request:
     branches: ["main"]
@@ -48,6 +49,11 @@ jobs:
             swift --version
           fi
           echo "=== Final: $(swift --version | head -1) ==="
+
+      # Tests del kernel de sketch (Fase 1): paquete puro, corre en segundos en
+      # el host macOS — falla rápido ANTES del build pesado de la app.
+      - name: Run SketchKernel tests (host)
+        run: swift test --package-path ios-app/SketchKernel
 
       - name: Install XcodeGen
         run: brew install xcodegen

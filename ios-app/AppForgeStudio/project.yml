@@ -28,6 +28,9 @@ packages:
   OCCTSwift:
     url: https://github.com/gsdali/OCCTSwift.git
     from: 1.0.0
+  # Kernel 2D de dibujo (Fase 1) — paquete local puro, testeable en cualquier host
+  SketchKernel:
+    path: ../SketchKernel
 
 targets:
   AppForgeStudio:
@@ -84,6 +87,7 @@ targets:
     dependencies:
       - package: Satin
       - package: OCCTSwift
+      - package: SketchKernel
 
   AppForgeStudioTests:
     type: bundle.unit-test
