@@ -64,7 +64,9 @@ final class TrimTests: XCTestCase {
         }
         XCTAssertEqual(horizontals.count, 1)
         let xs = horizontals.flatMap { [$0.0.x, $0.1.x] }.sorted()
-        XCTAssertEqual(xs, [4, 10], accuracy: 1e-6)
+        XCTAssertEqual(xs.count, 2)
+        XCTAssertEqual(xs.first ?? -1, 4, accuracy: 1e-6)
+        XCTAssertEqual(xs.last ?? -1, 10, accuracy: 1e-6)
     }
 
     /// Círculo cruzado por una línea (diámetro) → queda un arco.
