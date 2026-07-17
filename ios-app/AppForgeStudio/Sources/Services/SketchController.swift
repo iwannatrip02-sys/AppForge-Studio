@@ -112,6 +112,9 @@ final class SketchController: ObservableObject {
     /// arco: centro→inicio→fin usa además `arcStart`).
     @Published private(set) var anchor: SIMD2<Float>? = nil
     private var arcStart: Vec2? = nil
+    /// Inicio del arco en curso (para que el overlay dibuje el radio punteado
+    /// centro→cursor mientras se arma el arco). nil si aún no hay inicio.
+    var arcStartPoint: SIMD2<Float>? { arcStart?.simd }
     /// Puntos de la spline en curso.
     @Published private(set) var splineDraft: [SIMD2<Float>] = []
     /// Modo de la spline (los DOS de Shapr3D). La UI podrá alternarlo.
@@ -607,6 +610,16 @@ final class SketchController: ObservableObject {
             preview = p.simd
             return
         }
+        // Arco en su 3ª fase (centro=anchor y arcStart ya fijados): un drag elige
+        // el FIN. No sobrescribir el centro — solo mostrar el preview del arco.
+        if tool == .arc, anchor != nil, arcStart != nil {
+            let p = snap(raw, reference: arcStart.map { Vec2($0) }).position
+            preview = p.simd
+            if let c = anchor.map({ Vec2($0) }), let s = arcStart {
+                previewPolyline = arcPreviewPolyline(center: c, start: s, cursor: p)
+            }
+            return
+        }
         let p = snap(raw, reference: chainLast).position
         anchor = p.simd
         preview = p.simd
@@ -689,12 +702,22 @@ final class SketchController: ObservableObject {
             armedTool = nil   // auto-neutral
             return
         case .arc:
-            // Drag de arco: ancla = centro, fin del drag = inicio; el fin llega
-            // con un tap posterior (flujo centro→inicio→fin).
-            arcStart = end
-            statusMessage = "Toca el punto final del arco"
-            preview = nil
-            previewPolyline = []
+            // Flujo centro→inicio→fin. Si arcStart YA existe (3ª fase), este
+            // drag eligió el FIN: confirma el arco. Si no, este drag eligió el
+            // INICIO (radio) y el fin llegará después (drag o tap).
+            if let s = arcStart {
+                let v1 = s - a, v2 = end - a
+                let ccw = v1.cross(v2) > 0
+                mutate { $0.addArc(center: a, start: s, end: end, ccw: ccw) }
+                anchor = nil; arcStart = nil
+                clearFeedback()
+                statusMessage = "Arco ✓"
+            } else {
+                arcStart = end
+                statusMessage = "Toca o arrastra el punto final del arco"
+                preview = nil
+                previewPolyline = []
+            }
             return
         case .spline, .trim:
             break
@@ -703,10 +726,37 @@ final class SketchController: ObservableObject {
         clearFeedback()
     }
 
+    /// Muestrea un arco vivo centro→start→cursor: radio = |start−centro|,
+    /// ángulos de start y cursor, sentido por el signo del cross, ~24 puntos.
+    /// Preview REAL del arco (antes se veía una recta hasta el cursor).
+    private func arcPreviewPolyline(center c: Vec2, start s: Vec2, cursor p: Vec2) -> [SIMD2<Float>] {
+        let r = s.distance(to: c)
+        guard r > 1e-6 else { return [] }
+        let a0 = (s - c).angle
+        let a1 = (p - c).angle
+        let ccw = (s - c).cross(p - c) > 0
+        var sweep = ccw ? (a1 - a0) : (a0 - a1)
+        while sweep < 0 { sweep += 2 * .pi }
+        while sweep > 2 * .pi { sweep -= 2 * .pi }
+        let n = 24
+        return (0...n).map { k in
+            let t = Double(k) / Double(n)
+            let ang = ccw ? a0 + sweep * t : a0 - sweep * t
+            return (c + Vec2(cos(ang), sin(ang)) * r).simd
+        }
+    }
+
     /// Polilínea de preview de la figura entre `a` y el cursor.
     private func draftShape(from a: Vec2, to p: Vec2) -> [SIMD2<Float>] {
         switch activeTool {
-        case .line, .arc:
+        case .arc:
+            // Con centro (anchor=a) y arcStart ya fijados: muestrea el arco real
+            // hasta el cursor. Sin arcStart aún: recta centro→cursor (elige start).
+            if let s = arcStart {
+                return arcPreviewPolyline(center: a, start: s, cursor: p)
+            }
+            return [a.simd, p.simd]
+        case .line:
             return [a.simd, p.simd]
         case .rectangle:
             return [a.simd, Vec2(p.x, a.y).simd, p.simd, Vec2(a.x, p.y).simd, a.simd]

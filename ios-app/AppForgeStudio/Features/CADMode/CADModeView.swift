@@ -3406,6 +3406,7 @@ struct SketchCanvasOverlay: View {
         let chainSegments = sketch.chainCount         // segmentos confirmados (≥2 → cerrar da región)
         let splinePts = sketch.splineChain
         let anchorPt = sketch.anchor
+        let arcStartPt = sketch.arcStartPoint   // inicio del arco en curso (radio punteado)
         let previewPt = sketch.preview
         let tool = sketch.activeTool
         let uPerPt = sketch.unitsPerPoint
@@ -3618,14 +3619,26 @@ struct SketchCanvasOverlay: View {
                            with: .color(ember.opacity(0.6)), lineWidth: 1.5)
             }
             if let a = anchorPt { dot(a, color: ember) }
+            // Arco: mientras se arma, radio punteado centro→cursor y marca del
+            // inicio. El arco muestreado ya se dibuja como `draft` (previewPolyline).
+            if tool == .arc, let center = anchorPt {
+                if let s = arcStartPt { dot(s, color: ember) }
+                if let pv = previewPt {
+                    strokeDashed(center, pv, color: ember.opacity(0.6))  // radio punteado
+                }
+            }
             if let pv = previewPt {
                 let from: SIMD2<Float>? = chainPts.last ?? anchorPt
                 if let f = from, simd_distance(f, pv) > 1e-4 {
                     switch tool {
-                    case .line, .arc:
+                    case .line:
                         strokePolyline([f, pv], close: false, color: ember, width: 2.5)
                         label(String(format: "%.2f", simd_distance(f, pv)),
                               at: (f + pv) * 0.5)
+                    case .arc:
+                        // El trazo del arco ya viene en `draft`; aquí solo la cota
+                        // del radio junto al cursor.
+                        label(String(format: "R %.2f", simd_distance(f, pv)), at: pv)
                     case .rectangle:
                         label(String(format: "%.2f × %.2f",
                                      abs(pv.x - f.x), abs(pv.y - f.y)),
