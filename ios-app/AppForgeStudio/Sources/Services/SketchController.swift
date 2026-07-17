@@ -648,7 +648,7 @@ final class SketchController: ObservableObject {
         // Arco en su 3ª fase (centro=anchor y arcStart ya fijados): un drag elige
         // el FIN. No sobrescribir el centro — solo mostrar el preview del arco.
         if tool == .arc, anchor != nil, arcStart != nil {
-            let p = snap(raw, reference: arcStart.map { Vec2($0) }).position
+            let p = snap(raw, reference: arcStart).position   // arcStart ya es Vec2?
             preview = p.simd
             if let c = anchor.map({ Vec2($0) }), let s = arcStart {
                 previewPolyline = arcPreviewPolyline(center: c, start: s, cursor: p)
