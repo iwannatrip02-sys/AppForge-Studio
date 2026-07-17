@@ -245,6 +245,27 @@ final class SketchController: ObservableObject {
         preview = nil
     }
 
+    /// ¿El snap enganchó un punto NOTABLE "duro" (endpoint/intersección/medio/
+    /// centro/cuadrante)? Si sí, la posición es intencional y NO debe ajustarse
+    /// a H/V en el commit — el usuario apuntó exactamente ahí.
+    private func isHardSnap(_ result: SnapResult) -> Bool {
+        switch result.kind {
+        case .endpoint, .intersection, .midpoint, .center, .quadrant:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Commit H/V DEFINITIVO (<10°, delega en `AxisSnap` del kernel — lógica
+    /// pura testeable). Solo endereza cuando NO hubo snap duro: si el usuario
+    /// enganchó un punto notable, esa posición fue intencional.
+    private func snapEndpointToAxis(_ endpoint: Vec2, from reference: Vec2,
+                                    snap result: SnapResult) -> Vec2 {
+        AxisSnap.commit(endpoint: endpoint, reference: reference,
+                        allowAdjust: !isHardSnap(result))
+    }
+
     /// Distancia al punto topológico más cercano — decide la prioridad del
     /// gesto (ajuste fino vs. región vs. trazo), igual que antes.
     func nearestEditablePointDistance(to p: SIMD2<Float>) -> Float? {
@@ -390,9 +411,13 @@ final class SketchController: ObservableObject {
 
         if let last = chainLast {
             guard p.distance(to: last) > 1e-6 else { return }
-            mutate { $0.addLine(from: last, to: p) }
+            // Commit H/V definitivo (<10°): endereza el extremo si el ángulo
+            // desde el punto anterior está casi horizontal/vertical y no hubo
+            // snap duro.
+            let end = snapEndpointToAxis(p, from: last, snap: s)
+            mutate { $0.addLine(from: last, to: end) }
             chainCount += 1
-            chainLast = p
+            chainLast = end
             // El punto de arranque ya EXISTE en el modelo tras el primer
             // segmento: capturamos su pointID para cerrar por identidad
             // topológica (más robusto que sólo por distancia).
@@ -594,18 +619,22 @@ final class SketchController: ObservableObject {
             return
         }
         guard let a = anchor.map({ Vec2($0) }) else { return }
-        let end = snap(raw, reference: a).position
+        let endSnap = snap(raw, reference: a)
+        let end = endSnap.position
         switch tool {
         case .line:
-            if end.distance(to: a) > 1e-6 {
-                mutate { $0.addLine(from: a, to: end) }
+            // Commit H/V definitivo (<10°): endereza el extremo del drag si no
+            // hubo snap duro y el ángulo está casi horizontal/vertical.
+            let lineEnd = snapEndpointToAxis(end, from: a, snap: endSnap)
+            if lineEnd.distance(to: a) > 1e-6 {
+                mutate { $0.addLine(from: a, to: lineEnd) }
                 // El drag continúa la cadena: siguiente segmento desde el fin.
                 // La línea NO hace auto-neutral: sigue armada hasta cerrar.
                 if chainStart == nil {
                     chainStart = a
                     chainStartPoint = model.existingPoint(near: a, tolerance: Double(snapRadiusPlane) * 0.5)
                 }
-                chainLast = end
+                chainLast = lineEnd
                 chainCount += 1
                 statusMessage = "Sigue con más segmentos o toca el primero para cerrar"
             }
