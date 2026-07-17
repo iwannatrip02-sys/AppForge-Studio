@@ -155,6 +155,12 @@ final class SketchController: ObservableObject {
     /// añade/quita del conjunto — como Shapr3D sin botón de seleccionar).
     @Published var selectedCurveIDs: Set<CurveID> = []
 
+    /// "Curva caliente": la RECIÉN confirmada. La barra muestra campos numéricos
+    /// contextuales para editarla en vivo (longitud/ángulo/radio) además del
+    /// auto-neutral. Brecha #1 de sensación vs Shapr3D (input al dibujar). Se
+    /// limpia al tocar en vacío o armar otra herramienta.
+    @Published private(set) var hotCurveID: CurveID? = nil
+
     /// Compat: el panel de Elementos y el render leen un solo `selectedCurveID`.
     /// Es el PRIMERO del conjunto (orden de dibujo). Asignarlo reemplaza el set.
     var selectedCurveID: CurveID? {
@@ -316,6 +322,7 @@ final class SketchController: ObservableObject {
         anchor = nil; arcStart = nil
         splineDraft = []
         selectedCurveIDs = []
+        hotCurveID = nil
         draggedPoint = nil
         clearFeedback()
     }
@@ -385,9 +392,10 @@ final class SketchController: ObservableObject {
             statusMessage = "Región seleccionada — arrastra desde adentro para extruir"
             clearFeedback()
         case .none:
-            // Tap en vacío deselecciona todo.
+            // Tap en vacío deselecciona todo (incluida la curva caliente).
             selectedCurveIDs = []
             selectedRegion = nil
+            hotCurveID = nil
             statusMessage = ""
             clearFeedback()
         }
@@ -419,7 +427,9 @@ final class SketchController: ObservableObject {
             // desde el punto anterior está casi horizontal/vertical y no hubo
             // snap duro.
             let end = snapEndpointToAxis(p, from: last, snap: s)
-            mutate { $0.addLine(from: last, to: end) }
+            var added: CurveID?
+            mutate { added = $0.addLine(from: last, to: end) }
+            hotCurveID = added   // curva caliente: editable en vivo por longitud/ángulo
             chainCount += 1
             chainLast = end
             // El punto de arranque ya EXISTE en el modelo tras el primer
@@ -484,7 +494,9 @@ final class SketchController: ObservableObject {
         if let c = anchor {
             let r = p.distance(to: Vec2(c))
             if r > 1e-3 {
-                mutate { $0.addCircle(center: Vec2(c), radius: r) }
+                var added: CurveID?
+                mutate { added = $0.addCircle(center: Vec2(c), radius: r) }
+                hotCurveID = added   // radio editable en vivo
                 statusMessage = "Círculo ✓ — tócalo y arrastra para extruir"
             }
             anchor = nil
@@ -502,7 +514,9 @@ final class SketchController: ObservableObject {
             // Tercer tap: fin. Sentido = el barrido menor.
             let v1 = s - c, v2 = p - c
             let ccw = v1.cross(v2) > 0
-            mutate { $0.addArc(center: c, start: s, end: p, ccw: ccw) }
+            var added: CurveID?
+            mutate { added = $0.addArc(center: c, start: s, end: p, ccw: ccw) }
+            hotCurveID = added   // radio editable en vivo
             anchor = nil; arcStart = nil
             clearFeedback()
             statusMessage = "Arco ✓"
@@ -667,7 +681,9 @@ final class SketchController: ObservableObject {
             // hubo snap duro y el ángulo está casi horizontal/vertical.
             let lineEnd = snapEndpointToAxis(end, from: a, snap: endSnap)
             if lineEnd.distance(to: a) > 1e-6 {
-                mutate { $0.addLine(from: a, to: lineEnd) }
+                var added: CurveID?
+                mutate { added = $0.addLine(from: a, to: lineEnd) }
+                hotCurveID = added
                 // El drag continúa la cadena: siguiente segmento desde el fin.
                 // La línea NO hace auto-neutral: sigue armada hasta cerrar.
                 if chainStart == nil {
@@ -687,7 +703,9 @@ final class SketchController: ObservableObject {
         case .circle:
             let r = end.distance(to: a)
             if r > 1e-3 {
-                mutate { $0.addCircle(center: a, radius: r) }
+                var added: CurveID?
+                mutate { added = $0.addCircle(center: a, radius: r) }
+                hotCurveID = added
                 statusMessage = "Círculo ✓ — tócalo y arrastra para extruir"
             }
             anchor = nil
@@ -708,7 +726,9 @@ final class SketchController: ObservableObject {
             if let s = arcStart {
                 let v1 = s - a, v2 = end - a
                 let ccw = v1.cross(v2) > 0
-                mutate { $0.addArc(center: a, start: s, end: end, ccw: ccw) }
+                var added: CurveID?
+                mutate { added = $0.addArc(center: a, start: s, end: end, ccw: ccw) }
+                hotCurveID = added
                 anchor = nil; arcStart = nil
                 clearFeedback()
                 statusMessage = "Arco ✓"
@@ -939,6 +959,79 @@ final class SketchController: ObservableObject {
 
     func editSelectedSides(_ sides: Int) {}
     func editSelectedRectSize(w: Float, h: Float) {}
+
+    // MARK: - Entrada numérica al dibujar (curva caliente / selección única)
+
+    /// La curva que la barra puede editar numéricamente: la CALIENTE (recién
+    /// dibujada), o la ÚNICA seleccionada. nil si no hay una clara.
+    var editableCurveID: CurveID? {
+        if let hot = hotCurveID, model.curves[hot] != nil { return hot }
+        if selectedCurveIDs.count == 1 { return selectedCurveIDs.first }
+        return nil
+    }
+
+    /// Tipo de la curva editable para que la barra decida qué campos mostrar.
+    enum EditableKind: Equatable { case line, circle, arc, other }
+    var editableKind: EditableKind? {
+        guard let id = editableCurveID, let k = model.curves[id]?.kind else { return nil }
+        switch k {
+        case .line: return .line
+        case .circle: return .circle
+        case .arc: return .arc
+        case .spline: return .other
+        }
+    }
+
+    /// Longitud actual de la línea editable (o nil).
+    var editableLineLength: Float? {
+        guard let id = editableCurveID, let m = model.lineMetrics(id) else { return nil }
+        return Float(m.length)
+    }
+    /// Ángulo actual (grados) de la línea editable (o nil).
+    var editableLineAngle: Float? {
+        guard let id = editableCurveID, let m = model.lineMetrics(id) else { return nil }
+        return Float(m.angleDegrees)
+    }
+    /// Radio actual del círculo/arco editable (o nil).
+    var editableRadius: Float? {
+        guard let id = editableCurveID else { return nil }
+        switch model.curves[id]?.kind {
+        case .circle(_, let r): return Float(r)
+        case .arc(let s, _, let c, _):
+            guard let sp = model.position(of: s), let cp = model.position(of: c) else { return nil }
+            return Float(sp.distance(to: cp))
+        default: return nil
+        }
+    }
+
+    /// Fija la longitud de la línea editable (mueve el endpoint; la topología
+    /// conectada lo sigue).
+    func setEditableLineLength(_ length: Float) {
+        guard let id = editableCurveID else { return }
+        mutate { $0.setLineLength(id, Double(max(1e-3, length))) }
+    }
+    /// Fija el ángulo (grados) de la línea editable.
+    func setEditableLineAngle(_ degrees: Float) {
+        guard let id = editableCurveID else { return }
+        mutate { $0.setLineAngle(id, degrees: Double(degrees)) }
+    }
+    /// Fija el radio del círculo/arco editable. El círculo usa setCircleRadius;
+    /// el arco mueve el punto START re-proyectando (el fixup del kernel recoloca
+    /// el extremo final al nuevo radio).
+    func setEditableRadius(_ r: Float) {
+        guard let id = editableCurveID else { return }
+        let radius = Double(max(1e-3, r))
+        switch model.curves[id]?.kind {
+        case .circle:
+            mutate { $0.setCircleRadius(id, radius: radius) }
+        case .arc(let s, _, let c, _):
+            guard let sp = model.position(of: s), let cp = model.position(of: c) else { return }
+            let dir = sp.distance(to: cp) > 1e-9 ? (sp - cp).normalized : Vec2(1, 0)
+            mutate { $0.movePoint(s, to: cp + dir * radius) }
+        default:
+            break
+        }
+    }
 
     // MARK: - Geometría de construcción (helper)
 

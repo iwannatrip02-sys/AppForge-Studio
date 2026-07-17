@@ -1062,6 +1062,13 @@ struct CADModeView: View {
                 }
                 .onChange(of: polygonSidesUI) { v in sketch.polygonSides = v }
             }
+            // Entrada numérica al dibujar (brecha #1): campos contextuales para
+            // la curva CALIENTE (recién dibujada) o la selección única. Línea →
+            // Longitud+Ángulo; círculo/arco → Radio. No se solapa con el editor
+            // de selección de arriba (ese solo aparece con selectedEntityIndex).
+            if sketch.selectedEntityIndex == nil {
+                hotCurveNumericControls()
+            }
             // Geometría de construcción (helper): togglea el bit de los trazos
             // seleccionados. Punteada fina que NO cierra región pero sigue
             // snappable — mecánica GeometryMode::Construction de FreeCAD.
@@ -1176,6 +1183,35 @@ struct CADModeView: View {
             Image(systemName: "xmark.circle.fill").foregroundColor(theme.textSecondary)
         }
         .accessibilityLabel("Deseleccionar entidad")
+    }
+
+    /// Campos numéricos contextuales de la curva CALIENTE o selección única
+    /// (brecha #1 vs Shapr3D). Línea → Longitud + Ángulo; círculo/arco → Radio.
+    /// Editar aplica en vivo vía el kernel (mueve endpoint / radio con topología).
+    @ViewBuilder
+    private func hotCurveNumericControls() -> some View {
+        switch sketch.editableKind {
+        case .line:
+            if let len = sketch.editableLineLength, let ang = sketch.editableLineAngle {
+                Text("L").font(.caption2).foregroundColor(theme.textSecondary)
+                NumericField(value: Binding(get: { Double(len) },
+                                            set: { sketch.setEditableLineLength(Float($0)) }),
+                             range: 0.01...1000)
+                Text("∠").font(.caption2).foregroundColor(theme.textSecondary)
+                NumericField(value: Binding(get: { Double(ang) },
+                                            set: { sketch.setEditableLineAngle(Float($0)) }),
+                             range: -360...360, format: "%.1f°")
+            }
+        case .circle, .arc:
+            if let r = sketch.editableRadius {
+                Text("R").font(.caption2).foregroundColor(theme.textSecondary)
+                NumericField(value: Binding(get: { Double(r) },
+                                            set: { sketch.setEditableRadius(Float($0)) }),
+                             range: 0.01...1000)
+            }
+        case .other, .none:
+            EmptyView()
+        }
     }
 
     /// Tap sobre una cara PLANA de un sólido con herramienta de dibujo activa:
@@ -3649,7 +3685,10 @@ struct SketchCanvasOverlay: View {
                     switch tool {
                     case .line:
                         strokePolyline([f, pv], close: false, color: ember, width: 2.5)
-                        label(String(format: "%.2f", simd_distance(f, pv)),
+                        // Longitud Y ángulo en el mismo label ("2.35 · 47°").
+                        let dv = pv - f
+                        let deg = Double(atan2(dv.y, dv.x)) * 180 / .pi
+                        label(String(format: "%.2f · %.0f°", simd_distance(f, pv), deg),
                               at: (f + pv) * 0.5)
                     case .arc:
                         // El trazo del arco ya viene en `draft`; aquí solo la cota
