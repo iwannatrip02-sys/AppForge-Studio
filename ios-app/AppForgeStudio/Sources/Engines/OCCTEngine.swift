@@ -31,13 +31,16 @@ final class OCCTEngine {
         OCCTSwift.Shape.cone(bottomRadius: bottomRadius, topRadius: topRadius, height: height)
     }
     
-    // MARK: - Boolean Operations (operators +, -, & return Shape?)
-    
-    func union(_ a: OCCTSwift.Shape, _ b: OCCTSwift.Shape) -> OCCTSwift.Shape? { a + b }
-    
-    func subtract(_ a: OCCTSwift.Shape, _ b: OCCTSwift.Shape) -> OCCTSwift.Shape? { a - b }
-    
-    func intersect(_ a: OCCTSwift.Shape, _ b: OCCTSwift.Shape) -> OCCTSwift.Shape? { a & b }
+    // MARK: - Boolean Operations
+    // Canalizados por RobustBoolean: fuzzy tolerance (caras coplanares) + ShapeFix
+    // (rescate de topología inválida). Antes usaban los operadores crudos +/-/&,
+    // que fallan cuando dos caras son coincidentes/casi-tangentes.
+
+    func union(_ a: OCCTSwift.Shape, _ b: OCCTSwift.Shape) -> OCCTSwift.Shape? { RobustBoolean.union(a, b) }
+
+    func subtract(_ a: OCCTSwift.Shape, _ b: OCCTSwift.Shape) -> OCCTSwift.Shape? { RobustBoolean.subtract(a, b) }
+
+    func intersect(_ a: OCCTSwift.Shape, _ b: OCCTSwift.Shape) -> OCCTSwift.Shape? { RobustBoolean.intersect(a, b) }
     
     // MARK: - Modifiers (all return Shape?)
     

@@ -23,12 +23,15 @@ enum BRepModeling {
             logger.info("[BRep] boolean \(op.rawValue): algún modelo sin B-rep — fallback a malla")
             return nil
         }
+        // Punto único de paso blindado: fuzzy tolerance (caras coplanares) +
+        // ShapeFix (rescate de topología inválida). Ya no usamos los operadores
+        // +/-/& crudos, que fallan en el caso clásico de dos caras coincidentes.
         let result: CADShape?
         let prefix: String
         switch op {
-        case .booleanUnion: result = shapeA + shapeB; prefix = "Union"
-        case .booleanSubtract: result = shapeA - shapeB; prefix = "Subtract"
-        case .booleanIntersect: result = shapeA & shapeB; prefix = "Intersect"
+        case .booleanUnion: result = RobustBoolean.union(shapeA, shapeB); prefix = "Union"
+        case .booleanSubtract: result = RobustBoolean.subtract(shapeA, shapeB); prefix = "Subtract"
+        case .booleanIntersect: result = RobustBoolean.intersect(shapeA, shapeB); prefix = "Intersect"
         default: return nil
         }
         guard let shape = result, let mesh = OCCTBridge.toMesh(shape, quality: quality) else {
