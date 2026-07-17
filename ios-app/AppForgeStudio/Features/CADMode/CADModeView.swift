@@ -1078,6 +1078,22 @@ struct CADModeView: View {
                 }
                 .accessibilityLabel("Alternar construcción")
             }
+            // Spline: alternar modo (los DOS de Shapr3D). Visible cuando la
+            // herramienta spline está armada — el controlador ya soporta ambos.
+            if selectedTool == .spline {
+                Button(action: {
+                    HapticService.shared.light()
+                    sketch.splineMode = sketch.splineMode == .throughPoints
+                        ? .controlPoints : .throughPoints
+                }) {
+                    Label(sketch.splineMode == .throughPoints ? "Por puntos" : "Por control",
+                          systemImage: sketch.splineMode == .throughPoints
+                              ? "scribble.variable" : "skew")
+                        .font(.caption)
+                        .foregroundColor(theme.accent)
+                }
+                .accessibilityLabel("Modo de spline")
+            }
             if sketch.splineChain.count >= 2 {
                 Button("Fin spline") {
                     HapticService.shared.medium()
