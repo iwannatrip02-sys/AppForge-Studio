@@ -48,9 +48,11 @@ public enum RegionFinder {
                                maxDeviation: Double = 2e-3,
                                weldTolerance: Double? = nil) -> [SketchRegion] {
         let weld = weldTolerance ?? max(model.mergeTolerance, maxDeviation)
-        // 1. Sopa de segmentos de todas las curvas discretizadas
+        // 1. Sopa de segmentos de todas las curvas discretizadas. La geometría
+        // de CONSTRUCCIÓN se omite: es helper (snappable/seleccionable) pero no
+        // debe cerrar regiones ni aportar aristas al perfil extruible.
         var segments: [(Vec2, Vec2)] = []
-        for curve in model.orderedCurves {
+        for curve in model.orderedCurves where !curve.isConstruction {
             guard let g = CurveGeometry.resolve(curve, in: model) else { continue }
             let poly = g.discretize(maxDeviation: maxDeviation)
             for i in 0..<(poly.count - 1) where poly[i].distance(to: poly[i + 1]) > weld * 0.5 {

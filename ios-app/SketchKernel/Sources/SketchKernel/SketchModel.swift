@@ -28,6 +28,11 @@ public enum SplineMode: String, Sendable, Codable {
 public struct SketchCurve: Identifiable, Sendable, Codable {
     public let id: CurveID
     public var kind: Kind
+    /// Geometría de CONSTRUCCIÓN (helper): participa en snap y es seleccionable,
+    /// pero NO aporta aristas a las regiones cerradas (no genera geometría
+    /// extruible). Bit inspirado en `GeometryMode::Construction` de FreeCAD.
+    /// Codable retrocompatible: si el JSON viejo no lo trae, decodifica `false`.
+    public var isConstruction: Bool = false
 
     public enum Kind: Sendable, Codable {
         case line(start: PointID, end: PointID)
@@ -40,9 +45,30 @@ public struct SketchCurve: Identifiable, Sendable, Codable {
         case spline(points: [PointID], mode: SplineMode)
     }
 
-    public init(id: CurveID = CurveID(), kind: Kind) {
+    public init(id: CurveID = CurveID(), kind: Kind, isConstruction: Bool = false) {
         self.id = id
         self.kind = kind
+        self.isConstruction = isConstruction
+    }
+
+    // Codable manual: `isConstruction` decodifica `false` cuando falta la clave
+    // (documentos serializados antes de que existiera la geometría de construcción).
+    private enum CodingKeys: String, CodingKey {
+        case id, kind, isConstruction
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decode(CurveID.self, forKey: .id)
+        self.kind = try c.decode(Kind.self, forKey: .kind)
+        self.isConstruction = try c.decodeIfPresent(Bool.self, forKey: .isConstruction) ?? false
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(kind, forKey: .kind)
+        try c.encode(isConstruction, forKey: .isConstruction)
     }
 
     /// Puntos topológicos que esta curva referencia.
@@ -185,6 +211,13 @@ public struct SketchModel: Sendable, Codable {
     public mutating func setCircleRadius(_ id: CurveID, radius: Double) {
         guard case .circle(let c, _) = curves[id]?.kind else { return }
         curves[id]?.kind = .circle(center: c, radius: max(1e-9, radius))
+    }
+
+    /// Marca/desmarca una curva como geometría de construcción (helper). Las de
+    /// construcción no cierran regiones pero siguen snappables y seleccionables.
+    public mutating func setConstruction(_ id: CurveID, _ flag: Bool) {
+        guard curves[id] != nil else { return }
+        curves[id]?.isConstruction = flag
     }
 
     /// Elimina la curva y recoge los puntos que quedaron huérfanos

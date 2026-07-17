@@ -832,6 +832,29 @@ final class SketchController: ObservableObject {
     func editSelectedSides(_ sides: Int) {}
     func editSelectedRectSize(w: Float, h: Float) {}
 
+    // MARK: - Geometría de construcción (helper)
+
+    /// ¿TODOS los trazos seleccionados son de construcción? (para etiquetar el
+    /// botón como "activo"). Falso si el conjunto está vacío.
+    var selectionAllConstruction: Bool {
+        guard !selectedCurveIDs.isEmpty else { return false }
+        return selectedCurveIDs.allSatisfy { model.curves[$0]?.isConstruction ?? false }
+    }
+
+    /// Togglea el bit de construcción de los trazos seleccionados. Si ya son
+    /// todos de construcción, los vuelve normales; si no, los marca a todos.
+    func toggleConstructionForSelection() {
+        let targets = selectedCurveIDs
+        guard !targets.isEmpty else { return }
+        let makeConstruction = !selectionAllConstruction
+        mutate { m in
+            for t in targets { m.setConstruction(t, makeConstruction) }
+        }
+        statusMessage = makeConstruction
+            ? "Construcción ✓ — no cierra región, sigue como guía"
+            : "Geometría normal ✓"
+    }
+
     // MARK: - Plano ↔ mundo
 
     func world(_ p: SIMD2<Float>) -> SIMD3<Float> {

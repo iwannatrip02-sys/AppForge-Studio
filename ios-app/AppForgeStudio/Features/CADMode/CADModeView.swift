@@ -1060,6 +1060,22 @@ struct CADModeView: View {
                 }
                 .onChange(of: polygonSidesUI) { v in sketch.polygonSides = v }
             }
+            // Geometría de construcción (helper): togglea el bit de los trazos
+            // seleccionados. Punteada fina que NO cierra región pero sigue
+            // snappable — mecánica GeometryMode::Construction de FreeCAD.
+            if !sketch.selectedCurveIDs.isEmpty {
+                Button(action: {
+                    HapticService.shared.light()
+                    sketch.toggleConstructionForSelection()
+                }) {
+                    Label("Construcción",
+                          systemImage: sketch.selectionAllConstruction
+                              ? "scribble.variable" : "line.diagonal")
+                        .font(.caption)
+                        .foregroundColor(sketch.selectionAllConstruction ? theme.accent : theme.textSecondary)
+                }
+                .accessibilityLabel("Alternar construcción")
+            }
             if sketch.splineChain.count >= 2 {
                 Button("Fin spline") {
                     HapticService.shared.medium()
@@ -3512,14 +3528,31 @@ struct SketchCanvasOverlay: View {
             }
 
             // ---- Curvas confirmadas (kernel): la seleccionada en brasa ----
+            let constructionColor = Color(red: 0.50, green: 0.60, blue: 0.72)
             for curve in curves {
                 guard let g = CurveGeometry.resolve(curve, in: kernelModel) else { continue }
                 let pts = g.discretize(maxDeviation: 2e-3).map { $0.simd }
                 // Selección MÚLTIPLE en brasa (beta 2026-07-16b: el set completo).
                 let isSel = selectedIDs.contains(curve.id)
-                strokePolyline(pts, close: false,
-                               color: isSel ? ember : steel,
-                               width: isSel ? 3 : 2)
+                // Construcción: punteada fina gris-azulada (helper visual). Sigue
+                // resaltando en brasa si está seleccionada.
+                if curve.isConstruction {
+                    let screen = pts.compactMap(proj)
+                    if screen.count >= 2 {
+                        var path = Path()
+                        path.move(to: screen[0])
+                        for p in screen.dropFirst() { path.addLine(to: p) }
+                        ctx.stroke(path,
+                                   with: .color(isSel ? ember : constructionColor),
+                                   style: StrokeStyle(lineWidth: isSel ? 2 : 1,
+                                                      lineCap: .round,
+                                                      dash: [4, 4]))
+                    }
+                } else {
+                    strokePolyline(pts, close: false,
+                                   color: isSel ? ember : steel,
+                                   width: isSel ? 3 : 2)
+                }
                 switch curve.kind {
                 case .line(let s, let e):
                     if let a = kernelModel.position(of: s), let b = kernelModel.position(of: e) {
