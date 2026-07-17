@@ -294,9 +294,30 @@ final class SketchController: ObservableObject {
     }
 
     private func modelDidChange() {
-        regions = RegionFinder.regions(in: model)
+        // Primera pasada con la tolerancia por defecto.
+        var found = RegionFinder.regions(in: model)
+        // Segunda pasada TOLERANTE (robustez): si no salió ninguna región pero
+        // hay ≥3 curvas no-construcción (un perfil que "parece" cerrado en
+        // pantalla pero con gaps de Pencil), reintenta soldando con una
+        // tolerancia mayor derivada del radio de snap. Feedback device: "cerrar
+        // cadena todavía no funciona muy bien". (Dune3D usa Clipper2 tolerante;
+        // esto es el equivalente barato: subir weldTolerance en el segundo pase.)
+        if found.isEmpty {
+            let solidCurves = model.orderedCurves.filter { !$0.isConstruction }.count
+            if solidCurves >= 3 {
+                let weld = Double(snapRadiusPlane) * 0.5
+                let second = RegionFinder.regions(in: model, weldTolerance: weld)
+                if !second.isEmpty { found = second }
+            }
+        }
+        regions = found
         revision += 1
     }
+
+    /// Re-evalúa las regiones sin mutar el modelo. Útil cuando cambia el zoom
+    /// (el umbral del segundo pase depende de `snapRadiusPlane`). Internal para
+    /// que los tests verifiquen el segundo pase con un radio concreto.
+    func recomputeRegions() { modelDidChange() }
 
     // MARK: - Herramientas (taps)
 

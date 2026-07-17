@@ -253,6 +253,41 @@ final class SketchControllerTests: XCTestCase {
         XCTAssertEqual(s.regions.count, 1)
     }
 
+    // MARK: - Segunda pasada de regiones (robustez ante gaps)
+
+    /// Un cuadrado con las esquinas desviadas ~0.05 (gaps mayores que la
+    /// mergeTolerance de 1e-3) NO cierra en la primera pasada, pero SÍ en la
+    /// segunda con weldTolerance = snapRadiusPlane*0.5. Feedback device:
+    /// "cerrar cadena todavía no funciona muy bien".
+    func testSecondPassClosesDeviatedSquare() {
+        let s = SketchController()
+        // Radio de snap DIMINUTO durante el trazado: los extremos desviados NO
+        // se fusionan por endpoint-snap (quedan como esquinas separadas).
+        s.unitsPerPoint = 1e-5
+
+        // 4 lados como líneas independientes (beginTool nuevo = sin cadena), con
+        // las esquinas desviadas ~0.05 respecto a un cuadrado 4×4 perfecto.
+        func side(_ a: SIMD2<Float>, _ b: SIMD2<Float>) {
+            s.beginTool(.line)
+            s.pencilDragBegan(at: a)
+            s.pencilDragEnded(at: b)
+        }
+        side(SIMD2(0.00, 0.00), SIMD2(4.05, 0.03))
+        side(SIMD2(4.02, 0.05), SIMD2(3.98, 4.04))
+        side(SIMD2(4.01, 4.00), SIMD2(0.04, 3.97))
+        side(SIMD2(0.03, 4.02), SIMD2(0.02, 0.05))
+        s.disarm()
+
+        // Primera pasada (radio diminuto): los gaps ~0.05 no sueldan → 0 regiones.
+        XCTAssertTrue(s.regions.isEmpty, "con gaps y radio diminuto no cierra")
+
+        // Zoom que da snapRadiusPlane ≈ 0.3 → weld del 2º pase = 0.15 > gaps.
+        s.unitsPerPoint = 0.3 / 22
+        s.recomputeRegions()
+        XCTAssertEqual(s.regions.count, 1,
+                       "la segunda pasada tolerante cierra el cuadrado desviado")
+    }
+
     // MARK: - Radio de snap adaptativo al zoom
 
     /// Con `unitsPerPoint` grande (zoom lejano) el snap agarra desde MÁS lejos;
