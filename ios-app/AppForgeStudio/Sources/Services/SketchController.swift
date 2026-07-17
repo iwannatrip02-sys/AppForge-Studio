@@ -36,7 +36,7 @@ final class SketchController: ObservableObject {
     }
     @Published var plane: WorkPlane = .floor
 
-    enum Tool { case line, rectangle, circle, arc, spline, polygon }
+    enum Tool { case line, rectangle, circle, arc, spline, polygon, trim }
 
     // MARK: - Estado del kernel
 
@@ -344,6 +344,7 @@ final class SketchController: ObservableObject {
         case .arc: tapArc(raw)
         case .spline: tapSpline(raw)
         case .polygon: tapPolygon(raw)
+        case .trim: tapTrim(raw)
         }
         preview = nil
     }
@@ -556,6 +557,26 @@ final class SketchController: ObservableObject {
         }
     }
 
+    /// Tap con la herramienta TRIM armada: localiza el trazo bajo el toque
+    /// (HitTester) y lo recorta en ese tramo (kernel.trim). Tras recortar sigue
+    /// ARMADO (recortes en ráfaga, como Shapr3D). Status honesto si no pudo.
+    private func tapTrim(_ raw: SIMD2<Float>) {
+        let r = Double(snapRadiusPlane)
+        let hit = hitTester.hitTest(at: Vec2(raw), in: model,
+                                    pointRadius: r * 0.5,   // el punto no gana al trazo aquí
+                                    curveRadius: r,
+                                    regions: [])
+        guard case .curve(let id, let closest) = hit else {
+            statusMessage = "Toca un trazo para recortarlo"
+            return
+        }
+        var didTrim = false
+        mutate { didTrim = $0.trim(id, at: closest) }
+        statusMessage = didTrim
+            ? "Recortado ✓ — sigue tocando trazos para recortar"
+            : "No se pudo recortar aquí (¿spline o sin cruces suficientes?)"
+    }
+
     /// Polígono = N líneas con vértices compartidos (igual que el rect).
     private func commitPolygon(center: Vec2, radius: Double) {
         let sides = max(3, min(12, polygonSides))
@@ -578,6 +599,8 @@ final class SketchController: ObservableObject {
         // Solo dibuja si hay herramienta armada (en neutral el drag se enruta a
         // mover-punto/región desde CADModeView, no aquí).
         guard let tool = armedTool else { return }
+        // Trim es SOLO por tap: un drag lo trata como un tap de recorte.
+        if tool == .trim { return }
         if tool == .spline {
             let p = snap(raw).position
             splineDraft = [p.simd]
@@ -591,6 +614,7 @@ final class SketchController: ObservableObject {
 
     func pencilDragChanged(to raw: SIMD2<Float>) {
         guard let tool = armedTool else { return }
+        if tool == .trim { return }   // trim no dibuja preview
         if tool == .spline {
             // El trazo siembra puntos cada `splineSeedStep` (adaptativo al zoom:
             // beta 2026-07-16b — con paso fijo 0.35 salían 2 puntos y parecía
@@ -613,6 +637,9 @@ final class SketchController: ObservableObject {
 
     func pencilDragEnded(at raw: SIMD2<Float>) {
         guard let tool = armedTool else { return }
+        // Trim SOLO por tap: si el drag terminó sin haberse iniciado como dibujo
+        // (no hay anchor), lo tratamos como un tap de recorte.
+        if tool == .trim { tapTrim(raw); return }
         if tool == .spline {
             splineDraft.append(raw)
             finishSpline()   // el trazo ES la spline (finishSpline hace auto-neutral)
@@ -669,7 +696,7 @@ final class SketchController: ObservableObject {
             preview = nil
             previewPolyline = []
             return
-        case .spline:
+        case .spline, .trim:
             break
         }
         anchor = nil
@@ -702,6 +729,8 @@ final class SketchController: ObservableObject {
             return verts
         case .spline:
             return splineDraft + [p.simd]
+        case .trim:
+            return []   // trim no dibuja preview de figura
         }
     }
 

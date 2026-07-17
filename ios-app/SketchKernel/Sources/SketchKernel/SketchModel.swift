@@ -236,6 +236,168 @@ public struct SketchModel: Sendable, Codable {
         if curvesAttached(to: id).isEmpty { positions[id] = nil }
     }
 
+    // MARK: - Trim (recorte por intersecciones)
+
+    /// Recorta la curva `id` en el tramo que contiene el punto `p`: calcula
+    /// TODAS las intersecciones con las demás curvas, parametriza los cortes
+    /// sobre el target y elimina el tramo entre los dos cortes que rodean a `p`.
+    /// Mecánica de `CommandGeoTrim` de FreeCAD, pero geométrica (sin solver).
+    ///
+    /// - Línea → 0/1/2 líneas restantes (los extremos NO tocados conservan su
+    ///   PointID; los cortes se fusionan por topología con `addOrMergePoint`).
+    /// - Círculo → arco complementario (requiere ≥2 cortes; con <2 no-op → false).
+    /// - Arco → arco(s) recortado(s).
+    /// - Spline → no soportado en v1 (return false).
+    /// - Sin intersecciones → borra la curva entera (trim de curva suelta =
+    ///   borrar, como Shapr3D) y devuelve true.
+    @discardableResult
+    public mutating func trim(_ id: CurveID, at p: Vec2) -> Bool {
+        guard let curve = curves[id],
+              let g = CurveGeometry.resolve(curve, in: self) else { return false }
+
+        // Spline: no soportada en v1.
+        if case .spline = curve.kind { return false }
+
+        // 1. Parámetros t de los cortes con las demás curvas.
+        var cutTs: [Double] = []
+        for other in orderedCurves where other.id != id {
+            guard let og = CurveGeometry.resolve(other, in: self) else { continue }
+            for x in Intersections.between(g, og) {
+                let t = g.closestPoint(to: x).t
+                cutTs.append(t)
+            }
+        }
+
+        switch curve.kind {
+        case .line(let sID, let eID):
+            return trimLine(id, startID: sID, endID: eID, g: g, cuts: cutTs, at: p)
+        case .circle:
+            return trimCircle(id, g: g, cuts: cutTs, at: p)
+        case .arc(let sID, let eID, let cID, let ccw):
+            return trimArc(id, startID: sID, endID: eID, centerID: cID, ccw: ccw,
+                           g: g, cuts: cutTs, at: p)
+        case .spline:
+            return false
+        }
+    }
+
+    /// Cortes válidos ordenados en (0,1) sin duplicados (por tolerancia en t).
+    private func normalizedInteriorCuts(_ cuts: [Double], epsilon: Double = 1e-6) -> [Double] {
+        var uniq: [Double] = []
+        for t in cuts.sorted() where t > epsilon && t < 1 - epsilon {
+            if uniq.last.map({ abs($0 - t) > epsilon }) ?? true { uniq.append(t) }
+        }
+        return uniq
+    }
+
+    /// Línea: los cortes interiores + 0 y 1 forman las fronteras; se elimina el
+    /// tramo que contiene la proyección de `p`; los demás sobreviven como líneas.
+    private mutating func trimLine(_ id: CurveID, startID: PointID, endID: PointID,
+                                   g: CurveGeometry, cuts: [Double], at p: Vec2) -> Bool {
+        let interior = normalizedInteriorCuts(cuts)
+        // Sin cortes → borrar la curva suelta entera.
+        guard !interior.isEmpty else { removeCurve(id); return true }
+
+        let bounds = [0.0] + interior + [1.0]
+        let tp = g.closestPoint(to: p).t
+        // Tramo [bounds[k], bounds[k+1]] que contiene tp.
+        var kill = 0
+        for k in 0..<(bounds.count - 1) where tp >= bounds[k] && tp <= bounds[k + 1] {
+            kill = k; break
+        }
+        // Reconstruir los tramos SALVO el eliminado, preservando PointIDs de
+        // los extremos originales (t=0 → startID; t=1 → endID) que sobrevivan.
+        removeCurve(id)
+        for k in 0..<(bounds.count - 1) where k != kill {
+            let t0 = bounds[k], t1 = bounds[k + 1]
+            let a = t0 <= 1e-9 ? startID : addOrMergePoint(at: g.evaluate(t0))
+            let b = t1 >= 1 - 1e-9 ? endID : addOrMergePoint(at: g.evaluate(t1))
+            // Los extremos originales pudieron quedar huérfanos al remover la
+            // curva; re-crearlos si hace falta manteniendo su identidad.
+            ensurePoint(a, at: g.evaluate(t0))
+            ensurePoint(b, at: g.evaluate(t1))
+            _ = addLine(from: a, to: b)
+        }
+        return true
+    }
+
+    /// Círculo → arco: con ≥2 cortes, quita el sector que contiene `p` dejando
+    /// el arco complementario (de un corte al otro, por el lado sin `p`).
+    private mutating func trimCircle(_ id: CurveID, g: CurveGeometry,
+                                     cuts: [Double], at p: Vec2) -> Bool {
+        // Un círculo puede tener cortes en t≈0/1 (mismo punto): normalizar en
+        // el aro [0,1) sin la restricción interior, tratando ≈1 como ≈0 (wrap).
+        func wrap(_ t: Double) -> Double {
+            var v = t.truncatingRemainder(dividingBy: 1)
+            if v < 0 { v += 1 }
+            if v > 1 - 1e-6 { v = 0 }
+            return v
+        }
+        var ring: [Double] = []
+        for t in cuts.map(wrap).sorted() {
+            if ring.last.map({ abs($0 - t) > 1e-6 }) ?? true { ring.append(t) }
+        }
+        guard ring.count >= 2 else { return false } // <2 cortes: no-op
+
+        // Tramos del aro entre cortes consecutivos (envolviendo). Se elimina el
+        // que contiene tp; el resto se une en un arco por sus extremos.
+        let tpN = wrap(g.closestPoint(to: p).t)
+        // Encontrar el par de cortes (a,b) tal que tp caiga en (a,b) del aro.
+        var killLo = ring[ring.count - 1], killHi = ring[0]
+        var found = false
+        for k in 0..<(ring.count - 1) where tpN >= ring[k] && tpN <= ring[k + 1] {
+            killLo = ring[k]; killHi = ring[k + 1]; found = true; break
+        }
+        if !found { killLo = ring[ring.count - 1]; killHi = ring[0] } // tramo que envuelve 1→0
+        // El arco que SOBREVIVE va de killHi (avanzando CCW) a killLo.
+        guard case .circle(let center, let radius) = g.shape else { return false }
+        let startAng = 2 * .pi * killHi
+        let endAng = 2 * .pi * killLo
+        let sPos = center + Vec2(cos(startAng), sin(startAng)) * radius
+        let ePos = center + Vec2(cos(endAng), sin(endAng)) * radius
+        removeCurve(id)
+        _ = addArc(center: center, start: sPos, end: ePos, ccw: true)
+        return true
+    }
+
+    /// Arco → arco(s): igual que la línea pero sobre el barrido; los extremos
+    /// (t=0 start, t=1 end) conservan su PointID si sobreviven.
+    private mutating func trimArc(_ id: CurveID, startID: PointID, endID: PointID,
+                                  centerID: PointID, ccw: Bool,
+                                  g: CurveGeometry, cuts: [Double], at p: Vec2) -> Bool {
+        let interior = normalizedInteriorCuts(cuts)
+        guard !interior.isEmpty else { removeCurve(id); return true }
+
+        guard let centerPos = positions[centerID],
+              case .arc = g.shape else { return false }
+        let bounds = [0.0] + interior + [1.0]
+        let tp = g.closestPoint(to: p).t
+        var kill = 0
+        for k in 0..<(bounds.count - 1) where tp >= bounds[k] && tp <= bounds[k + 1] {
+            kill = k; break
+        }
+        removeCurve(id)
+        for k in 0..<(bounds.count - 1) where k != kill {
+            let t0 = bounds[k], t1 = bounds[k + 1]
+            let sPos = g.evaluate(t0), ePos = g.evaluate(t1)
+            // El sub-arco conserva centro, radio y sentido; ccw se mantiene
+            // porque evaluate ya respeta el sentido del barrido original.
+            let a = t0 <= 1e-9 ? startID : addOrMergePoint(at: sPos)
+            let b = t1 >= 1 - 1e-9 ? endID : addOrMergePoint(at: ePos)
+            ensurePoint(a, at: sPos)
+            ensurePoint(b, at: ePos)
+            ensurePoint(centerID, at: centerPos)
+            _ = insert(SketchCurve(kind: .arc(start: a, end: b, center: centerID, ccw: ccw)))
+        }
+        return true
+    }
+
+    /// Garantiza que un PointID exista en `positions` en la posición dada (los
+    /// extremos originales pudieron quedar huérfanos al remover la curva vieja).
+    private mutating func ensurePoint(_ id: PointID, at p: Vec2) {
+        if positions[id] == nil { positions[id] = p }
+    }
+
     public mutating func removeAll() {
         positions.removeAll()
         curves.removeAll()

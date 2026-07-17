@@ -341,8 +341,9 @@ struct CADModeView: View {
     }
 
     private var sketchTools: [CADTool] {
-        // Sketch en viewport: línea (cadena), círculo, rectángulo, SPLINE, POLÍGONO.
-        [.line, .circle, .rectangle, .spline, .polygon]
+        // Sketch en viewport: línea (cadena), círculo, rectángulo, ARCO, SPLINE,
+        // POLÍGONO, RECORTAR. (El controlador ya implementa arco y trim.)
+        [.line, .circle, .rectangle, .arc, .spline, .polygon, .trim]
     }
 
     /// `id` alimenta la lógica (performAddPrimitive); `label` es lo visible.
@@ -753,6 +754,7 @@ struct CADModeView: View {
             case .arc: sketch.beginTool(.arc)
             case .spline: sketch.beginTool(.spline)
             case .polygon: sketch.beginTool(.polygon)
+            case .trim: sketch.beginTool(.trim)
             case .sketch: sketch.disarm()   // modo boceto NEUTRAL (sin herramienta armada)
             default: break
             }
@@ -3630,7 +3632,7 @@ struct SketchCanvasOverlay: View {
                               at: (f + pv) * 0.5)
                     case .circle, .polygon:
                         label(String(format: "R %.2f", simd_distance(f, pv)), at: pv)
-                    case .spline:
+                    case .spline, .trim:
                         break
                     }
                     dot(pv, color: ember)
