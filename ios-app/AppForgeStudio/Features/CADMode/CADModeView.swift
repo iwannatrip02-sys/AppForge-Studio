@@ -23,7 +23,6 @@ struct CADModeView: View {
     var renderer: SatinRenderer
     @ObservedObject var toolVM: ToolViewModel
     @ObservedObject var animationVM: AnimationEngine
-    @StateObject private var sketchEngine = CADSketchEngine()
     @StateObject private var constraintEngine = ConstraintEngine()
     @StateObject private var groupAssemblyEngine = AssemblyEngine()
     @StateObject private var pushPullController = PushPullController()
@@ -843,7 +842,7 @@ struct CADModeView: View {
             Text(stepExportMessage)
         }
         .sheet(isPresented: $showCADTimeline) {
-            CADTimelineView(historyTree: sketchEngine.historyTree)
+            CADTimelineView(historyTree: canvasVM.scene.cadHistory)
                 .environmentObject(themeManager)
         }
         .sheet(isPresented: $showFeatureReport) {
@@ -1747,7 +1746,7 @@ struct CADModeView: View {
 
             Divider()
             ConstraintOverlayView(
-                constraintManager: sketchEngine.constraintManager,
+                constraintManager: canvasVM.scene.constraintManager,
                 snapPoints: snapPoints,
                 activeSnapPoint: constraintEngine.currentSnapPoint
             )
@@ -2314,58 +2313,43 @@ struct CADModeView: View {
         }
     }
 
-    /// Exporta la escena como STEP usando la primera entidad B-rep encontrada.
+    /// Exporta la escena como STEP a partir de la geometría de malla de los
+    /// modelos de la escena. (El antiguo camino vía `CADSketchEngine.getSketchLines`
+    /// murió con el motor legacy: el sketch vivo es `SketchController` y su salida
+    /// canónica a sólido pasa por extrusión B-rep, no por líneas sueltas a STEP.)
     private func exportToSTEP() {
-        let lines = sketchEngine.getSketchLines()
-
-        if lines.isEmpty {
-            var modelLines: [(CGPoint, CGPoint)] = []
-            for model in canvasVM.scene.models {
-                for mesh in model.meshes {
-                    let verts = mesh.vertices
-                    for i in stride(from: 0, to: verts.count - 1, by: 2) {
-                        if i + 1 < verts.count {
-                            let p1 = CGPoint(x: CGFloat(verts[i].position.x), y: CGFloat(verts[i].position.y))
-                            let p2 = CGPoint(x: CGFloat(verts[i + 1].position.x), y: CGFloat(verts[i + 1].position.y))
-                            modelLines.append((p1, p2))
-                        }
+        var modelLines: [(CGPoint, CGPoint)] = []
+        for model in canvasVM.scene.models {
+            for mesh in model.meshes {
+                let verts = mesh.vertices
+                for i in stride(from: 0, to: verts.count - 1, by: 2) {
+                    if i + 1 < verts.count {
+                        let p1 = CGPoint(x: CGFloat(verts[i].position.x), y: CGFloat(verts[i].position.y))
+                        let p2 = CGPoint(x: CGFloat(verts[i + 1].position.x), y: CGFloat(verts[i + 1].position.y))
+                        modelLines.append((p1, p2))
                     }
                 }
             }
+        }
 
-            if modelLines.isEmpty {
-                stepExportMessage = "No sketch lines available to export"
-                showStepExportAlert = true
-                return
-            }
+        if modelLines.isEmpty {
+            stepExportMessage = "No sketch lines available to export"
+            showStepExportAlert = true
+            return
+        }
 
-            let exportService = ExportServiceSTEP()
+        let exportService = ExportServiceSTEP()
 
-            guard let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
-            let outputURL = documentsDir.appendingPathComponent("export_\(UUID().uuidString.prefix(8)).stp")
+        guard let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let outputURL = documentsDir.appendingPathComponent("export_\(UUID().uuidString.prefix(8)).stp")
 
-            do {
-                _ = try exportService.exportToSTEP(sketchLines: modelLines, outputURL: outputURL)
-                stepExportMessage = "STEP exported to \(outputURL.lastPathComponent)"
-                showStepExportAlert = true
-            } catch {
-                stepExportMessage = "Export failed: \(error.localizedDescription)"
-                showStepExportAlert = true
-            }
-        } else {
-            let exportService = ExportServiceSTEP()
-
-            guard let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
-            let outputURL = documentsDir.appendingPathComponent("sketch_\(UUID().uuidString.prefix(8)).stp")
-
-            do {
-                _ = try exportService.exportToSTEP(sketchLines: lines, outputURL: outputURL)
-                stepExportMessage = "STEP exported to \(outputURL.lastPathComponent)"
-                showStepExportAlert = true
-            } catch {
-                stepExportMessage = "Export failed: \(error.localizedDescription)"
-                showStepExportAlert = true
-            }
+        do {
+            _ = try exportService.exportToSTEP(sketchLines: modelLines, outputURL: outputURL)
+            stepExportMessage = "STEP exported to \(outputURL.lastPathComponent)"
+            showStepExportAlert = true
+        } catch {
+            stepExportMessage = "Export failed: \(error.localizedDescription)"
+            showStepExportAlert = true
         }
     }
 
@@ -3069,7 +3053,9 @@ struct CADModeView: View {
         guard canvasVM.scene.models.count >= 2 else { return }
         let modelIDs = canvasVM.scene.models.map { $0.id }
         groupAssemblyEngine.createAssembly(name: "Group_\(UUID().uuidString.prefix(8))", modelIDs: modelIDs)
-        sketchEngine.logOperation(type: .booleanUnion, description: "Assembly agrupado (\(modelIDs.count) modelos)")
+        canvasVM.scene.cadHistory.pushOperation(
+            CADOperation(type: .booleanUnion, description: "Assembly agrupado (\(modelIDs.count) modelos)")
+        )
     }
 
     // MARK: - Primitive Creation (F3.T2)
@@ -3128,7 +3114,6 @@ struct CADModeView: View {
                          parameters: ["size": Double(primitiveSize)])
         )
         canvasVM.objectWillChange.send()
-        sketchEngine.logOperation(type: .createPrimitive, description: opDescription)
     }
 
     private func startCSGOperation(_ tool: CADTool) {
@@ -3205,7 +3190,9 @@ struct CADModeView: View {
         }
         canvasVM.scene.addModel(model)
         canvasVM.objectWillChange.send()
-        sketchEngine.logOperation(type: .booleanUnion, description: "CSG \(operation.rawValue) de 2 modelos")
+        canvasVM.scene.cadHistory.pushOperation(
+            CADOperation(type: opType, description: "CSG \(operation.rawValue) de 2 modelos")
+        )
         resetCSGSelection()
     }
 
