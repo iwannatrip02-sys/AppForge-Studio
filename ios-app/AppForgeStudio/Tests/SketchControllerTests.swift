@@ -107,6 +107,51 @@ final class SketchControllerTests: XCTestCase {
         XCTAssertNil(s.selectedCurveID)
     }
 
+    // MARK: - Doble tap = seleccionar el PERÍMETRO (mecánica Shapr3D)
+
+    /// Cuadrado de 4 líneas (esquinas compartidas). Doble tap sobre UN lado en
+    /// neutral selecciona los 4 (perímetro por cadena conectada). Un segundo
+    /// doble tap sobre el mismo lado lo DESELECCIONA (toggle).
+    func testDoubleTapSelectsWholePerimeter() {
+        let s = SketchController()
+        s.beginTool(.rectangle)
+        s.tap(at: SIMD2(0, 0))
+        s.tap(at: SIMD2(4, 4))            // rect cerrado → auto-neutral (4 líneas)
+        XCTAssertNil(s.armedTool)
+        XCTAssertEqual(s.entities.count, 4)
+
+        // Radio de snap generoso para acertar el lado con margen.
+        s.unitsPerPoint = 0.01
+
+        // Dos taps rápidos (< 0.35s) sobre el lado inferior (y≈0).
+        s.tap(at: SIMD2(2, 0), now: 10.0)
+        XCTAssertEqual(s.selectedCurveIDs.count, 1, "primer tap: solo ese lado")
+        s.tap(at: SIMD2(2, 0), now: 10.1)
+        XCTAssertEqual(s.selectedCurveIDs.count, 4,
+                       "doble tap selecciona el perímetro completo (4 lados)")
+
+        // Segundo doble tap sobre el mismo lado → deselecciona el perímetro.
+        s.tap(at: SIMD2(2, 0), now: 11.0)   // tap simple (fuera de ventana) reinicia
+        s.tap(at: SIMD2(2, 0), now: 11.1)   // doble tap → quita
+        XCTAssertTrue(s.selectedCurveIDs.isEmpty,
+                      "segundo doble tap deselecciona el perímetro")
+    }
+
+    /// Dos taps LENTOS (fuera de la ventana de 0.35s) NO son doble tap: cada uno
+    /// es un tap simple que togglea solo ese lado (no expande el perímetro).
+    func testSlowTapsDoNotTriggerPerimeter() {
+        let s = SketchController()
+        s.beginTool(.rectangle)
+        s.tap(at: SIMD2(0, 0))
+        s.tap(at: SIMD2(4, 4))
+        s.unitsPerPoint = 0.01
+
+        s.tap(at: SIMD2(2, 0), now: 10.0)   // selecciona el lado
+        s.tap(at: SIMD2(2, 0), now: 10.5)   // 0.5s > 0.35s → tap simple → lo quita
+        XCTAssertTrue(s.selectedCurveIDs.isEmpty,
+                      "dos taps lentos = toggle simple, no perímetro")
+    }
+
     // MARK: - Arrastre de puntos con topología compartida
 
     func testDraggingSharedCornerKeepsTopology() {

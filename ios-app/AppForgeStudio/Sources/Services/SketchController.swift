@@ -155,6 +155,15 @@ final class SketchController: ObservableObject {
     /// añade/quita del conjunto — como Shapr3D sin botón de seleccionar).
     @Published var selectedCurveIDs: Set<CurveID> = []
 
+    /// Doble tap = seleccionar el PERÍMETRO completo (mecánica Shapr3D). Guarda
+    /// la curva del último tap y su instante; si el siguiente tap cae sobre la
+    /// MISMA curva antes de `doubleTapWindow`, se expande a la cadena conectada.
+    private var lastTapCurve: CurveID? = nil
+    private var lastTapTime: TimeInterval = 0
+    /// Ventana de doble tap (s): dos taps más cercanos que esto sobre la misma
+    /// curva = seleccionar el perímetro. 0.35 s = umbral cómodo con dedo.
+    static let doubleTapWindow: TimeInterval = 0.35
+
     /// "Curva caliente": la RECIÉN confirmada. La barra muestra campos numéricos
     /// contextuales para editarla en vivo (longitud/ángulo/radio) además del
     /// auto-neutral. Brecha #1 de sensación vs Shapr3D (input al dibujar). Se
@@ -356,12 +365,14 @@ final class SketchController: ObservableObject {
     /// seleccionar regiones mientras se dibuja.
     var isDrawingInProgress: Bool { isDrafting }
 
-    func tap(at raw: SIMD2<Float>) {
+    /// - Parameter now: instante del tap (para detectar doble tap). Por defecto
+    ///   el reloj monótono real; los tests lo inyectan para controlar la ventana.
+    func tap(at raw: SIMD2<Float>, now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
         // ESTADO NEUTRAL (sin herramienta armada): tocar selecciona/mueve, no
         // dibuja. Paradigma Shapr3D — sin botón de seleccionar (beta
         // 2026-07-16b). El hit-test completo decide qué se tocó.
         guard let tool = armedTool else {
-            neutralTap(raw)
+            neutralTap(raw, now: now)
             return
         }
 
@@ -383,7 +394,7 @@ final class SketchController: ObservableObject {
     /// Tap en NEUTRAL: hit-test completo → punto (selecciona/arrastrable),
     /// trazo (selección múltiple: añade/quita del set), región (selecciona),
     /// vacío (deselecciona todo). Radio adaptativo al zoom.
-    private func neutralTap(_ raw: SIMD2<Float>) {
+    private func neutralTap(_ raw: SIMD2<Float>, now: TimeInterval) {
         let r = Double(snapRadiusPlane)
         let hit = hitTester.hitTest(at: Vec2(raw), in: model,
                                     pointRadius: r,
@@ -391,29 +402,55 @@ final class SketchController: ObservableObject {
                                     regions: regions)
         switch hit {
         case .curve(let id, _):
-            // Selección MULTI: tap añade/quita del conjunto (toggle).
+            // ¿DOBLE TAP sobre la MISMA curva dentro de la ventana? → seleccionar
+            // el PERÍMETRO completo (cadena conectada por extremos, mecánica
+            // Shapr3D). La primera vez expande el perímetro; un segundo doble tap
+            // sobre él (todas ya seleccionadas) lo DESELECCIONA (toggle limpio).
+            let isDouble = (lastTapCurve == id)
+                && (now - lastTapTime) < Self.doubleTapWindow
+            if isDouble {
+                let chain = hitTester.connectedChain(from: id, in: model)
+                if !chain.isEmpty, chain.isSubset(of: selectedCurveIDs) {
+                    selectedCurveIDs.subtract(chain)          // ya estaba → quita
+                    statusMessage = selectedCurveIDs.isEmpty ? "" : "\(selectedCurveIDs.count) trazo(s)"
+                } else {
+                    selectedCurveIDs.formUnion(chain)         // selecciona el perímetro
+                    statusMessage = "Perímetro seleccionado (\(chain.count) trazos) — edita o extruye"
+                }
+                lastTapCurve = nil                            // consume el doble tap
+                lastTapTime = 0
+                selectedRegion = nil
+                clearFeedback()
+                return
+            }
+            // Tap SIMPLE: añade/quita este trazo del conjunto (toggle).
             if selectedCurveIDs.contains(id) {
                 selectedCurveIDs.remove(id)
             } else {
                 selectedCurveIDs.insert(id)
             }
+            lastTapCurve = id
+            lastTapTime = now
             selectedRegion = nil
             statusMessage = selectedCurveIDs.isEmpty
                 ? ""
-                : "\(selectedCurveIDs.count) trazo(s) — edita o elimina"
+                : "\(selectedCurveIDs.count) trazo(s) — edita, extruye o doble-tap = perímetro"
             clearFeedback()
         case .point:
             // Un punto seleccionado queda listo para arrastrar (el drag lo mueve).
+            lastTapCurve = nil   // rompe cualquier doble tap de curva en curso
             selectedRegion = nil
             statusMessage = "Punto seleccionado — arrástralo para moverlo"
             clearFeedback()
         case .region(let region):
+            lastTapCurve = nil
             selectedRegion = region.polygon.map { $0.simd }
             selectedCurveIDs = []
             statusMessage = "Región seleccionada — arrastra desde adentro para extruir"
             clearFeedback()
         case .none:
             // Tap en vacío deselecciona todo (incluida la curva caliente).
+            lastTapCurve = nil
             selectedCurveIDs = []
             selectedRegion = nil
             hotCurveID = nil
