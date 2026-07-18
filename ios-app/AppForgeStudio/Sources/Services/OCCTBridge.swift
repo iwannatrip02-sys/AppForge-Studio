@@ -15,30 +15,39 @@ enum OCCTBridge {
                                          angularDeflection: angularDeflection) else {
             return nil
         }
-        
-        let vertexCount = occtMesh.vertices.count
-        let normalCount = occtMesh.normals.count
+
+        // CRÍTICO (crash device 2026-07-16, watchdog 0x8BADF00D al abrir
+        // proyecto): las propiedades del mesh de OCCTSwift pueden ser COMPUTADAS
+        // (convierten los buffers C++ en cada acceso). Accederlas dentro del
+        // bucle (`occtMesh.vertices[i]`) convertía la copia en O(n²) y congelaba
+        // el main thread hasta que iOS mataba la app. Se materializan UNA vez.
+        let positions = occtMesh.vertices
+        let occtNormals = occtMesh.normals
+        let indices = occtMesh.indices
+        let vertexCount = positions.count
+        let normalCount = occtNormals.count
 
         // El bridge nativo de OCCTSwift rellena (0,0,1) cuando la triangulación
         // no trae normales → TODAS las normales iguales → sombreado plano (los
         // objetos se ven como siluetas grises, feedback de device). Detectar
         // normales ausentes O degeneradas y calcularlas desde los triángulos.
         let degenerate: Bool = {
-            guard normalCount >= vertexCount, let first = occtMesh.normals.first else { return true }
-            return !occtMesh.normals.contains { simd_distance($0, first) > 0.01 }
+            guard normalCount >= vertexCount, let first = occtNormals.first else { return true }
+            return !occtNormals.contains { simd_distance($0, first) > 0.01 }
         }()
         let normals: [SIMD3<Float>] = degenerate
-            ? Self.computeVertexNormals(positions: occtMesh.vertices, indices: occtMesh.indices)
-            : occtMesh.normals
+            ? Self.computeVertexNormals(positions: positions, indices: indices)
+            : occtNormals
 
         var vertices: [Vertex] = []
+        vertices.reserveCapacity(vertexCount)
         for i in 0..<vertexCount {
-            vertices.append(Vertex(position: occtMesh.vertices[i],
+            vertices.append(Vertex(position: positions[i],
                                    normal: i < normals.count ? normals[i] : SIMD3<Float>(0, 1, 0),
                                    uv: .zero))
         }
 
-        return Mesh(vertices: vertices, indices: occtMesh.indices)
+        return Mesh(vertices: vertices, indices: indices)
     }
 
     /// Normales por vértice área-ponderadas (acumulación del cross por triángulo).

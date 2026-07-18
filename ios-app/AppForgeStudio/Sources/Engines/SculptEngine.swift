@@ -71,6 +71,7 @@ class SculptEngine {
         guard !pendingStrokes.isEmpty else { return false }
         // Save undo state before applying strokes (once per frame batch)
         saveState(mesh.vertices)
+        mesh.ensureAdjacencyCache()   // adyacencia perezosa: construir UNA vez aquí
         let adjList = mesh.edgeAdjacentIndices
         for stroke in pendingStrokes {
             let neighborPositions: [[SIMD3<Float>]] = adjList.map { indices in

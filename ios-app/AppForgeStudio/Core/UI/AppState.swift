@@ -108,20 +108,39 @@ class AppState: ObservableObject {
         canvasVM.objectWillChange.send()
     }
 
+    /// True mientras un proyecto se carga en background (la galería puede
+    /// mostrar spinner; el canvas aparece vacío y se puebla al terminar).
+    @Published var isOpeningProject = false
+
     /// Abre un .appforge de la galería: modelos B-rep + cámara + nombre.
+    ///
+    /// CRÍTICO (crash device 2026-07-16): cargar el BREP + teselarlo con OCCT
+    /// tomaba >5s y corría en el MAIN THREAD → iOS mataba la app por watchdog
+    /// (0x8BADF00D) — el proyecto del usuario quedó inabrible (5 crashes
+    /// seguidos en los logs del iPad). La carga va ahora en un hilo de fondo;
+    /// la escena se aplica en el main actor al terminar.
     func openProject(at url: URL) {
-        guard let loaded = try? ProjectPersistenceService.shared.loadProject(from: url) else {
-            logger.error("No se pudo abrir el proyecto en \(url.path)")
-            return
+        guard !isOpeningProject else { return }
+        isOpeningProject = true
+        Task { [weak self] in
+            let loaded = await Task.detached(priority: .userInitiated) {
+                try? ProjectPersistenceService.shared.loadProject(from: url)
+            }.value
+            guard let self else { return }
+            self.isOpeningProject = false
+            guard let loaded else {
+                logger.error("No se pudo abrir el proyecto en \(url.path)")
+                return
+            }
+            var scene = self.canvasVM.scene
+            scene.models = loaded.models
+            scene.camera = loaded.camera
+            self.canvasVM.scene = scene
+            self.currentProjectName = loaded.metadata.name
+            self.currentProjectURL = url
+            ProjectPersistenceService.shared.markProjectOpened(url)
+            self.canvasVM.objectWillChange.send()
         }
-        var scene = canvasVM.scene
-        scene.models = loaded.models
-        scene.camera = loaded.camera
-        canvasVM.scene = scene
-        currentProjectName = loaded.metadata.name
-        currentProjectURL = url
-        ProjectPersistenceService.shared.markProjectOpened(url)
-        canvasVM.objectWillChange.send()
     }
 
     /// Guarda el documento actual en la carpeta canónica de proyectos.

@@ -37,8 +37,12 @@ struct Mesh {
     var indexBuffer: MTLBuffer?
     var morphTargets: [MorphTarget] = []
     var baseVertices: [Vertex] = []
-    private var _cachedAdjacency: [[Int]] = []
-    
+    // PEREZOSA (crash device 2026-07-16): construirla en el init (un Set por
+    // vértice) penalizaba TODA creación de Mesh — cada modelo al abrir proyecto
+    // y cada frame del preview de extrusión. Solo la escultura la necesita:
+    // se construye bajo demanda (ensureAdjacencyCache) y se invalida al mutar.
+    private var _cachedAdjacency: [[Int]]? = nil
+
     init(vertices: [Vertex] = [], indices: [UInt32] = []) {
         self.vertices = vertices
         self.indices = indices
@@ -46,7 +50,14 @@ struct Mesh {
         self.indexBuffer = nil
         self.morphTargets = []
         self.baseVertices = []
-        self._cachedAdjacency = Self.buildEdgeAdjacency(indices: indices)
+    }
+
+    /// Garantiza la caché de adyacencia (llamar antes de bucles de escultura
+    /// con acceso `inout` — evita reconstruirla por stroke).
+    mutating func ensureAdjacencyCache() {
+        if _cachedAdjacency == nil {
+            _cachedAdjacency = Self.buildEdgeAdjacency(indices: indices)
+        }
     }
     
     static func buildEdgeAdjacency(indices: [UInt32]) -> [[Int]] {
@@ -68,7 +79,9 @@ struct Mesh {
     }
     
     var edgeAdjacentIndices: [[Int]] {
-        get { _cachedAdjacency }
+        // Sin caché previa se calcula al vuelo (contexto no-mutante); los
+        // consumidores calientes (SculptEngine) llaman ensureAdjacencyCache().
+        get { _cachedAdjacency ?? Self.buildEdgeAdjacency(indices: indices) }
         set { _cachedAdjacency = newValue }
     }
     
