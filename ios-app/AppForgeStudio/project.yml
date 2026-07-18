@@ -27,7 +27,12 @@ packages:
     revision: a91c469f517cef1946d5ed4dd9771df4843a30ef
   OCCTSwift:
     url: https://github.com/gsdali/OCCTSwift.git
-    from: 1.0.0
+    # PINEADO exacto (2026-07-18): v1.12.x salió con el slice de device roto
+    # (Undefined symbols StepTidy_DuplicateCleaner/CleanDuplicateEntities en
+    # arm64-iphoneos — el simulador sí linka). `from:` resolvía la última y
+    # rompió el archive sin cambio nuestro. Subir de versión = cambiar este pin
+    # a propósito y verificar el archive de device en CI.
+    exactVersion: 1.11.3
   # Kernel 2D de dibujo (Fase 1) — paquete local puro, testeable en cualquier host
   SketchKernel:
     path: ../SketchKernel

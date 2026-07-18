@@ -13,7 +13,9 @@ let package = Package(
         // OCCTSwift — Open CASCADE Technology 8.0.0 Swift bindings (CAD kernel)
         // Provides: B-rep geometry, Boolean ops, fillet/chamfer, STEP/IGES, NURBS, assemblies
         // Pre-built xcframework for iOS arm64 (~190 MB). Requires Xcode 16.0+ and Swift 6.1+.
-        .package(url: "https://github.com/gsdali/OCCTSwift.git", from: "1.0.0"),
+        // Pineado exacto (2026-07-18): v1.12.x salió con el slice arm64-iphoneos roto
+        // (Undefined symbols StepTidy_* en archive de device). Ver project.yml.
+        .package(url: "https://github.com/gsdali/OCCTSwift.git", exact: "1.11.3"),
     ],
     targets: [
         .executableTarget(
