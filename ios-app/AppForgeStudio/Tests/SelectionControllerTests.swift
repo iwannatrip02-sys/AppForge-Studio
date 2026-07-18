@@ -86,6 +86,56 @@ final class SelectionControllerTests: XCTestCase {
         XCTAssertNil(sel.outlinedModelId)
     }
 
+    // MARK: - Selección de CUERPO entre varios (bloqueador T0)
+
+    /// Con DOS cuerpos, el picking de escena elige el MÁS CERCANO al ojo y la
+    /// selección recae sobre ESE cuerpo. Espejo de ScenePickingTests pero de
+    /// punta a punta (rayo → hit → SelectionController.handleTap).
+    func testTapSelectsNearestBodyOfTwo() throws {
+        let near = try makeBoxModel()   // caja centrada [-1,1]³
+        let far = try makeBoxModel()
+        // Aleja el segundo en -Z (más lejos de la cámara cenital en z=10).
+        for i in far.meshes[0].vertices.indices {
+            far.meshes[0].vertices[i].position.z -= 5
+        }
+        let camera = Scene3D.Camera(position: SIMD3<Float>(0, 0, 10),
+                                    target: SIMD3<Float>(0, 0, 0),
+                                    up: SIMD3<Float>(0, 1, 0),
+                                    fov: 45, nearPlane: 0.1, farPlane: 100)
+        let ray = CameraRay.from(screenPoint: CGPoint(x: 200, y: 200),
+                                 viewSize: CGSize(width: 400, height: 400),
+                                 camera: camera)
+        let models = [far, near]   // el cercano es el índice 1
+        let hit = try XCTUnwrap(ScenePicker.hitTest(models: models, ray: ray))
+        XCTAssertEqual(hit.modelIndex, 1, "picking elige el cuerpo más cercano al ojo")
+
+        let sel = SelectionController()
+        sel.handleTap(hit: hit, models: models)
+        XCTAssertEqual(sel.lastItem?.modelIndex, 1,
+                       "la selección recae sobre el cuerpo cercano")
+        XCTAssertNotNil(sel.highlightMesh, "feedback visual inequívoco (highlight)")
+    }
+
+    /// Tocar otro cuerpo CAMBIA la selección al escalar a cuerpo; tap en vacío
+    /// (deselect) la limpia. Cubre "tap en otro cuerpo → cambia; vacío → nada".
+    func testBodySelectionSwitchesAndClears() throws {
+        let a = try makeBoxModel()
+        let b = try makeBoxModel()
+        let sel = SelectionController()
+
+        sel.handleTap(hit: hit(SIMD3<Float>(0, 0, 1), model: 0), models: [a, b])
+        sel.escalateToBody(models: [a, b])
+        XCTAssertEqual(sel.bodyIndex, 0)
+
+        sel.handleTap(hit: hit(SIMD3<Float>(0, 0, 1), model: 1), models: [a, b])
+        sel.escalateToBody(models: [a, b])
+        XCTAssertEqual(sel.bodyIndex, 1, "tocar otro cuerpo cambia la selección")
+
+        sel.deselect()
+        XCTAssertNil(sel.bodyIndex, "tap en vacío deselecciona")
+        XCTAssertNil(sel.outlinedModelId)
+    }
+
     func testMeshOnlyModelReportsVisibleState() {
         let model = Model(name: "Escultura")
         var mesh = Mesh(vertices: [], indices: [])
