@@ -122,9 +122,12 @@ class AppState: ObservableObject {
     func openProject(at url: URL) {
         guard !isOpeningProject else { return }
         isOpeningProject = true
+        // Capturar el servicio EN el main actor; dentro del detached solo se
+        // llama al método nonisolated (síncrono, sin rebote de actor).
+        let service = ProjectPersistenceService.shared
         Task { [weak self] in
             let loaded = await Task.detached(priority: .userInitiated) {
-                try? ProjectPersistenceService.shared.loadProject(from: url)
+                try? service.loadProject(from: url)
             }.value
             guard let self else { return }
             self.isOpeningProject = false

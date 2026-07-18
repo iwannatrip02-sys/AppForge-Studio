@@ -145,8 +145,13 @@ final class ProjectPersistenceService {
 
     // MARK: - Load
 
-    /// Carga un proyecto desde un paquete .appforge
-    func loadProject(from projectURL: URL) throws -> LoadedProject {
+    /// Carga un proyecto desde un paquete .appforge.
+    /// `nonisolated`: el trabajo pesado (BREP + teselado OCCT) DEBE poder correr
+    /// fuera del main actor — con el servicio @MainActor, llamarlo desde un
+    /// Task.detached rebotaba al main thread y el watchdog mataba la app
+    /// (crash device 2026-07-16). No toca estado aislado: solo fileManager
+    /// (let), decoders, OCCT y Models recién creados.
+    nonisolated func loadProject(from projectURL: URL) throws -> LoadedProject {
         guard fileManager.fileExists(atPath: projectURL.path) else {
             throw ProjectError.fileNotFound(projectURL.path)
         }
