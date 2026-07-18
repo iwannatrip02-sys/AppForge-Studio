@@ -410,8 +410,13 @@ final class SketchController: ObservableObject {
                 && (now - lastTapTime) < Self.doubleTapWindow
             if isDouble {
                 let chain = hitTester.connectedChain(from: id, in: model)
-                if !chain.isEmpty, chain.isSubset(of: selectedCurveIDs) {
-                    selectedCurveIDs.subtract(chain)          // ya estaba → quita
+                // Decisión por MAYORÍA (robusta al medio-toggle del 1er tap del par:
+                // ese tap pudo quitar/añadir SOLO este trazo del perímetro): si más
+                // de la mitad de la cadena ya está seleccionada, el doble tap la
+                // DESELECCIONA entera; si no, la SELECCIONA entera.
+                let alreadyIn = chain.filter { selectedCurveIDs.contains($0) }.count
+                if !chain.isEmpty, alreadyIn * 2 > chain.count {
+                    selectedCurveIDs.subtract(chain)          // perímetro ya activo → quita
                     statusMessage = selectedCurveIDs.isEmpty ? "" : "\(selectedCurveIDs.count) trazo(s)"
                 } else {
                     selectedCurveIDs.formUnion(chain)         // selecciona el perímetro
