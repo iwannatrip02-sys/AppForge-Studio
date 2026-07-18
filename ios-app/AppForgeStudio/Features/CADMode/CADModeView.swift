@@ -122,6 +122,9 @@ struct CADModeView: View {
     /// Drag de REGIÓN de sketch activo (extruir por arrastre — LA mecánica).
     @State private var regionDrag: (verts: [SIMD2<Float>], start: SIMD2<Float>)? = nil
     @State private var regionDragHeight: Double = 0
+    /// Ancla en MUNDO del label de altura viva del ghost de región (nil = sin
+    /// drag). El overlay lo proyecta a pantalla → altura grande junto al dedo.
+    @State private var regionGhostLabelAnchor: SIMD3<Float>? = nil
     /// Tamaño del viewport (para la escala adaptativa al zoom del sketch).
     @State private var viewportSize: CGSize = .zero
     /// Altura de extrusión del perfil de sketch (editable).
@@ -632,6 +635,30 @@ struct CADModeView: View {
                         SketchCanvasOverlay(sketch: sketch, canvasVM: canvasVM)
                             .ignoresSafeArea()
                             .allowsHitTesting(false)
+
+                        // Altura VIVA del ghost de región: número grande y legible
+                        // anclado al centro del prisma, junto al dedo (queja #2:
+                        // "no se ve la extrusión en tiempo real"). Sigue el ghost
+                        // frame a frame vía el ancla en mundo proyectada a pantalla.
+                        if let anchor = regionGhostLabelAnchor, regionDrag != nil {
+                            GeometryReader { geo in
+                                if let pt = ViewportProjector(
+                                    viewMatrix: canvasVM.viewMatrix,
+                                    projectionMatrix: canvasVM.projectionMatrix(for: geo.size),
+                                    viewportSize: geo.size).project(anchor) {
+                                    Text(projectSettings.config.format(regionDragHeight))
+                                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 12).padding(.vertical, 6)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 10)
+                                                .fill(theme.accent.opacity(0.92)))
+                                        .position(x: pt.x, y: pt.y)
+                                }
+                            }
+                            .ignoresSafeArea()
+                            .allowsHitTesting(false)
+                        }
 
                         // Cotas 3D en viewport (estilo Shapr3D Drawings)
                         if dimensionManager.showDimensions || selectedTool == .measure {
@@ -1304,36 +1331,24 @@ struct CADModeView: View {
     /// el B-rep exacto) + paredes. Naranja translúcido como los live previews.
     private func updateRegionGhost(verts: [SIMD2<Float>], height: Float) {
         guard verts.count >= 3, height > 0.005 else { return }
-        let o = sketch.plane.origin, u = sketch.plane.u
-        let v = sketch.plane.v, n = sketch.plane.normal
-        func world(_ p: SIMD2<Float>, _ h: Float) -> SIMD3<Float> {
-            o + u * p.x + v * p.y + n * h
-        }
-        let c2 = verts.reduce(SIMD2<Float>(0, 0), +) / Float(verts.count)
-        var vx: [Vertex] = []
-        var ix: [UInt32] = []
-        func add(_ p: SIMD3<Float>, _ normal: SIMD3<Float>) -> UInt32 {
-            vx.append(Vertex(position: p, normal: normal, uv: .zero))
-            return UInt32(vx.count - 1)
-        }
-        // Tapa superior (abanico centroide) + paredes por segmento
-        let topC = add(world(c2, height), n)
-        for i in 0..<verts.count {
-            let a = verts[i], b = verts[(i + 1) % verts.count]
-            let ta = add(world(a, height), n)
-            let tb = add(world(b, height), n)
-            ix.append(contentsOf: [topC, ta, tb])
-            // Pared del segmento a-b
-            let wall = simd_normalize(simd_cross(world(b, 0) - world(a, 0), n))
-            let ba = add(world(a, 0), wall), bb = add(world(b, 0), wall)
-            let wta = add(world(a, height), wall), wtb = add(world(b, height), wall)
-            ix.append(contentsOf: [ba, bb, wta, bb, wtb, wta])
-        }
+        // Malla PURA (sin OCCT) regenerada este frame: prisma cerrado que sigue
+        // el dedo a 60fps de forma continua. El B-rep real se hace al soltar.
+        guard let mesh = RegionGhostMesh.build(
+                polygon: verts,
+                origin: sketch.plane.origin, u: sketch.plane.u,
+                v: sketch.plane.v, normal: sketch.plane.normal,
+                height: height) else { return }
         canvasVM.scene.models.removeAll { $0.name == "__regionPreview" }
         let ghost = Model(name: "__regionPreview")
-        ghost.meshes = [Mesh(vertices: vx, indices: ix)]
+        ghost.meshes = [mesh]
         ghost.color = SIMD4<Float>(1.0, 0.48, 0.27, 0.45)
         canvasVM.scene.addModel(ghost)
+        // Ancla del label de altura: centroide de la región a media altura, en
+        // coords de mundo (lo proyecta a pantalla el overlay `regionHeightLabel`).
+        let c2 = verts.reduce(SIMD2<Float>(0, 0), +) / Float(verts.count)
+        regionGhostLabelAnchor = sketch.plane.origin
+            + sketch.plane.u * c2.x + sketch.plane.v * c2.y
+            + sketch.plane.normal * (height * 0.5)
         canvasVM.objectWillChange.send()
     }
 
@@ -1341,6 +1356,7 @@ struct CADModeView: View {
     private func finishRegionDragExtrude() {
         defer {
             regionDrag = nil
+            regionGhostLabelAnchor = nil
             canvasVM.scene.models.removeAll { $0.name == "__regionPreview" }
             canvasVM.objectWillChange.send()
         }
