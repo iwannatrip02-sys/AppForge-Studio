@@ -357,10 +357,21 @@ struct CADModeView: View {
 
     @State private var primitiveSize: Float = 1.0
 
-    /// Primer modelo de la escena que conserva su B-rep vivo (nil si ninguno).
-    /// Usado por la barra de planos y el botón de features para habilitar/deshabilitar.
-    private var firstBRepModel: Model? {
-        canvasVM.scene.models.first(where: { $0.cadShape != nil })
+    /// Cuerpo con B-rep sobre el que actúan los planos 2D y el reconocimiento de
+    /// features: el SELECCIONADO si lo hay; solo si no hay selección, el primero.
+    ///
+    /// Antes era siempre `models.first(where: cadShape != nil)`, así que con varios
+    /// cuerpos en escena te exportaba el plano — o analizaba las features — de uno
+    /// que NO estabas mirando, sin avisar. Es la misma clase de defecto que el
+    /// `models.first` de `executeCADTool` (auditoría 2026-07-25): operar en silencio
+    /// sobre el objeto equivocado.
+    private var activeBRepModel: Model? {
+        if let idx = selectionController.bodyIndex,
+           idx < canvasVM.scene.models.count,
+           canvasVM.scene.models[idx].cadShape != nil {
+            return canvasVM.scene.models[idx]
+        }
+        return canvasVM.scene.models.first(where: { $0.cadShape != nil })
     }
 
     var body: some View {
@@ -1705,23 +1716,23 @@ struct CADModeView: View {
                 Spacer()
                 Button("DXF") {
                     HapticService.shared.medium()
-                    if let model = firstBRepModel {
+                    if let model = activeBRepModel {
                         let ok = drawingExportController.exportDXF(model: model)
                         if ok { showShareSheet = true }
                     }
                 }
                 .font(.caption.bold())
-                .disabled(drawingExportController.isBusy || firstBRepModel == nil)
+                .disabled(drawingExportController.isBusy || activeBRepModel == nil)
 
                 Button("PDF") {
                     HapticService.shared.medium()
-                    if let model = firstBRepModel {
+                    if let model = activeBRepModel {
                         let ok = drawingExportController.exportPDF(model: model)
                         if ok { showShareSheet = true }
                     }
                 }
                 .font(.caption.bold())
-                .disabled(drawingExportController.isBusy || firstBRepModel == nil)
+                .disabled(drawingExportController.isBusy || activeBRepModel == nil)
             }
         }
         .padding(.horizontal, 10)
@@ -2287,23 +2298,23 @@ struct CADModeView: View {
                 Image(systemName: "doc.viewfinder")
                     .font(.system(size: 11))
                     .foregroundColor(showDrawingExportBar ? theme.accent
-                                     : (firstBRepModel != nil ? theme.textPrimary : theme.textSecondary))
+                                     : (activeBRepModel != nil ? theme.textPrimary : theme.textSecondary))
             }
-            .disabled(firstBRepModel == nil)
+            .disabled(activeBRepModel == nil)
             .help("Exportar plano DXF / PDF")
 
             Button(action: {
                 HapticService.shared.light()
-                if let model = firstBRepModel {
+                if let model = activeBRepModel {
                     featureReportController.analyze(model: model)
                     showFeatureReport = true
                 }
             }) {
                 Image(systemName: "wand.and.rays")
                     .font(.system(size: 11))
-                    .foregroundColor(firstBRepModel != nil ? theme.accent : theme.textSecondary)
+                    .foregroundColor(activeBRepModel != nil ? theme.accent : theme.textSecondary)
             }
-            .disabled(firstBRepModel == nil)
+            .disabled(activeBRepModel == nil)
             .help("Reconocer features de fabricación")
         }.padding(.horizontal, 6).padding(.vertical, 2)
     }

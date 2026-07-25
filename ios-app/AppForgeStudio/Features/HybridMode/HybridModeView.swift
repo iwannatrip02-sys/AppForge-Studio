@@ -330,45 +330,23 @@ struct HybridModeView: View {
             }
             Spacer()
 
-            Button("Extruir") {
-                toolVM.selectedTool = .extrude
-                executeCADTool(layer: activeLayer, op: .extrude(distance: 10, direction: SIMD3<Double>(0, 1, 0)))
-            }
-            .font(.caption)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(themeManager.currentTheme.surface)
-            .cornerRadius(6)
-
-            Button("Loop Cut") {
-                toolVM.selectedTool = .loopCut
-                executeCADTool(layer: activeLayer, op: nil)
-            }
-            .font(.caption)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(themeManager.currentTheme.surface)
-            .cornerRadius(6)
-
-            Button("Bisel") {
-                toolVM.selectedTool = .bevel
-                executeCADTool(layer: activeLayer, op: .chamfer(distance: 2))
-            }
-            .font(.caption)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(themeManager.currentTheme.surface)
-            .cornerRadius(6)
-
-            Button("Booleano") {
-                toolVM.selectedTool = .booleanUnion
-                executeCADTool(layer: activeLayer, op: nil)
-            }
-            .font(.caption)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(themeManager.currentTheme.surface)
-            .cornerRadius(6)
+            // BOTONES RETIRADOS (auditoría 2026-07-25): Extruir / Loop Cut /
+            // Bisel / Booleano. Los cuatro llamaban a
+            // `ToolViewModel.executeTool(mesh:)`, el motor de malla placebo del
+            // CAD, ya eliminado: Extruir era `break` (no hacía NADA), Loop Cut y
+            // Bisel operaban sobre `indices[0]`/`[1]` — una arista arbitraria del
+            // primer triángulo — y Booleano operaba contra una copia de la propia
+            // malla desplazada 0.15 en X.
+            //
+            // Lo más grave: SÍ registraban la operación en el historial de la capa
+            // (`.extrude(distance: 10)`, `.chamfer(distance: 2)`) aunque la
+            // geometría no cambiara. Historial FABRICADO — peor que no hacer nada.
+            //
+            // El CAD real vive en su propio workspace, sobre B-rep OCCT. Regla del
+            // proyecto: cero botones falsos.
+            Text("Las operaciones CAD viven en el workspace CAD")
+                .font(.caption2)
+                .foregroundColor(themeManager.currentTheme.textSecondary)
         }
     }
 
@@ -498,14 +476,8 @@ struct HybridModeView: View {
         }
     }
 
-    /// Execute a CAD tool on the active layer's mesh, then record the operation.
-    /// Adapts ToolViewModel.executeTool(mesh:) to CanvasViewModel.currentMesh.
-    private func executeCADTool(layer: ModelLayer?, op: LayerOperation?) {
-        var mesh = canvasVM.currentMesh
-        toolVM.executeTool(mesh: &mesh)
-        canvasVM.currentMesh = mesh
-        if let layerId = layer?.id, let operation = op {
-            layerManager.addOperation(operation, to: layerId)
-        }
-    }
+    // `executeCADTool(layer:op:)` se BORRÓ en la auditoría 2026-07-25 junto con los
+    // cuatro botones que lo llamaban: adaptaba el motor de malla placebo
+    // (`ToolViewModel.executeTool`) a `canvasVM.currentMesh` y registraba en el
+    // historial de la capa operaciones que la geometría nunca recibía.
 }

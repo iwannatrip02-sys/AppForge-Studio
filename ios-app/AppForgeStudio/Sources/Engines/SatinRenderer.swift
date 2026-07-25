@@ -354,6 +354,15 @@ class SatinRenderer: NSObject, ObservableObject {
     /// Ídem para overlays "__" cuya malla es de PUNTO/disco (puntos de medición): brasa,
     /// pipeline de línea, un poco más gruesos que las líneas.
     private var dotOverlayModelIds: Set<String> = []
+    /// IDs de los renderables del GIZMO de transformación (`__gizmo*`). Se saltan en
+    /// el pase lit normal y se dibujan AL FINAL con depth test `.always`, para que el
+    /// propio cuerpo no los tape (feedback de device: "los gizmos los tapa el objeto,
+    /// hay que orbitar para encontrarlos"). Es la convención de todo CAD: el
+    /// manipulador manda sobre la escena — si no lo ves, no puedes agarrarlo.
+    private var gizmoModelIds: Set<String> = []
+    /// Depth state de overlays SIEMPRE ENCIMA (gizmo): pasa siempre el test y NO
+    /// escribe depth, así que se pinta sobre todo sin ocluir lo que venga después.
+    private var alwaysOnTopDepthState: MTLDepthStencilState?
 
     func diagnostics() -> RenderDiagnostics {
         RenderDiagnostics(
@@ -630,6 +639,12 @@ class SatinRenderer: NSObject, ObservableObject {
         ld.depthCompareFunction = .lessEqual
         ld.isDepthWriteEnabled = false
         lineDepthState = device.makeDepthStencilState(descriptor: ld)
+
+        // Gizmo SIEMPRE encima: pasa el depth test siempre y no escribe depth.
+        let od = MTLDepthStencilDescriptor()
+        od.depthCompareFunction = .always
+        od.isDepthWriteEnabled = false
+        alwaysOnTopDepthState = device.makeDepthStencilState(descriptor: od)
     }
 
     private func setupPBRPipeline(library: MTLLibrary) {
@@ -1007,6 +1022,7 @@ class SatinRenderer: NSObject, ObservableObject {
         edgeRenderables.removeAll()
         lineOverlayModelIds.removeAll()
         dotOverlayModelIds.removeAll()
+        gizmoModelIds.removeAll()
         modelIdToObject.removeAll()
 
         // Snapshot de versiones para el fast-path del fantasma (tarea 2). Cubre
@@ -1163,6 +1179,10 @@ class SatinRenderer: NSObject, ObservableObject {
         // de medición): su malla es cinta/disco → invisible bajo el shader lit. Se
         // marcan para dibujarse en BRASA con el pipeline de línea. `__faceHighlight`
         // NO se marca: es una superficie 3D real y se sombrea normal.
+        // El gizmo de transformación se dibuja al final, siempre encima.
+        if model.name.hasPrefix("__gizmo") {
+            gizmoModelIds.insert(model.id.uuidString)
+        }
         if model.name == "__edgeHighlight" {
             lineOverlayModelIds.insert(model.id.uuidString)
         } else if model.name.hasPrefix("__measureDot") {
@@ -1586,6 +1606,8 @@ class SatinRenderer: NSObject, ObservableObject {
                 // el pase de línea (brasa) más abajo.
                 if lineOverlayModelIds.contains(renderable.modelId) ||
                    dotOverlayModelIds.contains(renderable.modelId) { continue }
+                // El gizmo va en su propio pase final (siempre encima del cuerpo).
+                if gizmoModelIds.contains(renderable.modelId) { continue }
                 // El fantasma de preview se pinta en su PROPIO pase (translúcido, sin
                 // depth-write) DESPUÉS de los opacos — no aquí (obstáculo A del RECON).
                 if renderable.forceTranslucent { continue }
@@ -1646,6 +1668,20 @@ class SatinRenderer: NSObject, ObservableObject {
                 for r in basicRenderables where dotOverlayModelIds.contains(r.modelId) {
                     drawLine(r, core: emberCore, halo: emberHalo, halfWidthPx: emberDotHalfWidthPx)
                 }
+            }
+
+            // ---- GIZMO: último pase, SIEMPRE encima ----
+            // Depth `.always` (no `.lessEqual` + sesgo como las líneas): las flechas
+            // y anillos son volúmenes que entran DENTRO del cuerpo, así que un sesgo
+            // no basta — la mitad del gizmo quedaría enterrada. Sin escritura de
+            // depth, así que el gizmo no ocluye nada que se dibuje después.
+            if let basicPS = basicPipelineState, !gizmoModelIds.isEmpty {
+                encoder.setRenderPipelineState(basicPS)
+                encoder.setDepthStencilState(alwaysOnTopDepthState ?? depthState)
+                for r in basicRenderables where gizmoModelIds.contains(r.modelId) {
+                    drawBasic(r, alpha: 1.0)
+                }
+                encoder.setDepthStencilState(depthState)
             }
 
             if edgeRenderables.isEmpty, xrayEnabled {
