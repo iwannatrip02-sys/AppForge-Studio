@@ -871,9 +871,27 @@ struct CADModeView: View {
         .sheet(isPresented: $showMeasurements) {
             NavigationView {
                 List {
-                    Text(String(format: "Longitud: %.2f mm", toolVM.measurementDistance))
-                    Text(String(format: "Area: %.2f mm²", toolVM.measurementArea))
-                    Text(String(format: "Volumen: %.3f mm³", toolVM.measurementVolume))
+                    // Distancia entre los dos puntos tocados (medición libre).
+                    if toolVM.measurementDistance > 0 {
+                        Text(String(format: "Distancia: %.2f mm", toolVM.measurementDistance))
+                    }
+                    // Magnitudes del B-rep de lo SELECCIONADO. Antes esta lista
+                    // mostraba `Area: 0.00` y `Volumen: 0.000` FIJOS: se
+                    // calculaban en una rama inalcanzable del motor de malla
+                    // placebo. Ahora salen del sólido exacto, y lo que no aplica
+                    // (una arista no tiene volumen) simplemente no se lista.
+                    if let target = activeTransformTarget,
+                       let m = MeasureService.measure(target: target,
+                                                      in: canvasVM.scene.models) {
+                        Section(m.label) {
+                            ForEach(MeasureService.readout(m), id: \.self) { line in
+                                Text(line)
+                            }
+                        }
+                    } else {
+                        Text("Selecciona un cuerpo, una cara o una arista para medirlo")
+                            .foregroundColor(theme.textSecondary)
+                    }
                 }.navigationTitle("Mediciones")
             }
         }

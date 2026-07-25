@@ -6,9 +6,11 @@ import simd
 class ToolViewModel: ObservableObject {
     @Published var selectedTool: CADTool = .select
     @Published var gridSnapEnabled: Bool = false
+    /// Distancia entre los dos puntos tocados en la medición libre. El ÁREA y el
+    /// VOLUMEN ya no viven aquí: los calcula `MeasureService` desde el B-rep de
+    /// lo seleccionado (eran `Float` fijos en 0 alimentados por una rama
+    /// inalcanzable del motor de malla placebo — números falsos en pantalla).
     @Published var measurementDistance: Float = 0
-    @Published var measurementArea: Float = 0
-    @Published var measurementVolume: Float = 0
     @Published var isPaintMode: Bool = false
     @Published var radius: Float = 0.1
     @Published var filletRadius: Float = 0.05
@@ -37,9 +39,7 @@ class ToolViewModel: ObservableObject {
     // `startCSGOperation(_:)` con selección A/B, barrido → `tubeAlongPath`,
     // revolución → `revolveProfile`, extrusión → `extrudedShapeForActiveRegion`.
     //
-    // DEUDA CONOCIDA que esto deja a la vista: `measurementArea` y
-    // `measurementVolume` solo se calculaban en la rama `.measure` de
-    // `executeTool`, que ya era inalcanzable — la UI los muestra como
-    // "Area: 0.00 mm²" / "Volumen: 0.000 mm³" fijos. Hay que calcularlos del
-    // B-rep (`Shape.volume`, `Face.area`) o quitar esas dos líneas de la UI.
+    // La deuda que esto dejó a la vista (`Area: 0.00 mm²` / `Volumen: 0.000 mm³`
+    // fijos en la barra de Medir) quedó SALDADA: `MeasureService` los calcula
+    // ahora desde el B-rep de lo seleccionado — cuerpo, cara o arista.
 }
