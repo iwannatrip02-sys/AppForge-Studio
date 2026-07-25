@@ -137,6 +137,24 @@ final class RegionProvenanceTests: XCTestCase {
         XCTAssertEqual(merged[0].tEnd, 1.0, accuracy: 1e-12)
     }
 
+    /// Una curva que se auto-interseca aporta al contorno solo el SUB-INTERVALO
+    /// del lazo. Emitirla entera metería las colas que sobran fuera de la
+    /// región — por eso el atajo de "curva cerrada completa" exige que el
+    /// barrido sume 1.
+    func testMergeRunsPartialLoopKeepsSubInterval() {
+        let c = CurveID()
+        // El lazo cubre t 0.2→0.8 (60% de la curva); las colas quedan fuera.
+        let steps = [
+            RegionEdge(curveID: c, tStart: 0.2, tEnd: 0.5),
+            RegionEdge(curveID: c, tStart: 0.5, tEnd: 0.8),
+        ]
+        let merged = RegionFinder.mergeRuns(steps)
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(merged[0].tStart, 0.2, accuracy: 1e-12,
+            "conserva el sub-intervalo real, no salta a la curva entera")
+        XCTAssertEqual(merged[0].tEnd, 0.8, accuracy: 1e-12)
+    }
+
     /// Recorrido en sentido inverso: el tramo sale invertido (t 1→0).
     func testMergeRunsClosedCurveReversed() {
         let c = CurveID()

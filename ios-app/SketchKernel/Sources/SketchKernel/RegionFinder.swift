@@ -182,22 +182,40 @@ public enum RegionFinder {
     /// ~50 micro-tramos en que se discretizó un círculo vuelven a ser UN círculo.
     static func mergeRuns(_ steps: [RegionEdge], epsilon: Double = 1e-9) -> [RegionEdge] {
         guard let first = steps.first else { return [] }
+        let n = steps.count
 
-        // Caso dominante: TODO el contorno es una sola curva cerrada (un
-        // círculo suelto). El recorrido puede arrancar en cualquier punto del
-        // aro, así que no hay corte donde partir — se emite la curva entera.
+        // Caso dominante: TODO el contorno es UNA curva cerrada recorrida
+        // ENTERA (un círculo suelto). El recorrido puede arrancar en cualquier
+        // punto del aro, así que no hay corte donde partir — se emite completa.
+        //
+        // La condición de barrido total es imprescindible: una spline que se
+        // auto-interseca también da un contorno de una sola curva, pero solo
+        // con el SUB-INTERVALO del lazo. Emitirla entera metería las colas que
+        // sobran fuera de la región.
         if steps.allSatisfy({ $0.curveID == first.curveID }) {
-            let forward = steps.filter { $0.tEnd > $0.tStart }.count * 2 >= steps.count
-            return [RegionEdge(curveID: first.curveID,
-                               tStart: forward ? 0 : 1,
-                               tEnd: forward ? 1 : 0)]
+            var totalSweep = 0.0
+            for s in steps { totalSweep += abs(s.tEnd - s.tStart) }
+            if abs(totalSweep - 1) < 1e-6 {
+                let forward = steps.filter { $0.tEnd > $0.tStart }.count * 2 >= n
+                return [RegionEdge(curveID: first.curveID,
+                                   tStart: forward ? 0 : 1,
+                                   tEnd: forward ? 1 : 0)]
+            }
         }
 
-        // Rotar para empezar donde arranca una curva (existe tal corte porque
-        // hay ≥2 IDs distintos), si no el primer y el último run se partirían.
+        /// ¿El paso `i` ARRANCA un tramo nuevo? Lo hace si cambia de curva o si
+        /// su parámetro no continúa donde terminó el anterior (el salto de un
+        /// lazo que se cierra sobre sí mismo).
+        func startsNewRun(_ i: Int) -> Bool {
+            let prev = steps[(i + n - 1) % n]
+            return prev.curveID != steps[i].curveID
+                || abs(prev.tEnd - steps[i].tStart) >= epsilon
+        }
+
+        // Rotar para empezar donde arranca un tramo: si no, el primer y el
+        // último run del recorrido quedarían partidos en dos.
         var ordered = steps
-        let n = steps.count
-        if let cut = (0..<n).first(where: { steps[$0].curveID != steps[($0 + n - 1) % n].curveID }) {
+        if let cut = (0..<n).first(where: startsNewRun) {
             ordered = Array(steps[cut...]) + Array(steps[..<cut])
         }
 

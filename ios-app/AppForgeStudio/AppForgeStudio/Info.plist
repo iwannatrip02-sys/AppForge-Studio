@@ -34,5 +34,12 @@
     <array>
         <string>metal</string>
     </array>
+    <!-- ProMotion: SIN esta clave iOS limita la app a 60 Hz en pantallas de
+         120 Hz (iPad Pro M1), por mucho que MetalView pida
+         preferredFramesPerSecond = 120 — el sistema lo recorta en silencio.
+         Es el opt-in documentado por Apple desde iOS 15 para frame rates
+         altos. Con ella, los 120 que ya pedía el renderer se respetan. -->
+    <key>CADisableMinimumFrameDuration</key>
+    <true/>
 </dict>
 </plist>
