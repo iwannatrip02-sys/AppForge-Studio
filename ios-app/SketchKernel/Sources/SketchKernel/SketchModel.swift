@@ -236,6 +236,103 @@ public struct SketchModel: Sendable, Codable {
         if curvesAttached(to: id).isEmpty { positions[id] = nil }
     }
 
+    // MARK: - Espejo 2D
+
+    /// Refleja las curvas dadas sobre un eje y añade las copias al sketch.
+    ///
+    /// Exacto para TODOS los tipos: una recta refleja a recta, un círculo a
+    /// círculo del mismo radio, un arco a arco del mismo radio (con el sentido
+    /// INVERTIDO, porque una reflexión cambia la orientación del plano) y una
+    /// spline a spline con sus puntos reflejados. Nada se discretiza.
+    ///
+    /// La topología se cose sola: las copias pasan por `addOrMergePoint`, así
+    /// que los puntos que caen SOBRE el eje se funden con sus originales. Por
+    /// eso reflejar media pieza sobre su borde produce un perfil cerrado único
+    /// —extruible— y no dos mitades sueltas.
+    ///
+    /// - Parameters:
+    ///   - ids: curvas a reflejar. Las que no existan se ignoran.
+    ///   - axisPoint: un punto del eje de simetría.
+    ///   - axisDirection: dirección del eje (no hace falta normalizarla).
+    /// - Returns: los IDs de las curvas nuevas, en el orden de `ids`.
+    @discardableResult
+    public mutating func mirrorCurves(_ ids: [CurveID],
+                                      axisPoint: Vec2,
+                                      axisDirection: Vec2) -> [CurveID] {
+        // OJO: comprobar la dirección CRUDA. `Vec2.normalized` devuelve (1,0)
+        // para el vector cero, así que validar la normalizada dejaría pasar un
+        // eje degenerado y reflejaría en silencio sobre el eje X.
+        guard axisDirection.lengthSquared > 1e-24 else { return [] }
+        let dir = axisDirection.normalized
+
+        /// Reflexión de un punto sobre el eje: `p' = a + 2(v·d)d − v`, con
+        /// `v = p − a`. Los puntos del eje quedan fijos (por eso se funden).
+        func reflect(_ p: Vec2) -> Vec2 {
+            let v = p - axisPoint
+            return axisPoint + dir * (2 * v.dot(dir)) - v
+        }
+
+        /// ¿El punto queda FIJO por la reflexión? (es decir, cae sobre el eje)
+        func isOnAxis(_ p: Vec2) -> Bool {
+            p.distance(to: reflect(p)) <= mergeTolerance
+        }
+
+        var created: [CurveID] = []
+        for id in ids {
+            guard let curve = curves[id] else { continue }
+            switch curve.kind {
+            case .line(let s, let e):
+                guard let sp = positions[s], let ep = positions[e] else { continue }
+                // Un segmento contenido EN el eje se refleja sobre sí mismo:
+                // duplicarlo pondría dos aristas encima y rompería la detección
+                // de regiones (el grafo planar vería un tramo doble).
+                guard !(isOnAxis(sp) && isOnAxis(ep)) else { continue }
+                let a = addOrMergePoint(at: reflect(sp))
+                let b = addOrMergePoint(at: reflect(ep))
+                guard a != b else { continue }   // degenerado
+                created.append(insert(SketchCurve(kind: .line(start: a, end: b),
+                                                  isConstruction: curve.isConstruction)))
+
+            case .circle(let c, let r):
+                guard let cp = positions[c] else { continue }
+                // Un círculo centrado en el eje ya es simétrico: se mapea a sí
+                // mismo y su copia sería geometría duplicada.
+                guard !isOnAxis(cp) else { continue }
+                let nc = addOrMergePoint(at: reflect(cp))
+                created.append(insert(SketchCurve(kind: .circle(center: nc, radius: r),
+                                                  isConstruction: curve.isConstruction)))
+
+            case .arc(let s, let e, let c, let ccw):
+                guard let sp = positions[s], let ep = positions[e],
+                      let cp = positions[c] else { continue }
+                let a = addOrMergePoint(at: reflect(sp))
+                let b = addOrMergePoint(at: reflect(ep))
+                let nc = addOrMergePoint(at: reflect(cp))
+                // La reflexión invierte la orientación del plano: un arco CCW
+                // pasa a recorrerse CW. Sin esto el espejo sale por el lado malo.
+                created.append(insert(SketchCurve(kind: .arc(start: a, end: b,
+                                                             center: nc, ccw: !ccw),
+                                                  isConstruction: curve.isConstruction)))
+
+            case .spline(let pts, let mode):
+                let mirrored = pts.compactMap { positions[$0].map(reflect) }
+                guard mirrored.count == pts.count, mirrored.count >= 2 else { continue }
+                let newIDs = mirrored.map { addOrMergePoint(at: $0) }
+                created.append(insert(SketchCurve(kind: .spline(points: newIDs, mode: mode),
+                                                  isConstruction: curve.isConstruction)))
+            }
+        }
+        return created
+    }
+
+    /// Espejo de TODAS las curvas no-construcción del sketch. Atajo del caso
+    /// dominante: dibujas media pieza y la completas de un toque.
+    @discardableResult
+    public mutating func mirrorAll(axisPoint: Vec2, axisDirection: Vec2) -> [CurveID] {
+        let ids = curveOrder.filter { curves[$0]?.isConstruction == false }
+        return mirrorCurves(ids, axisPoint: axisPoint, axisDirection: axisDirection)
+    }
+
     // MARK: - Redondeo de esquina (fillet 2D)
 
     /// Redondea la esquina donde se tocan DOS líneas, insertando un arco

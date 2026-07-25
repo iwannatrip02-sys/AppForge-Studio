@@ -656,6 +656,49 @@ final class SketchController: ObservableObject {
     /// Tap con la herramienta TRIM armada: localiza el trazo bajo el toque
     /// (HitTester) y lo recorta en ese tramo (kernel.trim). Tras recortar sigue
     /// ARMADO (recortes en ráfaga, como Shapr3D). Status honesto si no pudo.
+    // MARK: - Espejo 2D
+
+    /// ¿Hay una línea de CONSTRUCCIÓN que pueda servir de eje de simetría?
+    /// La barra usa esto para habilitar el botón en vez de ofrecer uno muerto.
+    var hasMirrorAxis: Bool { lastConstructionAxis() != nil }
+
+    /// La última línea de construcción dibujada, como (punto, dirección).
+    /// La geometría de construcción existe precisamente para esto: ejes y
+    /// referencias que guían el trazado sin formar parte de la pieza.
+    private func lastConstructionAxis() -> (Vec2, Vec2)? {
+        for curve in model.orderedCurves.reversed() where curve.isConstruction {
+            guard case .line(let s, let e) = curve.kind,
+                  let sp = model.position(of: s), let ep = model.position(of: e),
+                  sp.distance(to: ep) > 1e-9 else { continue }
+            return (sp, ep - sp)
+        }
+        return nil
+    }
+
+    /// Refleja los trazos SELECCIONADOS (o todos, si no hay selección) sobre la
+    /// última línea de construcción.
+    ///
+    /// Los puntos que caen sobre el eje se funden por topología, así que media
+    /// pieza reflejada queda como UN perfil cerrado extruible — no dos mitades.
+    func mirrorSelectionAcrossConstructionAxis() {
+        guard let (origin, dir) = lastConstructionAxis() else {
+            statusMessage = "Dibuja una línea de CONSTRUCCIÓN para usarla como eje de simetría"
+            return
+        }
+        let targets = selectedCurveIDs.isEmpty
+            ? model.curveOrder.filter { model.curves[$0]?.isConstruction == false }
+            : Array(selectedCurveIDs)
+        guard !targets.isEmpty else {
+            statusMessage = "No hay trazos que reflejar"
+            return
+        }
+        var made: [CurveID] = []
+        mutate { made = $0.mirrorCurves(targets, axisPoint: origin, axisDirection: dir) }
+        statusMessage = made.isEmpty
+            ? "Nada que reflejar (¿los trazos ya están sobre el eje?)"
+            : "Espejo ✓ — \(made.count) trazo(s)"
+    }
+
     /// Redondeo de esquina: tocas el VÉRTICE donde se juntan dos líneas y se
     /// sustituye por un arco tangente del radio de la barra.
     ///

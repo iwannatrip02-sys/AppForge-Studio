@@ -1171,6 +1171,24 @@ struct CADModeView: View {
                     .font(.caption2)
                     .foregroundColor(theme.textSecondary)
             }
+
+            // ESPEJO 2D: refleja lo seleccionado (o todo) sobre la última línea
+            // de construcción. Deshabilitado —y explicado— cuando no hay eje,
+            // en vez de ofrecer un botón que no haría nada.
+            if isSketchTool {
+                Button {
+                    HapticService.shared.medium()
+                    sketch.mirrorSelectionAcrossConstructionAxis()
+                } label: {
+                    Label("Espejo", systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right")
+                        .font(.caption2)
+                }
+                .disabled(!sketch.hasMirrorAxis)
+                .help(sketch.hasMirrorAxis
+                      ? "Reflejar sobre la línea de construcción"
+                      : "Dibuja una línea de construcción para usarla como eje")
+                .accessibilityIdentifier("sketch.mirror")
+            }
             // Entrada numérica al dibujar (brecha #1): campos contextuales para
             // la curva CALIENTE (recién dibujada) o la selección única. Línea →
             // Longitud+Ángulo; círculo/arco → Radio. No se solapa con el editor
