@@ -784,7 +784,15 @@ struct CADModeView: View {
             case .sketch: sketch.disarm()   // modo boceto NEUTRAL (sin herramienta armada)
             default: break
             }
-            executeCADTool(newTool, canvasVM: canvasVM, toolVM: toolVM)
+            // AQUÍ SE EJECUTABA `executeCADTool(newTool, ...)` (retirado en la
+            // auditoría 2026-07-25). Era el peor defecto de usabilidad del CAD:
+            // SELECCIONAR una herramienta en el rail aplicaba ya la operación,
+            // sin confirmar, y sobre `scene.models.first` — NO sobre el cuerpo
+            // que tenías seleccionado. Además `activate(_:)` asigna
+            // `selectedTool` y luego llama a `executeSelectedTool()`, así que un
+            // Redondear se aplicaba DOS VECES, a DOS cuerpos distintos.
+            // Elegir herramienta ahora solo cambia de herramienta; la geometría
+            // se toca cuando el usuario confirma en la barra de parámetros.
             rebuildGizmoOverlays()
             rebuildSketchOverlays()
             // Ghost en vivo de la extrusión de sketch (tarea 6): al entrar a la
@@ -1960,13 +1968,15 @@ struct CADModeView: View {
         let model = canvasVM.scene.models[idx]
 
         // Ruta B-rep REAL para las barras globales (fillet/chamfer/shell).
-        if model.cadShape != nil, [.fillet, .chamfer, .shell].contains(selectedTool) {
+        // `.bevel` se CONSOLIDA aquí: un bisel ES un chaflán, y tenía un motor
+        // de malla propio que achaflanaba una arista arbitraria (placebo).
+        if model.cadShape != nil, [.fillet, .chamfer, .bevel, .shell].contains(selectedTool) {
             BRepHistory.shared.recordChange(of: model)
             let ok: Bool
             switch selectedTool {
             case .fillet:
                 ok = BRepModeling.fillet(model, radius: Double(toolVM.filletRadius))
-            case .chamfer:
+            case .chamfer, .bevel:
                 ok = BRepModeling.chamfer(model, distance: Double(toolVM.chamferRadius))
             default:
                 ok = BRepModeling.shell(model, thickness: Double(toolVM.shellThickness),
@@ -1983,13 +1993,42 @@ struct CADModeView: View {
             return
         }
 
-        // Legacy malla (modelos sin B-rep)
-        guard var mutableMesh = model.meshes.first else { return }
-        toolVM.executeTool(mesh: &mutableMesh)
-        if !model.meshes.isEmpty {
-            model.meshes[0] = mutableMesh
+        // AQUÍ VIVÍAN LOS PLACEBOS (auditoría 2026-07-25). La ruta "legacy
+        // malla" llamaba a `toolVM.executeTool`, cuyos motores de malla:
+        //   · Corte y Bisel operaban sobre `indices[0]`/`[1]` — una arista
+        //     ARBITRARIA del primer triángulo, no la que tocaste.
+        //   · Barrer usaba una ruta de 3 puntos HARDCODEADA, ignorando la
+        //     spline dibujada (el barrido real es `sketch.tubeAlongPath`).
+        //   · Loft y Revolución eran `break`: el botón no hacía nada.
+        // Y el daño de fondo: escribían `model.meshes[0]` SIN tocar `cadShape`
+        // y sin `saveState()`, así que dejaban el render desincronizado de la
+        // verdad de ingeniería y sin undo. Es el origen probable de las
+        // "formas extrañas" del feedback en device.
+        //
+        // Regla del proyecto: cero botones falsos. Mejor un mensaje honesto que
+        // una geometría corrupta.
+        selectionController.showHint(unavailableHint(for: selectedTool, on: model))
+    }
+
+    /// Mensaje honesto cuando una herramienta no tiene operación real que hacer
+    /// sobre este cuerpo. Nunca miente y nunca toca la geometría.
+    private func unavailableHint(for tool: CADTool, on model: Model) -> String {
+        if model.cadShape == nil {
+            return "«\(tool.displayName)» necesita un cuerpo con geometría CAD; "
+                 + "\(model.name) es solo malla."
         }
-        canvasVM.objectWillChange.send()
+        switch tool {
+        case .sweep:
+            return "Para barrer: dibuja una spline como ruta y usa «Tubo por ruta»."
+        case .revolve:
+            return "Para revolucionar: cierra un perfil en el boceto y usa «Revolución»."
+        case .loft:
+            return "«Loft» necesita dos perfiles cerrados a distinta altura."
+        case .loopCut:
+            return "«Corte» aún no tiene implementación real — no se aplicó nada."
+        default:
+            return "«\(tool.displayName)» no se puede aplicar a \(model.name)."
+        }
     }
 
     @ViewBuilder
@@ -3783,83 +3822,12 @@ struct ShareSheet: UIViewControllerRepresentable {
 }
 
 // MARK: - CAD Tool Execution
-
-@MainActor
-private func executeCADTool(_ tool: CADTool, canvasVM: CanvasViewModel, toolVM: ToolViewModel) {
-    guard let firstModel = canvasVM.scene.models.first,
-          let firstMesh = firstModel.meshes.first else { return }
-    var mutableMesh = firstMesh
-
-    // Ruta B-rep real (OCCT) cuando el modelo conserva su CADShape.
-    if firstModel.cadShape != nil {
-        let applied: Bool
-        switch tool {
-        case .fillet, .chamfer, .shell:
-            BRepHistory.shared.recordChange(of: firstModel)
-            switch tool {
-            case .fillet:
-                applied = BRepModeling.fillet(firstModel, radius: Double(toolVM.filletRadius))
-            case .chamfer:
-                applied = BRepModeling.chamfer(firstModel, distance: Double(toolVM.chamferRadius))
-            default:
-                applied = BRepModeling.shell(firstModel, thickness: Double(toolVM.shellThickness))
-            }
-            if !applied { BRepHistory.shared.discardLast() }
-        default:
-            applied = false
-        }
-        if applied {
-            canvasVM.objectWillChange.send()
-            return
-        }
-        // Si la feature B-rep no aplica o falla, continuar con la ruta de malla.
-    }
-
-    switch tool {
-    case .fillet, .chamfer:
-        // PLACEBO RETIRADO (barrido device 2026-07-11): operaba sobre indices[0]/[1]
-        // de la malla — una arista arbitraria e invisible. Sin B-rep no hay
-        // fillet/chamfer honesto; el flujo real es seleccionar aristas →
-        // Redondear/Chaflán de la barra de selección.
-        logger.warning("fillet/chamfer sin B-rep: sin efecto (placebo retirado)")
-        return
-
-    case .shell:
-        let engine = ShellEngine()
-        _ = engine.computeShell(faceIndex: 0, thickness: toolVM.shellThickness, mesh: &mutableMesh)
-
-    case .loft:
-        // TODO(F3): LoftEngine.loft(profiles:solid:quality:) expects [Wire], not [Vertex].
-        // Vertex→Wire bridging not yet implemented. No-op until F3.
-        logger.warning("TODO(F3): Loft operation skipped — Wire bridging needed")
-
-    case .sweep:
-        let engine = SweepEngine()
-        let profile = mutableMesh.vertices
-        let sweepHeight = toolVM.sweepHeight
-        let path: [(position: SIMD3<Float>, tangent: SIMD3<Float>)] = [
-            (SIMD3<Float>(0, 0, 0), SIMD3<Float>(0, 0, 1)),
-            (SIMD3<Float>(0.05, 0, sweepHeight * 0.5), SIMD3<Float>(0, 0.2, 1)),
-            (SIMD3<Float>(0, 0, sweepHeight), SIMD3<Float>(0, 0, 1))
-        ]
-        let sweptMesh = engine.computeSweep(profile: profile, path: path, segments: 12)
-        if !sweptMesh.vertices.isEmpty {
-            let model = Model(name: "Sweep_\(UUID().uuidString.prefix(8))")
-            model.meshes = [sweptMesh]
-            canvasVM.scene.addModel(model)
-        }
-
-    case .booleanUnion, .booleanSubtract, .booleanIntersect:
-        toolVM.csgActiveOperation = tool
-        toolVM.csgShapeAIndex = nil
-        toolVM.csgShapeBIndex = nil
-
-    default:
-        break
-    }
-
-    if !canvasVM.scene.models.isEmpty {
-        canvasVM.scene.models[0].meshes[0] = mutableMesh
-    }
-    canvasVM.objectWillChange.send()
-}
+//
+// `executeCADTool(_:canvasVM:toolVM:)` vivía aquí y se BORRÓ en la auditoría
+// 2026-07-25. Se disparaba desde `.onChange(of: selectedTool)`, así que aplicaba
+// operaciones al SELECCIONAR la herramienta, sobre `scene.models.first` en vez
+// del cuerpo seleccionado, y duplicaba las que `executeSelectedTool()` ya hacía
+// bien. Sus ramas de malla eran placebos: shell con `faceIndex: 0`, barrido con
+// una ruta de 3 puntos hardcodeada, loft no-op. Todo lo que hacía de verdad ya
+// tiene un camino correcto: fillet/chamfer/shell por `executeSelectedTool()`,
+// barrido por `sketch.tubeAlongPath`, booleanos por `startCSGOperation(_:)`.
