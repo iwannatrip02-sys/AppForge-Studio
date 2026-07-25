@@ -80,7 +80,7 @@ final class FilletCornerTests: XCTestCase {
         let regions = RegionFinder.regions(in: m, maxDeviation: 1e-3)
         XCTAssertEqual(regions.count, 1, "el cuadrado redondeado sigue siendo UNA región")
         // Área = 100 − (esquina recortada 2×2) + (cuarto de disco r=2).
-        let expected = 100 - 4 + .pi * 4 / 4
+        let expected: Double = 100 - 4 + Double.pi * 4 / 4
         XCTAssertEqual(try XCTUnwrap(regions.first).area, expected, accuracy: 0.05)
     }
 
