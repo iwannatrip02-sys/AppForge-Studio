@@ -36,7 +36,11 @@ final class SketchController: ObservableObject {
     }
     @Published var plane: WorkPlane = .floor
 
-    enum Tool { case line, rectangle, circle, arc, spline, polygon, trim }
+    enum Tool { case line, rectangle, circle, arc, spline, polygon, trim, filletCorner }
+
+    /// Radio del redondeo de esquina 2D (herramienta `.filletCorner`), editable
+    /// desde la barra. En unidades del plano de dibujo.
+    @Published var cornerFilletRadius: Double = 0.2
 
     // MARK: - Estado del kernel
 
@@ -397,6 +401,7 @@ final class SketchController: ObservableObject {
         case .spline: tapSpline(raw)
         case .polygon: tapPolygon(raw)
         case .trim: tapTrim(raw)
+        case .filletCorner: tapFilletCorner(raw)
         }
         preview = nil
     }
@@ -651,6 +656,29 @@ final class SketchController: ObservableObject {
     /// Tap con la herramienta TRIM armada: localiza el trazo bajo el toque
     /// (HitTester) y lo recorta en ese tramo (kernel.trim). Tras recortar sigue
     /// ARMADO (recortes en ráfaga, como Shapr3D). Status honesto si no pudo.
+    /// Redondeo de esquina: tocas el VÉRTICE donde se juntan dos líneas y se
+    /// sustituye por un arco tangente del radio de la barra.
+    ///
+    /// El arco sobrevive como curva analítica hasta el B-rep (ver
+    /// `AnalyticProfileBuilder`), así que al extruir sale una cara cilíndrica
+    /// real — no los ~25 planos en que se habría discretizado.
+    private func tapFilletCorner(_ raw: SIMD2<Float>) {
+        let r = Double(snapRadiusPlane)
+        let hit = hitTester.hitTest(at: Vec2(raw), in: model,
+                                    pointRadius: r,        // aquí manda el PUNTO
+                                    curveRadius: r * 0.4,
+                                    regions: [])
+        guard case .point(let id, _) = hit else {
+            statusMessage = "Toca la esquina (el punto donde se juntan dos líneas)"
+            return
+        }
+        var newArc: CurveID?
+        mutate { newArc = $0.filletCorner(at: id, radius: cornerFilletRadius) }
+        statusMessage = newArc != nil
+            ? String(format: "Esquina redondeada R %.2f ✓", cornerFilletRadius)
+            : "Aquí no se puede redondear (¿no une dos líneas, o el radio es muy grande?)"
+    }
+
     private func tapTrim(_ raw: SIMD2<Float>) {
         let r = Double(snapRadiusPlane)
         let hit = hitTester.hitTest(at: Vec2(raw), in: model,
@@ -813,7 +841,7 @@ final class SketchController: ObservableObject {
                 previewPolyline = []
             }
             return
-        case .spline, .trim:
+        case .spline, .trim, .filletCorner:
             break
         }
         anchor = nil
@@ -873,8 +901,8 @@ final class SketchController: ObservableObject {
             return verts
         case .spline:
             return splineDraft + [p.simd]
-        case .trim:
-            return []   // trim no dibuja preview de figura
+        case .trim, .filletCorner:
+            return []   // operan por toque sobre lo dibujado: no hay figura que previsualizar
         }
     }
 

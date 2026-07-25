@@ -236,6 +236,92 @@ public struct SketchModel: Sendable, Codable {
         if curvesAttached(to: id).isEmpty { positions[id] = nil }
     }
 
+    // MARK: - Redondeo de esquina (fillet 2D)
+
+    /// Redondea la esquina donde se tocan DOS líneas, insertando un arco
+    /// TANGENTE a ambas y recortándolas hasta los puntos de tangencia.
+    ///
+    /// Es la operación más usada del dibujo mecánico y no existía. Cobra sentido
+    /// pleno con los perfiles analíticos: el arco que se inserta aquí sobrevive
+    /// hasta el B-rep como una cara cilíndrica REAL, no como los ~25 segmentos
+    /// en que se habría discretizado antes.
+    ///
+    /// Geometría (bisectriz):
+    ///   · `t = r / tan(α/2)` es la distancia desde la esquina a cada punto de
+    ///     tangencia, con α el ángulo interior entre las dos líneas.
+    ///   · el centro cae sobre la bisectriz a `r / sin(α/2)` de la esquina.
+    ///
+    /// Devuelve el `CurveID` del arco nuevo, o `nil` si no se puede redondear:
+    /// esquina que no une exactamente dos líneas, líneas casi colineales
+    /// (α≈0 o α≈π, donde el radio se va a infinito) o radio tan grande que el
+    /// redondeo se comería alguno de los dos segmentos.
+    @discardableResult
+    public mutating func filletCorner(at corner: PointID, radius: Double) -> CurveID? {
+        guard radius > mergeTolerance, let p = positions[corner] else { return nil }
+
+        // Exactamente dos líneas compartiendo la esquina.
+        let attached = curvesAttached(to: corner)
+        guard attached.count == 2 else { return nil }
+        var farEnds: [(curve: CurveID, far: PointID, pos: Vec2)] = []
+        for cid in attached {
+            guard case .line(let s, let e)? = curves[cid]?.kind else { return nil }
+            let far = (s == corner) ? e : s
+            guard far != corner, let fp = positions[far] else { return nil }
+            farEnds.append((cid, far, fp))
+        }
+
+        let d1 = (farEnds[0].pos - p).normalized
+        let d2 = (farEnds[1].pos - p).normalized
+        let cosA = max(-1, min(1, d1.dot(d2)))
+        let alpha = acos(cosA)
+        // Colineales (α≈0 o α≈π): no hay esquina que redondear.
+        guard alpha > 1e-6, alpha < .pi - 1e-6 else { return nil }
+
+        let halfA = alpha / 2
+        let tanHalf = tan(halfA)
+        let sinHalf = sin(halfA)
+        guard tanHalf > 1e-12, sinHalf > 1e-12 else { return nil }
+
+        let t = radius / tanHalf
+        // El redondeo no puede comerse ninguno de los dos segmentos.
+        let len1 = p.distance(to: farEnds[0].pos)
+        let len2 = p.distance(to: farEnds[1].pos)
+        guard t > mergeTolerance, t < len1 - mergeTolerance, t < len2 - mergeTolerance else {
+            return nil
+        }
+
+        let tangent1 = p + d1 * t
+        let tangent2 = p + d2 * t
+        let bisector = (d1 + d2).normalized
+        let center = p + bisector * (radius / sinHalf)
+
+        // Re-cablear cada línea para que termine en SU punto de tangencia. Se
+        // crean puntos nuevos: la esquina compartida deja de existir como tal.
+        let t1ID = addOrMergePoint(at: tangent1)
+        let t2ID = addOrMergePoint(at: tangent2)
+        replaceEndpoint(of: farEnds[0].curve, from: corner, to: t1ID)
+        replaceEndpoint(of: farEnds[1].curve, from: corner, to: t2ID)
+
+        // La esquina queda huérfana salvo que sea un punto suelto explícito.
+        if !freePoints.contains(corner), curvesAttached(to: corner).isEmpty {
+            positions[corner] = nil
+        }
+
+        // Sentido del barrido: el arco va de T1 a T2 por el lado CORTO (su
+        // barrido es π−α < π), así que lo decide el signo del producto cruz.
+        let ccw = (tangent1 - center).cross(tangent2 - center) > 0
+        let arc = SketchCurve(kind: .arc(start: t1ID, end: t2ID,
+                                         center: addOrMergePoint(at: center), ccw: ccw))
+        return insert(arc)
+    }
+
+    /// Sustituye un extremo de una línea conservando su identidad de curva.
+    private mutating func replaceEndpoint(of id: CurveID, from old: PointID, to new: PointID) {
+        guard case .line(let s, let e)? = curves[id]?.kind else { return }
+        curves[id]?.kind = .line(start: s == old ? new : s,
+                                 end: e == old ? new : e)
+    }
+
     // MARK: - Trim (recorte por intersecciones)
 
     /// Recorta la curva `id` en el tramo que contiene el punto `p`: calcula

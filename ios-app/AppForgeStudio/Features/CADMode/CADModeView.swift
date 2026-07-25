@@ -149,6 +149,8 @@ struct CADModeView: View {
         }
     }
     @State private var expandedGroup: ToolGroup? = nil
+    /// Espejo UI del radio de redondeo de esquina 2D (`sketch.cornerFilletRadius`).
+    @State private var cornerFilletRadiusUI: Float = 0.2
 
     private func tools(for group: ToolGroup) -> [CADTool] {
         switch group {
@@ -344,8 +346,8 @@ struct CADModeView: View {
 
     private var sketchTools: [CADTool] {
         // Sketch en viewport: línea (cadena), círculo, rectángulo, ARCO, SPLINE,
-        // POLÍGONO, RECORTAR. (El controlador ya implementa arco y trim.)
-        [.line, .circle, .rectangle, .arc, .spline, .polygon, .trim]
+        // POLÍGONO, RECORTAR, REDONDEAR ESQUINA.
+        [.line, .circle, .rectangle, .arc, .spline, .polygon, .trim, .cornerFillet]
     }
 
     /// `id` alimenta la lógica (performAddPrimitive); `label` es lo visible.
@@ -787,6 +789,7 @@ struct CADModeView: View {
             case .spline: sketch.beginTool(.spline)
             case .polygon: sketch.beginTool(.polygon)
             case .trim: sketch.beginTool(.trim)
+            case .cornerFillet: sketch.beginTool(.filletCorner)
             case .sketch: sketch.disarm()   // modo boceto NEUTRAL (sin herramienta armada)
             default: break
             }
@@ -1151,6 +1154,22 @@ struct CADModeView: View {
                         .frame(width: 20)
                 }
                 .onChange(of: polygonSidesUI) { v in sketch.polygonSides = v }
+            } else if selectedTool == .cornerFillet {
+                // Radio del redondeo de esquina, editable antes de tocar el
+                // vértice. Número visible: en CAD el valor SIEMPRE se ve.
+                Text("Radio").font(.caption2).foregroundColor(theme.textSecondary)
+                Slider(value: $cornerFilletRadiusUI, in: 0.02...2.0)
+                    .frame(width: 110)
+                    .onChange(of: cornerFilletRadiusUI) { v in
+                        sketch.cornerFilletRadius = Double(v)
+                    }
+                Text(String(format: "%.2f", cornerFilletRadiusUI))
+                    .font(.caption.monospacedDigit().bold())
+                    .foregroundColor(theme.accent)
+                    .frame(width: 34)
+                Text("Toca la esquina entre dos líneas")
+                    .font(.caption2)
+                    .foregroundColor(theme.textSecondary)
             }
             // Entrada numérica al dibujar (brecha #1): campos contextuales para
             // la curva CALIENTE (recién dibujada) o la selección única. Línea →

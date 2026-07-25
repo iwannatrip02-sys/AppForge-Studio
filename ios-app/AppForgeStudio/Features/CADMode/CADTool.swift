@@ -28,6 +28,10 @@ enum CADTool: String, CaseIterable, Identifiable {
     case arc = "Arc"
     case polygon = "Polygon"
     case trim = "Trim"
+    /// Redondeo de esquina 2D: tocas el vértice donde se juntan dos líneas y se
+    /// sustituye por un arco tangente. La operación más usada del dibujo
+    /// mecánico — y el arco sobrevive al B-rep como cara cilíndrica real.
+    case cornerFillet = "Corner Fillet"
     case dimension = "Dimension"
     case constraint = "Constraint"
 
@@ -63,6 +67,7 @@ enum CADTool: String, CaseIterable, Identifiable {
         case .arc: return "Arco"
         case .polygon: return "Polígono"
         case .trim: return "Recortar"
+        case .cornerFillet: return "Redondear esquina"
         case .dimension: return "Cota"
         case .constraint: return "Restricción"
         }
@@ -73,7 +78,8 @@ enum CADTool: String, CaseIterable, Identifiable {
         // `.sketch` = modo boceto NEUTRAL (beta 2026-07-16b): sin herramienta de
         // dibujo armada, pero el input de sketch y los overlays siguen VIVOS —
         // tocar selecciona (paradigma Shapr3D sin botón de seleccionar).
-        case .sketch, .line, .circle, .rectangle, .spline, .arc, .polygon, .trim, .dimension, .constraint:
+        case .sketch, .line, .circle, .rectangle, .spline, .arc, .polygon, .trim,
+             .cornerFillet, .dimension, .constraint:
             return true
         default:
             return false
@@ -109,6 +115,7 @@ enum CADTool: String, CaseIterable, Identifiable {
         case .arc: return "point.topleft.down.curvedto.point.bottomright.up"
         case .polygon: return "pentagon"
         case .trim: return "scissors"
+        case .cornerFillet: return "square.on.circle"
         case .dimension: return "text.magnifyingglass"
         case .constraint: return "link"
         }
