@@ -3817,7 +3817,9 @@ struct SketchCanvasOverlay: View {
                               at: (f + pv) * 0.5)
                     case .circle, .polygon:
                         label(String(format: "R %.2f", simd_distance(f, pv)), at: pv)
-                    case .spline, .trim:
+                    case .spline, .trim, .filletCorner:
+                        // Operan por toque sobre lo ya dibujado: no hay cota que
+                        // mostrar entre el ancla y el cursor.
                         break
                     }
                     dot(pv, color: ember)
