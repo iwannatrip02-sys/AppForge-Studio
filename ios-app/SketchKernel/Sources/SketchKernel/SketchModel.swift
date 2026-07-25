@@ -341,11 +341,25 @@ public struct SketchModel: Sendable, Codable {
         guard isClosed || endpoints.count == 2 else { return nil }
 
         var remaining = Set(ids)
+        // El punto de arranque debe ser DETERMINISTA: elegirlo por `uuidString`
+        // era aleatorio, así que la misma cadena se recorría en un sentido u
+        // otro entre ejecuciones — y con ello el offset salía a un lado o al
+        // opuesto. Regla: respetar el orden del llamador (su primera curva
+        // lleva la intención) y, si no desempata, el extremo geométricamente
+        // menor.
         var current: PointID
-        if let start = endpoints.min(by: { $0.raw.uuidString < $1.raw.uuidString }) {
-            current = start
-        } else if let any = ends[ids[0]]?.0 {
-            current = any
+        guard let (firstStart, firstEnd) = ends[ids[0]] else { return nil }
+        if isClosed {
+            current = firstStart
+        } else if degree[firstStart] == 1 {
+            current = firstStart
+        } else if degree[firstEnd] == 1 {
+            current = firstEnd
+        } else if let lowest = endpoints.min(by: { a, b in
+            guard let pa = positions[a], let pb = positions[b] else { return false }
+            return (pa.x, pa.y) < (pb.x, pb.y)
+        }) {
+            current = lowest
         } else {
             return nil
         }
