@@ -8,9 +8,13 @@ enum OCCTBridge {
     
     /// Triangulate an OCCTSwift B-rep shape into our Mesh type.
     /// OCCTSwift.mesh() returns [SIMD3<Float>] vertices, [SIMD3<Float>] normals, [UInt32] indices.
+    /// Los DEFAULTS son los de `.medium`, no los de OCCT: el default angular de
+    /// OCCT (0.5 rad ≈ 28.6°) deja las curvas facetadas, y cualquier llamador
+    /// que omitiera el parámetro heredaba ese defecto en silencio (le pasó a
+    /// `BooleanEngine`). Prefiere `toMesh(_:quality:)` para elegir calidad.
     static func shapeToMesh(_ shape: OCCTSwift.Shape,
                             linearDeflection: Double = 0.1,
-                            angularDeflection: Double = 0.5) -> Mesh? {
+                            angularDeflection: Double = 0.20) -> Mesh? {
         guard let occtMesh = shape.mesh(linearDeflection: linearDeflection,
                                          angularDeflection: angularDeflection) else {
             return nil

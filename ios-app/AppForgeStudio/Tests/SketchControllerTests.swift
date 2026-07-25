@@ -78,8 +78,11 @@ final class SketchControllerTests: XCTestCase {
         XCTAssertEqual(s.regions.count, 1)
 
         let model = try XCTUnwrap(s.extrudeProfile(height: 2.0))
-        XCTAssertEqual(try volume(model), .pi * 2.0, accuracy: 0.05,
-                       "cilindro R1 alto 2 → ~2π (perfil poligonal del kernel)")
+        // Con perfil ANALÍTICO el volumen es exacto: el prisma inscrito de
+        // antes subestimaba ~1.6e-2. La tolerancia apretada es la que blinda
+        // el cambio (ver AnalyticProfileTests para el oráculo de caras).
+        XCTAssertEqual(try volume(model), .pi * 2.0, accuracy: 1e-6,
+                       "cilindro R1 alto 2 → 2π EXACTO (perfil analítico, no polígono)")
     }
 
     // MARK: - Selección (Fase 1 §4: tocar un trazo lo selecciona)

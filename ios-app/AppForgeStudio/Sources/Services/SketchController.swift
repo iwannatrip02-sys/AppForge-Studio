@@ -183,7 +183,17 @@ final class SketchController: ObservableObject {
     }
 
     /// Vértices de la región cerrada seleccionada por tap (nil = ninguna).
-    @Published private(set) var selectedRegion: [SIMD2<Float>]? = nil
+    @Published private(set) var selectedRegion: [SIMD2<Float>]? = nil {
+        // La procedencia de curvas solo vale para la región que la fijó: al
+        // cambiar de región se invalida sola, y quien conozca el contorno
+        // analítico lo vuelve a poner justo después de asignar.
+        didSet { selectedRegionBoundary = [] }
+    }
+
+    /// Contorno de la región seleccionada con la IDENTIDAD de sus curvas
+    /// conservada (un círculo sigue siendo un círculo, no 50 segmentos). Vacío
+    /// = solo hay polígono y el perfil B-rep cae al camino facetado.
+    private(set) var selectedRegionBoundary: [SketchKernel.RegionEdge] = []
 
     // MARK: - Compatibilidad con la UI existente
 
@@ -449,7 +459,8 @@ final class SketchController: ObservableObject {
             clearFeedback()
         case .region(let region):
             lastTapCurve = nil
-            selectedRegion = region.polygon.map { $0.simd }
+            selectedRegion = region.polygon.map { $0.simd }   // el didSet limpia…
+            selectedRegionBoundary = region.boundary          // …y aquí se re-fija
             selectedCurveIDs = []
             statusMessage = "Región seleccionada — arrastra desde adentro para extruir"
             clearFeedback()
@@ -1149,22 +1160,80 @@ final class SketchController: ObservableObject {
         return biggest.polygon.map { $0.simd }
     }
 
-    private func activeRegionWire() -> Wire? {
-        guard let verts = activeRegionVertices() else { return nil }
-        return wire(vertices: verts)
+    private func double3(_ v: SIMD3<Float>) -> SIMD3<Double> {
+        SIMD3<Double>(Double(v.x), Double(v.y), Double(v.z))
+    }
+
+    /// Contorno de la región ACTIVA con procedencia de curvas, si se conoce.
+    private func activeRegionBoundary() -> [SketchKernel.RegionEdge] {
+        if selectedRegion != nil { return selectedRegionBoundary }
+        return regions.first?.boundary ?? []
+    }
+
+    /// Wires candidatos de un contorno, EN ORDEN DE PREFERENCIA: primero el
+    /// ANALÍTICO (círculos y arcos reales → un cilindro de 3 caras en vez de un
+    /// prisma de 50), luego el poligonal de siempre.
+    ///
+    /// El llamador se queda con el primero que produzca geometría VÁLIDA: ganar
+    /// cilindros nunca puede costar una extrusión que antes funcionaba.
+    private func profileWires(boundary: [SketchKernel.RegionEdge],
+                              vertices: [SIMD2<Float>]) -> [Wire] {
+        var candidates: [Wire] = []
+        if !boundary.isEmpty {
+            let o = double3(plane.origin)
+            let u = double3(plane.u)
+            let v = double3(plane.v)
+            let n = double3(plane.normal)
+            if let analytic = AnalyticProfileBuilder.wire(boundary: boundary, in: model,
+                                                          origin: o, uAxis: u,
+                                                          vAxis: v, normal: n) {
+                candidates.append(analytic)
+            }
+        }
+        if let polygonal = wire(vertices: vertices) { candidates.append(polygonal) }
+        return candidates
+    }
+
+    private func activeRegionWires() -> [Wire] {
+        profileWires(boundary: activeRegionBoundary(),
+                     vertices: activeRegionVertices() ?? [])
+    }
+
+    /// Contorno con procedencia de la región que corresponde a estos vértices.
+    ///
+    /// Se localiza por CENTROIDE, no por igualdad de puntos flotantes: los
+    /// vértices siempre vienen de una región, así que su centroide cae dentro
+    /// de ella. Si el perfil es tan cóncavo que el centroide queda fuera, no se
+    /// encuentra nada y la extrusión cae al polígono — el resultado de siempre.
+    private func boundary(matching vertices: [SIMD2<Float>]) -> [SketchKernel.RegionEdge] {
+        guard vertices.count >= 3 else { return [] }
+        var sum = Vec2.zero
+        for v in vertices { sum = sum + Vec2(v) }
+        let centroid = sum / Double(vertices.count)
+        return RegionFinder.region(at: centroid, in: regions)?.boundary ?? []
     }
 
     /// Perfil planar (cara B-rep) de la región activa, en coords mundo.
     func activeRegionProfile() -> CADShape? {
-        guard let w = activeRegionWire() else { return nil }
-        return OCCTSwift.Shape.face(from: w, planar: true)
+        for w in activeRegionWires() {
+            if let face = OCCTSwift.Shape.face(from: w, planar: true), face.isValid {
+                return face
+            }
+        }
+        return nil
     }
 
     /// Prisma B-rep de extruir la región activa. Puro: NO toca la escena.
     func extrudedShapeForActiveRegion(distance: Double) -> CADShape? {
-        guard distance > 1e-9, let w = activeRegionWire() else { return nil }
-        let dir = SIMD3<Double>(Double(plane.normal.x), Double(plane.normal.y), Double(plane.normal.z))
-        return OCCTSwift.Shape.extrude(profile: w, direction: dir, length: distance)
+        guard distance > 1e-9 else { return nil }
+        let dir = double3(plane.normal)
+        for w in activeRegionWires() {
+            if let solid = OCCTSwift.Shape.extrude(profile: w, direction: dir, length: distance),
+               solid.isValid {
+                return solid
+            }
+        }
+        return nil
     }
 
     /// Extruye una región dada por sus vértices 2D del plano.
@@ -1173,9 +1242,20 @@ final class SketchController: ObservableObject {
             statusMessage = "Región inválida para extruir"
             return nil
         }
-        let dir = SIMD3<Double>(Double(plane.normal.x), Double(plane.normal.y), Double(plane.normal.z))
-        guard let w = wire(vertices: vertices),
-              let shape = OCCTSwift.Shape.extrude(profile: w, direction: dir, length: height),
+        let dir = double3(plane.normal)
+        // Mismo criterio que `extrudedShapeForActiveRegion`: perfil analítico
+        // primero. Esta es la ruta que usan el botón Extruir de la barra y el
+        // arrastre desde la región, así que sin esto el cilindro real nunca
+        // llegaría al usuario por los caminos que de verdad toca.
+        var solid: CADShape?
+        for w in profileWires(boundary: boundary(matching: vertices), vertices: vertices) {
+            if let s = OCCTSwift.Shape.extrude(profile: w, direction: dir, length: height),
+               s.isValid {
+                solid = s
+                break
+            }
+        }
+        guard let shape = solid,
               let mesh = OCCTBridge.toMesh(shape, quality: .medium) else {
             statusMessage = "No se pudo extruir la región"
             return nil
@@ -1277,11 +1357,20 @@ final class SketchController: ObservableObject {
             axisOrigin = SIMD3<Double>(Double(plane.origin.x), Double(plane.origin.y), Double(plane.origin.z))
             axisDir = SIMD3<Double>(Double(plane.v.x), Double(plane.v.y), Double(plane.v.z))
         }
-        guard let w = activeRegionWire(),
-              let shape = OCCTSwift.Shape.revolve(profile: w,
-                                                  axisOrigin: axisOrigin,
-                                                  axisDirection: axisDir,
-                                                  angle: angle),
+        // Mismo criterio que la extrusión: perfil analítico primero (una
+        // revolución de perfil con arcos da toros y esferas reales), poligonal
+        // como red de seguridad.
+        var revolved: CADShape?
+        for w in activeRegionWires() {
+            if let s = OCCTSwift.Shape.revolve(profile: w,
+                                               axisOrigin: axisOrigin,
+                                               axisDirection: axisDir,
+                                               angle: angle), s.isValid {
+                revolved = s
+                break
+            }
+        }
+        guard let shape = revolved,
               let mesh = OCCTBridge.toMesh(shape, quality: .medium) else {
             statusMessage = "No se pudo revolucionar (¿el perfil cruza el eje?)"
             return nil

@@ -23,8 +23,12 @@ class BooleanEngine {
     }
     
     // MARK: - Shape a Mesh (extraer triangulos de un Shape)
+    /// Pasa por `toMesh(quality:)` — llamar al `shapeToMesh` crudo dejaba los
+    /// resultados de booleanos con la deflección angular por defecto de OCCT
+    /// (0.5 rad ≈ 28.6°), o sea facetados, mientras el resto de la app ya
+    /// teselaba fino.
     private func shapeToMesh(_ shape: OCCTSwift.Shape) -> Mesh {
-        return OCCTBridge.shapeToMesh(shape) ?? Mesh()
+        return OCCTBridge.toMesh(shape, quality: .medium) ?? Mesh()
     }
     
     // MARK: - Operaciones Booleanas

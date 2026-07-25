@@ -204,26 +204,52 @@ public struct CurveGeometry: Sendable {
 
     /// Polilínea que aproxima la curva con flecha (sagitta) ≤ maxDeviation.
     public func discretize(maxDeviation: Double = 1e-3) -> [Vec2] {
+        discretizeWithParams(maxDeviation: maxDeviation).map { $0.point }
+    }
+
+    /// Igual que `discretize` pero conservando el PARÁMETRO t∈[0,1] de cada
+    /// punto muestreado.
+    ///
+    /// Es la PROCEDENCIA que necesitan las regiones: sin ella, el contorno de
+    /// una región cerrada es solo un polígono y extruir un círculo produce un
+    /// prisma de ~50 caras planas en vez de un cilindro. Con el par (curva, t)
+    /// viajando por el grafo planar, el perfil B-rep se reconstruye con la
+    /// curva ANALÍTICA original (ver `RegionEdge`).
+    ///
+    /// Los valores de t coinciden exactamente con los de `evaluate(_:)`, que es
+    /// lo que permite reconstruir la curva desde el intervalo.
+    public func discretizeWithParams(maxDeviation: Double = 1e-3) -> [(point: Vec2, t: Double)] {
         switch shape {
         case .line(let a, let b):
-            return [a, b]
+            return [(a, 0), (b, 1)]
+
         case .sampledSpline(let s):
-            return s
+            guard s.count >= 2 else { return s.map { ($0, 0) } }
+            let last = Double(s.count - 1)
+            var pts: [(point: Vec2, t: Double)] = []
+            pts.reserveCapacity(s.count)
+            for (i, p) in s.enumerated() { pts.append((p, Double(i) / last)) }
+            return pts
+
         case .circle(let c, let r):
             let n = Self.arcSegments(radius: r, sweep: 2 * .pi, maxDeviation: maxDeviation)
-            var pts: [Vec2] = []
+            var pts: [(point: Vec2, t: Double)] = []
+            pts.reserveCapacity(n + 1)
             for k in 0...n {
-                let ang = 2 * .pi * Double(k) / Double(n)
-                pts.append(c + Vec2(cos(ang), sin(ang)) * r)
+                let t = Double(k) / Double(n)
+                let ang = 2 * .pi * t
+                pts.append((c + Vec2(cos(ang), sin(ang)) * r, t))
             }
             return pts
+
         case .arc(let c, let r, let a0, let sweep, let ccw):
             let n = Self.arcSegments(radius: r, sweep: sweep, maxDeviation: maxDeviation)
-            var pts: [Vec2] = []
+            var pts: [(point: Vec2, t: Double)] = []
+            pts.reserveCapacity(n + 1)
             for k in 0...n {
                 let t = Double(k) / Double(n)
                 let ang = ccw ? a0 + sweep * t : a0 - sweep * t
-                pts.append(c + Vec2(cos(ang), sin(ang)) * r)
+                pts.append((c + Vec2(cos(ang), sin(ang)) * r, t))
             }
             return pts
         }
