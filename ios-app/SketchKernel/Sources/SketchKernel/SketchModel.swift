@@ -236,6 +236,162 @@ public struct SketchModel: Sendable, Codable {
         if curvesAttached(to: id).isEmpty { positions[id] = nil }
     }
 
+    // MARK: - Offset 2D (contorno paralelo)
+
+    /// Desplaza una cadena conectada de LÍNEAS a distancia `distance`, creando
+    /// un contorno paralelo. Signo positivo = hacia la izquierda del sentido de
+    /// recorrido de la cadena; negativo = hacia la derecha.
+    ///
+    /// Es EXACTO, no una aproximación: cada recta desplazada es una recta
+    /// paralela, y las esquinas se resuelven INTERSECTANDO las rectas
+    /// desplazadas consecutivas (esquina en inglete). Así el contorno resultante
+    /// mantiene la distancia real en todos sus tramos — que es justo lo que se
+    /// necesita para paredes, holguras y contornos de mecanizado.
+    ///
+    /// v1 cubre cadenas de líneas (el caso dominante: perfiles poligonales).
+    /// Con arcos o splines devuelve `nil` en vez de aproximar — el arco
+    /// desplazado es concéntrico de radio r±d y entra en una versión siguiente.
+    ///
+    /// - Returns: los IDs de las curvas nuevas, o `nil` si la cadena no es
+    ///   válida (curvas que no son líneas, no conectadas, o menos de una).
+    @discardableResult
+    public mutating func offsetLineChain(_ ids: [CurveID], distance: Double) -> [CurveID]? {
+        guard abs(distance) > mergeTolerance, !ids.isEmpty else { return nil }
+        guard let chain = orderedLineChain(ids) else { return nil }
+
+        // Recta desplazada de cada tramo: se guarda como (punto, dirección).
+        // La normal izquierda de una dirección (dx,dy) es (−dy,dx).
+        var shifted: [(origin: Vec2, dir: Vec2)] = []
+        shifted.reserveCapacity(chain.points.count)
+        for i in 0..<(chain.points.count - 1) {
+            let a = chain.points[i], b = chain.points[i + 1]
+            let dir = (b - a).normalized
+            let normal = dir.perpendicular          // izquierda
+            shifted.append((a + normal * distance, dir))
+        }
+        guard !shifted.isEmpty else { return nil }
+
+        // Vértices del contorno desplazado: los extremos son el desplazamiento
+        // directo; los interiores, la intersección de las dos rectas vecinas.
+        var corners: [Vec2] = []
+        corners.reserveCapacity(shifted.count + 1)
+
+        if chain.isClosed {
+            // En un bucle, TODO vértice es interior: el primero se resuelve con
+            // el último tramo.
+            guard let first = intersectLines(shifted[shifted.count - 1], shifted[0]) else {
+                return nil
+            }
+            corners.append(first)
+        } else {
+            corners.append(shifted[0].origin)
+        }
+
+        for i in 0..<(shifted.count - 1) {
+            guard let x = intersectLines(shifted[i], shifted[i + 1]) else { return nil }
+            corners.append(x)
+        }
+
+        if chain.isClosed {
+            corners.append(corners[0])              // cerrar el bucle
+        } else {
+            let last = shifted[shifted.count - 1]
+            let endA = chain.points[chain.points.count - 2]
+            let endB = chain.points[chain.points.count - 1]
+            corners.append(last.origin + (endB - endA))
+        }
+
+        var created: [CurveID] = []
+        for i in 0..<(corners.count - 1) {
+            let a = corners[i], b = corners[i + 1]
+            guard a.distance(to: b) > mergeTolerance else { continue }
+            created.append(addLine(from: a, to: b))
+        }
+        return created.isEmpty ? nil : created
+    }
+
+    /// Intersección de dos rectas infinitas dadas por (punto, dirección).
+    /// `nil` si son paralelas — dos tramos colineales no forman esquina.
+    private func intersectLines(_ p: (origin: Vec2, dir: Vec2),
+                                _ q: (origin: Vec2, dir: Vec2)) -> Vec2? {
+        let denom = p.dir.cross(q.dir)
+        guard abs(denom) > 1e-12 else { return nil }
+        let t = (q.origin - p.origin).cross(q.dir) / denom
+        return p.origin + p.dir * t
+    }
+
+    /// Ordena las líneas dadas en una cadena conectada y devuelve sus vértices
+    /// en orden de recorrido. `nil` si alguna no es línea o no forman UNA cadena.
+    private func orderedLineChain(_ ids: [CurveID])
+        -> (points: [Vec2], isClosed: Bool)? {
+        // Adyacencia por PUNTO TOPOLÓGICO compartido — el invariante del kernel.
+        var ends: [CurveID: (PointID, PointID)] = [:]
+        var degree: [PointID: Int] = [:]
+        for id in ids {
+            guard case .line(let s, let e)? = curves[id]?.kind, s != e else { return nil }
+            ends[id] = (s, e)
+            degree[s, default: 0] += 1
+            degree[e, default: 0] += 1
+        }
+        guard ends.count == ids.count else { return nil }
+        // Una cadena simple: todo punto tiene grado 1 (extremos) o 2 (interior).
+        guard degree.values.allSatisfy({ $0 <= 2 }) else { return nil }
+        let endpoints = degree.filter { $0.value == 1 }.map { $0.key }
+        let isClosed = endpoints.isEmpty
+        guard isClosed || endpoints.count == 2 else { return nil }
+
+        var remaining = Set(ids)
+        var current: PointID
+        if let start = endpoints.min(by: { $0.raw.uuidString < $1.raw.uuidString }) {
+            current = start
+        } else if let any = ends[ids[0]]?.0 {
+            current = any
+        } else {
+            return nil
+        }
+
+        var points: [Vec2] = []
+        guard let p0 = positions[current] else { return nil }
+        points.append(p0)
+
+        while let next = remaining.first(where: { id in
+            guard let (s, e) = ends[id] else { return false }
+            return s == current || e == current
+        }) {
+            guard let (s, e) = ends[next] else { return nil }
+            let other = (s == current) ? e : s
+            guard let pos = positions[other] else { return nil }
+            points.append(pos)
+            remaining.remove(next)
+            current = other
+        }
+        // Todas las líneas deben haberse consumido: si sobra alguna, los `ids`
+        // no formaban UNA sola cadena.
+        guard remaining.isEmpty, points.count >= 2 else { return nil }
+
+        // En un BUCLE el punto de partida tiene dos líneas candidatas, así que
+        // el recorrido podría salir CW o CCW según el orden del Set. Como el
+        // lado del offset se define respecto al sentido de recorrido, eso haría
+        // que el contorno saliera hacia dentro o hacia fuera AL AZAR.
+        // Se normaliza a CCW (área firmada positiva): así "izquierda" = "hacia
+        // dentro" siempre, que además es la semántica que espera el usuario.
+        if isClosed, signedArea(points) < 0 {
+            points.reverse()
+        }
+        return (points, isClosed)
+    }
+
+    /// Área firmada (shoelace) del polígono; el último punto repetido no estorba.
+    private func signedArea(_ pts: [Vec2]) -> Double {
+        guard pts.count >= 3 else { return 0 }
+        var acc = 0.0
+        for i in 0..<pts.count {
+            let a = pts[i], b = pts[(i + 1) % pts.count]
+            acc += a.cross(b)
+        }
+        return acc / 2
+    }
+
     // MARK: - Espejo 2D
 
     /// Refleja las curvas dadas sobre un eje y añade las copias al sketch.

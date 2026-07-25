@@ -656,6 +656,30 @@ final class SketchController: ObservableObject {
     /// Tap con la herramienta TRIM armada: localiza el trazo bajo el toque
     /// (HitTester) y lo recorta en ese tramo (kernel.trim). Tras recortar sigue
     /// ARMADO (recortes en ráfaga, como Shapr3D). Status honesto si no pudo.
+    // MARK: - Offset 2D
+
+    /// Distancia del contorno paralelo. Signo = lado (izquierda del recorrido).
+    @Published var offsetDistance: Double = 0.5
+
+    /// Crea un contorno paralelo de los trazos seleccionados (o de todos si no
+    /// hay selección) a `offsetDistance`.
+    func offsetSelection() {
+        let targets = selectedCurveIDs.isEmpty
+            ? model.curveOrder.filter { model.curves[$0]?.isConstruction == false }
+            : Array(selectedCurveIDs)
+        guard !targets.isEmpty else {
+            statusMessage = "Selecciona los trazos a desplazar"
+            return
+        }
+        var made: [CurveID]?
+        mutate { made = $0.offsetLineChain(targets, distance: offsetDistance) }
+        if let made, !made.isEmpty {
+            statusMessage = String(format: "Contorno paralelo a %.2f ✓", offsetDistance)
+        } else {
+            statusMessage = "No se pudo desplazar: debe ser UNA cadena de líneas conectadas"
+        }
+    }
+
     // MARK: - Espejo 2D
 
     /// ¿Hay una línea de CONSTRUCCIÓN que pueda servir de eje de simetría?

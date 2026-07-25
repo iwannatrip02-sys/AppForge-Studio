@@ -151,6 +151,8 @@ struct CADModeView: View {
     @State private var expandedGroup: ToolGroup? = nil
     /// Espejo UI del radio de redondeo de esquina 2D (`sketch.cornerFilletRadius`).
     @State private var cornerFilletRadiusUI: Float = 0.2
+    /// Espejo UI de la distancia de offset 2D (`sketch.offsetDistance`).
+    @State private var offsetDistanceUI: Float = 0.5
 
     private func tools(for group: ToolGroup) -> [CADTool] {
         switch group {
@@ -1188,6 +1190,22 @@ struct CADModeView: View {
                       ? "Reflejar sobre la línea de construcción"
                       : "Dibuja una línea de construcción para usarla como eje")
                 .accessibilityIdentifier("sketch.mirror")
+
+                // OFFSET 2D: contorno paralelo exacto de la cadena seleccionada.
+                Slider(value: $offsetDistanceUI, in: -2.0...2.0)
+                    .frame(width: 90)
+                    .onChange(of: offsetDistanceUI) { v in
+                        sketch.offsetDistance = Double(v)
+                    }
+                Button {
+                    HapticService.shared.medium()
+                    sketch.offsetSelection()
+                } label: {
+                    Label(String(format: "Offset %.2f", offsetDistanceUI),
+                          systemImage: "square.on.square.dashed")
+                        .font(.caption2)
+                }
+                .accessibilityIdentifier("sketch.offset")
             }
             // Entrada numérica al dibujar (brecha #1): campos contextuales para
             // la curva CALIENTE (recién dibujada) o la selección única. Línea →
