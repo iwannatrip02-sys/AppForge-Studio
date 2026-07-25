@@ -87,21 +87,39 @@ class CanvasViewModel: ObservableObject {
         }
     }
 
+    /// Marcas monótonas paralelas a los stacks (ver `UndoClock`): dicen CUÁNDO se
+    /// registró cada snapshot, para que `UndoCoordinator` pueda decidir si lo
+    /// último que hizo el usuario fue una op de escena o una de B-rep.
+    private var undoSeqs: [UInt64] = []
+    private var redoSeqs: [UInt64] = []
+
+    /// Marca de la operación de escena más reciente pendiente de deshacer.
+    var lastUndoSeq: UInt64? { undoSeqs.last }
+    /// Marca de la operación de escena más reciente pendiente de rehacer.
+    var lastRedoSeq: UInt64? { redoSeqs.last }
+
     func saveState() {
         undoStack.append(scene)
-        if undoStack.count > maxUndo { undoStack.removeFirst() }
+        undoSeqs.append(UndoClock.tick())
+        if undoStack.count > maxUndo {
+            undoStack.removeFirst()
+            undoSeqs.removeFirst()
+        }
         redoStack.removeAll()
+        redoSeqs.removeAll()
     }
 
     func undo() {
         guard !undoStack.isEmpty else { return }
         redoStack.append(scene)
+        redoSeqs.append(undoSeqs.popLast() ?? 0)
         scene = undoStack.removeLast()
     }
 
     func redo() {
         guard !redoStack.isEmpty else { return }
         undoStack.append(scene)
+        undoSeqs.append(redoSeqs.popLast() ?? 0)
         scene = redoStack.removeLast()
     }
     

@@ -16,6 +16,10 @@ final class BRepHistory: ObservableObject {
         weak var model: Model?
         let shape: CADShape?
         let meshes: [Mesh]
+        /// Marca monótona del momento en que se registró (ver `UndoClock`). Es lo
+        /// que permite a `UndoCoordinator` saber si lo último que hizo el usuario
+        /// fue esto o una operación de escena.
+        let seq: UInt64
     }
 
     @Published private(set) var undoCount: Int = 0
@@ -28,9 +32,15 @@ final class BRepHistory: ObservableObject {
     var canUndo: Bool { !undoStack.isEmpty }
     var canRedo: Bool { !redoStack.isEmpty }
 
+    /// Marca de la operación más reciente pendiente de deshacer (nil si no hay).
+    var lastUndoSeq: UInt64? { undoStack.last?.seq }
+    /// Marca de la operación más reciente pendiente de rehacer (nil si no hay).
+    var lastRedoSeq: UInt64? { redoStack.last?.seq }
+
     /// Llamar ANTES de mutar el B-rep/malla de un modelo (feature, push/pull, booleano in-place).
     func recordChange(of model: Model) {
-        undoStack.append(Entry(model: model, shape: model.cadShape, meshes: model.meshes))
+        undoStack.append(Entry(model: model, shape: model.cadShape, meshes: model.meshes,
+                               seq: UndoClock.tick()))
         if undoStack.count > maxDepth { undoStack.removeFirst() }
         redoStack.removeAll()
         syncCounts()

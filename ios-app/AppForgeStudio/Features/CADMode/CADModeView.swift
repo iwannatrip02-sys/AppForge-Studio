@@ -507,23 +507,18 @@ struct CADModeView: View {
                                 selectionController.handleTap(hit: hit, models: canvasVM.scene.models)
                             }
                         },
-                        // Tap 2 dedos = deshacer: primero el historial B-rep (features),
-                        // si no hay, el de escena. Tap 3 dedos = rehacer.
+                        // Tap 2 dedos = deshacer, 3 dedos = rehacer. Va al
+                        // historial que registró la operación MÁS RECIENTE
+                        // (`UndoCoordinator`), no "el B-rep primero": esa regla
+                        // vieja des-redondeaba un cuerpo cuando lo último que
+                        // habías hecho era añadir una primitiva.
                         onUndoGesture: {
                             HapticService.shared.light()
-                            if BRepHistory.shared.canUndo {
-                                if BRepHistory.shared.undo() { canvasVM.objectWillChange.send() }
-                            } else {
-                                canvasVM.undo()
-                            }
+                            performUndo()
                         },
                         onRedoGesture: {
                             HapticService.shared.light()
-                            if BRepHistory.shared.canRedo {
-                                if BRepHistory.shared.redo() { canvasVM.objectWillChange.send() }
-                            } else {
-                                canvasVM.redo()
-                            }
+                            performRedo()
                         },
                         // Transformación directa: arrastra el cuerpo con la
                         // herramienta activa → preview vivo → bake al B-rep al soltar
@@ -935,28 +930,60 @@ struct CADModeView: View {
         .background(theme.surface)
     }
 
+    /// Deshace lo ÚLTIMO que hizo el usuario, sea del historial B-rep (features,
+    /// push/pull) o del de escena (añadir/borrar cuerpos). La decisión la toma
+    /// `UndoCoordinator` comparando las marcas monótonas de ambos.
+    private func performUndo() {
+        switch UndoCoordinator.undoTarget(brepSeq: BRepHistory.shared.lastUndoSeq,
+                                          sceneSeq: canvasVM.lastUndoSeq) {
+        case .brep:
+            if BRepHistory.shared.undo() { canvasVM.objectWillChange.send() }
+        case .scene:
+            canvasVM.undo()
+        case .none:
+            break
+        }
+    }
+
+    /// Simétrico de `performUndo`: rehace lo que se deshizo último.
+    private func performRedo() {
+        switch UndoCoordinator.redoTarget(brepSeq: BRepHistory.shared.lastRedoSeq,
+                                          sceneSeq: canvasVM.lastRedoSeq) {
+        case .brep:
+            if BRepHistory.shared.redo() { canvasVM.objectWillChange.send() }
+        case .scene:
+            canvasVM.redo()
+        case .none:
+            break
+        }
+    }
+
     /// Undo/redo de operaciones B-rep (features, push/pull). Visible cuando hay historial.
     @ViewBuilder
     private var brepHistoryBar: some View {
         if brepHistory.canUndo || brepHistory.canRedo {
             HStack(spacing: 14) {
+                // Mismo camino que el gesto de 2 dedos: deshace lo ÚLTIMO, venga
+                // del historial que venga. Dos botones que deshacen cosas
+                // distintas según dónde toques sería exactamente lo contrario de
+                // "intuitivo como Shapr3D".
                 Button {
                     HapticService.shared.light()
-                    if brepHistory.undo() { canvasVM.objectWillChange.send() }
+                    performUndo()
                 } label: {
                     Label("Deshacer", systemImage: "arrow.uturn.backward")
                         .font(.caption2)
                 }
-                .disabled(!brepHistory.canUndo)
+                .disabled(!brepHistory.canUndo && canvasVM.lastUndoSeq == nil)
 
                 Button {
                     HapticService.shared.light()
-                    if brepHistory.redo() { canvasVM.objectWillChange.send() }
+                    performRedo()
                 } label: {
                     Label("Rehacer", systemImage: "arrow.uturn.forward")
                         .font(.caption2)
                 }
-                .disabled(!brepHistory.canRedo)
+                .disabled(!brepHistory.canRedo && canvasVM.lastRedoSeq == nil)
 
                 Spacer()
                 Text("\(brepHistory.undoCount) ops")
