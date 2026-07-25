@@ -80,7 +80,11 @@ final class BRepHistory: ObservableObject {
     private func swapTop(from: inout [Entry], to: inout [Entry]) -> Bool {
         while let entry = from.popLast() {
             guard let model = entry.model else { continue }  // modelo borrado: descartar
-            to.append(Entry(model: model, shape: model.cadShape, meshes: model.meshes))
+            // El contra-snapshot HEREDA la marca de la entrada que se restaura:
+            // así la operación conserva su lugar en el orden global y
+            // `UndoCoordinator` sigue eligiendo bien al rehacer.
+            to.append(Entry(model: model, shape: model.cadShape, meshes: model.meshes,
+                            seq: entry.seq))
             model.cadShape = entry.shape
             model.meshes = entry.meshes
             logger.info("[BRepHistory] restaurado \(model.name)")
