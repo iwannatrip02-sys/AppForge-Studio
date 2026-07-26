@@ -1015,7 +1015,9 @@ struct CADModeView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
-            .background(theme.surfaceSecondary)
+            // FORGE GLASS · contexto `.overViewport` (0.72, el más conservador):
+            // la barra de deshacer flota sobre el 3D pero no lleva número vivo.
+            .glassPanel(context: .overViewport)
         }
     }
 
@@ -1049,7 +1051,9 @@ struct CADModeView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(theme.surfaceSecondary)
+        // FORGE GLASS · contexto `.paramBar` (0.80): barra contextual que flota
+        // sobre el viewport 3D y contiene números vivos.
+        .glassPanel(context: .paramBar)
         .tempered(trigger: temperTick)
     }
 
@@ -1080,7 +1084,9 @@ struct CADModeView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(theme.surfaceSecondary)
+        // FORGE GLASS · contexto `.paramBar` (0.80): barra contextual que flota
+        // sobre el viewport 3D y contiene números vivos.
+        .glassPanel(context: .paramBar)
         .tempered(trigger: temperTick)
     }
 
@@ -1107,7 +1113,9 @@ struct CADModeView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(theme.surfaceSecondary)
+        // FORGE GLASS · contexto `.paramBar` (0.80): barra contextual que flota
+        // sobre el viewport 3D y contiene números vivos.
+        .glassPanel(context: .paramBar)
         .tempered(trigger: temperTick)
     }
 
@@ -1774,7 +1782,9 @@ struct CADModeView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(theme.surfaceSecondary)
+        // FORGE GLASS · contexto `.paramBar` (0.80): barra contextual que flota
+        // sobre el viewport 3D y contiene números vivos.
+        .glassPanel(context: .paramBar)
         .tempered(trigger: temperTick)
     }
 
@@ -1843,7 +1853,9 @@ struct CADModeView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(theme.surfaceSecondary)
+        // FORGE GLASS · contexto `.paramBar` (0.80): barra contextual que flota
+        // sobre el viewport 3D y contiene números vivos.
+        .glassPanel(context: .paramBar)
     }
 
     private var parametricView: some View {
@@ -2331,7 +2343,9 @@ struct CADModeView: View {
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 4)
-        .background(theme.surfaceSecondary)
+        // FORGE GLASS · `.paramBar`: es LA barra de parámetros de la herramienta
+        // activa — la superficie con más números vivos de toda la app.
+        .glassPanel(context: .paramBar)
     }
 
     /// Fila de utilidades: agrupar, historial, exports, features. Los booleanos
