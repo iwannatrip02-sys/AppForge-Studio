@@ -47,16 +47,36 @@ struct SurfaceCardModifier: ViewModifier {
 // MARK: ToolbarGlow Modifier
 
 /// Active tool highlight: accent fill + border
+/// Estado ACTIVO de una herramienta del rail: relleno + borde de brasa, y la
+/// brasa VIVA del Design Bible encima.
+///
+/// Antes era puramente estático — relleno y borde, sin glow y sin animación— y
+/// además duplicaba a mano las opacidades `0.15` y `0.30`, que son exactamente
+/// `ForgeGlass.Opacity.stateActiveFill` y `stateActiveBorder`. Es decir: se
+/// copiaron los NÚMEROS del lenguaje pero no sus tokens ni su comportamiento.
+///
+/// El Bible define la brasa como ESTADO, con encendido de 0.15s y decaimiento
+/// de 0.40s (`emberGlow`). Un rectángulo quieto donde el lenguaje pide una
+/// brasa viva es justo la diferencia entre "se ve correcto" y "se siente
+/// premium" — y era, además, el segundo sistema de glow conviviendo con el
+/// canónico.
 struct ToolbarGlowModifier: ViewModifier {
     var active: Bool = false
+
     func body(content: Content) -> some View {
         content
-            .background(active ? AppTheme.accentColor.opacity(0.15) : Color.clear)
-            .cornerRadius(AppTheme.radiusSM)
+            .background(active
+                        ? ForgeGlass.Color.ember.opacity(ForgeGlass.Opacity.stateActiveFill)
+                        : Color.clear)
+            .cornerRadius(ForgeGlass.Radius.sm)
             .overlay(
-                RoundedRectangle(cornerRadius: AppTheme.radiusSM)
-                    .stroke(active ? AppTheme.accentColor.opacity(0.30) : Color.clear, lineWidth: 1)
+                RoundedRectangle(cornerRadius: ForgeGlass.Radius.sm)
+                    .stroke(active
+                            ? ForgeGlass.Color.ember.opacity(ForgeGlass.Opacity.stateActiveBorder)
+                            : Color.clear,
+                            lineWidth: 1)
             )
+            .emberGlow(active: active)
     }
 }
 
