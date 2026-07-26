@@ -120,6 +120,25 @@ enum ScenePicker {
         var best: SurfaceHit?
         for (modelIndex, model) in models.enumerated() {
             guard !model.name.hasPrefix("__"), model.isVisible else { continue }
+
+            // El rayo se lleva al ESPACIO DEL MODELO por la inversa de su
+            // transform, en vez de probar contra los vértices crudos.
+            //
+            // Antes se ignoraba el TRS: mientras es identidad (el flujo CAD
+            // normal, que hornea la transformación al B-rep) daba igual, pero
+            // NO lo es durante el arrastre en vivo, en la reproducción de
+            // animación ni con ensamblajes (`AssemblyMatesEngine` fija rotación
+            // de forma persistente). En esos casos tocabas donde el objeto SE
+            // VE y el picking ocurría donde estaba antes.
+            let transform = model.transform
+            let inverse = transform.inverse
+            let localOrigin = inverse * SIMD4<Float>(ray.origin, 1)
+            let localDir = inverse * SIMD4<Float>(ray.direction, 0)
+            let o = SIMD3<Float>(localOrigin.x, localOrigin.y, localOrigin.z)
+            let dRaw = SIMD3<Float>(localDir.x, localDir.y, localDir.z)
+            guard simd_length(dRaw) > 1e-9 else { continue }   // escala degenerada
+            let d = simd_normalize(dRaw)
+
             for mesh in model.meshes {
                 var j = 0
                 while j + 2 < mesh.indices.count {
@@ -132,16 +151,28 @@ enum ScenePicker {
                     let v0 = mesh.vertices[i0].position
                     let v1 = mesh.vertices[i1].position
                     let v2 = mesh.vertices[i2].position
-                    guard let hit = rayTriangleIntersect(rayOrigin: ray.origin, rayDir: ray.direction,
-                                                         v0: v0, v1: v1, v2: v2) else { continue }
+                    guard let localHit = rayTriangleIntersect(rayOrigin: o, rayDir: d,
+                                                              v0: v0, v1: v1, v2: v2) else { continue }
+                    // De vuelta a MUNDO: la distancia debe medirse ahí, o con
+                    // escala no unitaria los modelos se ordenarían mal entre sí.
+                    let world4 = transform * SIMD4<Float>(localHit, 1)
+                    let hit = SIMD3<Float>(world4.x, world4.y, world4.z)
                     let dist = simd_distance(ray.origin, hit)
                     guard dist < (best?.distance ?? .greatestFiniteMagnitude) else { continue }
 
                     let faceNormal = simd_normalize(simd_cross(v1 - v0, v2 - v0))
                     let interpolated = mesh.vertices[i0].normal + mesh.vertices[i1].normal + mesh.vertices[i2].normal
-                    let normal = simd_length(interpolated) > 0.001
+                    let localNormal = simd_length(interpolated) > 0.001
                         ? simd_normalize(interpolated)
                         : faceNormal
+                    // Las normales se transforman por la INVERSA TRASPUESTA;
+                    // con escala no uniforme, usar el transform a secas las
+                    // deja torcidas (y de la normal dependen push/pull y el
+                    // sentido de las operaciones de cara).
+                    let n4 = inverse.transpose * SIMD4<Float>(localNormal, 0)
+                    let nRaw = SIMD3<Float>(n4.x, n4.y, n4.z)
+                    let normal = simd_length(nRaw) > 1e-9
+                        ? simd_normalize(nRaw) : localNormal
                     best = SurfaceHit(modelIndex: modelIndex, position: hit,
                                       normal: normal, distance: dist)
                 }
