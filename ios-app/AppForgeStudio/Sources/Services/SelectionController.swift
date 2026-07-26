@@ -39,8 +39,60 @@ final class SelectionController: ObservableObject {
     @Published private(set) var outlinedModelId: String?
     private(set) var lastHit: SurfaceHit?
 
+    /// Identidad ESTABLE del modelo contra el que se creó cada item.
+    ///
+    /// `Item` guarda un `modelIndex`, es decir un ÍNDICE en `scene.models`. Ese
+    /// array cambia de tamaño y de orden durante el uso normal:
+    /// `rebuildGizmoOverlays` hace `removeAll` de los overlays "__" y los vuelve
+    /// a añadir en cada cambio de selección o de herramienta. Si se crea un
+    /// cuerpo mientras hay overlays en escena, al retirarlos ese cuerpo CAMBIA
+    /// de índice — y la selección pasa a apuntar a otro sin avisar.
+    ///
+    /// Guardar el `id` junto al item permite detectarlo y descartar la selección
+    /// obsoleta en vez de operar sobre el cuerpo equivocado.
+    private var itemModelIds: [Item: String] = [:]
+    /// Ídem para el cuerpo escalado.
+    private var bodyModelId: String?
+
     var hasSelection: Bool { !items.isEmpty || bodyIndex != nil }
     var lastItem: Item? { items.last }
+
+    /// Descarta la parte de la selección cuyos índices ya no apuntan al mismo
+    /// cuerpo. Llamar ANTES de aplicar cualquier operación: más vale perder la
+    /// selección que redondear las aristas de otra pieza.
+    ///
+    /// - Returns: `true` si algo quedó invalidado (la UI puede avisar).
+    @discardableResult
+    func validate(against models: [Model]) -> Bool {
+        func stillMatches(_ index: Int, _ recordedId: String?) -> Bool {
+            guard let recordedId, index >= 0, index < models.count else { return false }
+            return models[index].id.uuidString == recordedId
+        }
+
+        var invalidated = false
+
+        let survivors = items.filter { stillMatches($0.modelIndex, itemModelIds[$0]) }
+        if survivors.count != items.count {
+            invalidated = true
+            for dropped in items where !survivors.contains(dropped) {
+                itemModelIds[dropped] = nil
+            }
+            items = survivors
+            highlightMesh = nil
+        }
+
+        if let b = bodyIndex, !stillMatches(b, bodyModelId) {
+            invalidated = true
+            bodyIndex = nil
+            bodyModelId = nil
+            outlinedModelId = nil
+        }
+
+        if invalidated {
+            statusMessage = "La selección apuntaba a un cuerpo que cambió — vuelve a tocarlo"
+        }
+        return invalidated
+    }
 
     // MARK: - Tap directo (cara/arista, toggle multi)
 
@@ -72,8 +124,10 @@ final class SelectionController: ObservableObject {
 
         if let idx = items.firstIndex(of: item) {
             items.remove(at: idx)          // tocar lo seleccionado lo QUITA
+            itemModelIds[item] = nil
         } else {
             items.append(item)             // añadir (multi-selección natural)
+            itemModelIds[item] = model.id.uuidString
         }
         rebuildHighlight(models: models)
         updateStatus(models: models)
@@ -84,7 +138,9 @@ final class SelectionController: ObservableObject {
         guard index >= 0, index < models.count else { return }
         bodyIndex = index
         items = []
+        itemModelIds.removeAll()
         highlightMesh = nil
+        bodyModelId = models[index].id.uuidString
         outlinedModelId = models[index].id.uuidString
         statusMessage = "\(models[index].name)\(bodyMetrics(models[index]))"
     }
@@ -95,7 +151,9 @@ final class SelectionController: ObservableObject {
               m < models.count else { return }
         bodyIndex = m
         items = []
+        itemModelIds.removeAll()
         highlightMesh = nil
+        bodyModelId = models[m].id.uuidString
         outlinedModelId = models[m].id.uuidString
         statusMessage = "\(models[m].name)\(bodyMetrics(models[m]))"
     }
@@ -106,7 +164,9 @@ final class SelectionController: ObservableObject {
 
     func deselect() {
         items = []
+        itemModelIds.removeAll()
         bodyIndex = nil
+        bodyModelId = nil
         highlightMesh = nil
         outlinedModelId = nil
         lastHit = nil

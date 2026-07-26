@@ -1537,6 +1537,7 @@ struct CADModeView: View {
     /// seleccionadas, agrupadas por modelo (espejo de applyToSelectedEdges).
     private func applyToSelectedFaces(_ op: (Model, [Int]) -> Bool) {
         HapticService.shared.medium()
+        guard !selectionController.validate(against: canvasVM.scene.models) else { return }
         var grouped: [Int: [Int]] = [:]
         for case .face(let m, let f) in selectionController.items {
             grouped[m, default: []].append(f)
@@ -1564,6 +1565,10 @@ struct CADModeView: View {
     /// las esquinas compartidas se resuelvan juntas (multi-selección real).
     private func applyToSelectedEdges(_ op: (Model, [Int]) -> Bool) {
         HapticService.shared.medium()
+        // Los items guardan ÍNDICES en `scene.models`, y ese array cambia de
+        // orden al añadir/retirar overlays. Validar antes de operar: más vale
+        // perder la selección que redondear las aristas de otra pieza.
+        guard !selectionController.validate(against: canvasVM.scene.models) else { return }
         var grouped: [Int: [Int]] = [:]
         for case .edge(let m, let e) in selectionController.items {
             grouped[m, default: []].append(e)
@@ -2089,6 +2094,9 @@ struct CADModeView: View {
     //  único camino de activación — activate(_:).)
 
     private func executeSelectedTool() {
+        // Misma razón que en applyToSelectedEdges: el índice puede haber
+        // quedado obsoleto si la escena cambió bajo la selección.
+        guard !selectionController.validate(against: canvasVM.scene.models) else { return }
         // Objetivo: el CUERPO seleccionado; sin selección, el primero (legacy).
         // Antes las barras "Aplicar" pegaban SIEMPRE a models[0] — con varios
         // cuerpos en escena la operación caía en uno que no estabas mirando.
