@@ -118,24 +118,54 @@ final class LivePreviewEngine: ObservableObject {
 
     // MARK: - Generación de mesh preview (OCCT low-quality)
 
+    /// El fantasma debe ser EXACTAMENTE la operación que se va a confirmar.
+    ///
+    /// Antes no lo era en NINGUNO de los cuatro casos, y el estado ya traía los
+    /// datos necesarios — solo se ignoraban:
+    ///   · extrusión: hacía `extruded(by:)`, que barre el sólido ENTERO como un
+    ///     prisma, cuando el commit hace push/pull sobre UNA cara.
+    ///   · fillet y chaflán: usaban las variantes GLOBALES (todas las aristas)
+    ///     teniendo el `edgeIndex` a mano, mientras el commit opera solo sobre
+    ///     la arista elegida.
+    ///   · vaciado: ligaba `openFaceIndex` y no lo usaba (el compilador avisaba
+    ///     de la variable sin usar), así que previsualizaba una cáscara cerrada
+    ///     y confirmaba una con la cara abierta.
+    ///
+    /// Un preview que miente es peor que no tener preview: arrastras confiando
+    /// en lo que ves y sueltas sobre otra cosa.
     private func updateMesh(for parameter: Float) {
         guard let shape = originalShape else { return }
         let preview: CADShape?
 
         switch state {
-        case .extruding(_, _, let dir, _):
-            let d3 = SIMD3<Double>(Double(dir.x), Double(dir.y), Double(dir.z))
-            let vec = d3 * Double(parameter)
-            preview = shape.extruded(by: vec)
+        case .extruding(_, let faceIndex, _, _):
+            // Mismo camino que `BRepModeling.pushPullFace`: la dirección la da
+            // la NORMAL de la cara y el signo decide fusionar o restar.
+            preview = BRepModeling.pushPullFace(shape, faceIndex: faceIndex,
+                                                distance: Double(parameter))
 
-        case .fillet:
-            preview = shape.filleted(radius: Double(parameter))
+        case .fillet(_, let edgeIndex, _):
+            let all = shape.edges()
+            preview = (edgeIndex >= 0 && edgeIndex < all.count)
+                ? shape.filleted(edges: [all[edgeIndex]], radius: Double(parameter))
+                : nil
 
-        case .chamfer:
-            preview = shape.chamfered(distance: Double(parameter))
+        case .chamfer(_, let edgeIndex, _):
+            let count = shape.edges().count
+            preview = (edgeIndex >= 0 && edgeIndex < count)
+                ? shape.chamferedWithFullHistory(distance: Double(parameter),
+                                                 edges: [edgeIndex])?.result
+                : nil
 
-        case .shell(_, let face, _):
-            preview = shape.shelled(thickness: Double(parameter))
+        case .shell(_, let openFaceIndex, _):
+            if let fi = openFaceIndex {
+                let faces = shape.faces()
+                preview = (fi >= 0 && fi < faces.count)
+                    ? shape.shelled(thickness: Double(parameter), openFaces: [faces[fi]])
+                    : shape.shelled(thickness: Double(parameter))
+            } else {
+                preview = shape.shelled(thickness: Double(parameter))
+            }
 
         case .inactive:
             preview = nil
@@ -144,6 +174,14 @@ final class LivePreviewEngine: ObservableObject {
         if let preview = preview {
             previewMesh = OCCTBridge.toMesh(preview, quality: .low)
             previewEdges = OCCTBridge.edgesMesh(preview, radius: 0.005)
+        } else {
+            // La operación NO es válida con este parámetro (p. ej. un radio de
+            // fillet mayor del que admite la arista). Sin este `else` el
+            // fantasma anterior se quedaba congelado en pantalla y seguías
+            // arrastrando creyendo que funcionaba. Retirarlo es la señal
+            // honesta: si no hay ghost, ese valor no se puede aplicar.
+            previewMesh = nil
+            previewEdges = nil
         }
     }
 
