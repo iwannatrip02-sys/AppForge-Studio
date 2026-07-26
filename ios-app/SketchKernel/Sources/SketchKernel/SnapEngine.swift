@@ -119,13 +119,27 @@ public struct SnapEngine: Sendable {
 
         func consider(_ candidate: SnapResult, distance: Double) {
             guard distance <= r else { return }
-            if let b = best {
-                let bd = b.position.distance(to: ctx.cursor)
-                if candidate.kind < b.kind || (candidate.kind == b.kind && distance < bd) {
+            guard let b = best else {
+                best = candidate
+                return
+            }
+            let bd = b.position.distance(to: ctx.cursor)
+            if candidate.kind < b.kind {
+                best = candidate
+            } else if candidate.kind == b.kind {
+                // Desempate DETERMINISTA. Los candidatos de punto salen de
+                // `model.positions`, un diccionario sin orden garantizado: con
+                // `<` a secas, entre dos puntos EQUIDISTANTES enganchaba uno al
+                // azar entre ejecuciones. Es el mismo empate que ya se corrigió
+                // en `HitTester`, y aquí se nota más porque el snap es continuo
+                // durante el trazo — engancharía a un lado u otro sin criterio.
+                if distance < bd - 1e-12 {
+                    best = candidate
+                } else if abs(distance - bd) <= 1e-12,
+                          (candidate.position.x, candidate.position.y)
+                            < (b.position.x, b.position.y) {
                     best = candidate
                 }
-            } else {
-                best = candidate
             }
         }
 

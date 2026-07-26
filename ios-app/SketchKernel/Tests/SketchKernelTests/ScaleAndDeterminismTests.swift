@@ -135,6 +135,27 @@ final class ScaleAndDeterminismTests: XCTestCase {
                        "el mismo toque debe elegir SIEMPRE el mismo punto; vi \(seen)")
     }
 
+    /// El SNAP entre dos puntos equidistantes también debe ser reproducible.
+    /// Se corrigió el empate en `HitTester` pero no en `SnapEngine`, y aquí se
+    /// nota más: el snap es continuo durante el trazo, así que engancharía a un
+    /// lado o al otro sin criterio mientras dibujas.
+    func testEquidistantSnapIsDeterministic() {
+        var m = SketchModel(mergeTolerance: 1e-9)
+        m.addLine(from: Vec2(-1, 0), to: Vec2(-1, 1))
+        m.addLine(from: Vec2(1, 0), to: Vec2(1, 1))
+
+        let engine = SnapEngine()
+        let ctx = SnapContext(cursor: Vec2(0, 0), radius: 2)   // equidistante
+        var seen = Set<String>()
+        for _ in 0..<15 {
+            let r = engine.snap(ctx, in: m)
+            XCTAssertEqual(r.kind, .endpoint, "debe enganchar un punto duro")
+            seen.insert("\(r.position.x),\(r.position.y)")
+        }
+        XCTAssertEqual(seen.count, 1,
+                       "el mismo cursor debe enganchar SIEMPRE el mismo punto; vi \(seen)")
+    }
+
     /// El doble tap de perímetro no debe arrastrar geometría de CONSTRUCCIÓN:
     /// un eje suele tocar el perfil, y llevárselo a la selección hace que
     /// Espejo u Offset actúen sobre helpers.
