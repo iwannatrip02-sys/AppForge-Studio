@@ -109,6 +109,65 @@ final class ScaleAndDeterminismTests: XCTestCase {
         }
     }
 
+    // MARK: - El hit-test también tiene que ser reproducible
+
+    /// Tocar EXACTAMENTE en medio de dos puntos simétricos debe elegir siempre
+    /// el mismo. `model.positions` es un diccionario y el desempate era "el
+    /// primero que salga", o sea aleatorio. Los sketches simétricos son comunes
+    /// —más desde que existe el espejo— así que el empate es alcanzable.
+    func testEquidistantPointHitIsDeterministic() {
+        var m = SketchModel(mergeTolerance: 1e-9)
+        m.addLine(from: Vec2(-1, 0), to: Vec2(-1, 1))
+        m.addLine(from: Vec2(1, 0), to: Vec2(1, 1))
+
+        let tester = HitTester()
+        let cursor = Vec2(0, 0)          // equidistante de (−1,0) y (1,0)
+        var seen = Set<String>()
+        for _ in 0..<15 {
+            guard case .point(_, let pos) = tester.hitTest(at: cursor, in: m,
+                                                           pointRadius: 2,
+                                                           curveRadius: 0.1) else {
+                return XCTFail("debe enganchar uno de los dos puntos")
+            }
+            seen.insert("\(pos.x),\(pos.y)")
+        }
+        XCTAssertEqual(seen.count, 1,
+                       "el mismo toque debe elegir SIEMPRE el mismo punto; vi \(seen)")
+    }
+
+    /// El doble tap de perímetro no debe arrastrar geometría de CONSTRUCCIÓN:
+    /// un eje suele tocar el perfil, y llevárselo a la selección hace que
+    /// Espejo u Offset actúen sobre helpers.
+    func testConnectedChainDoesNotCrossIntoConstructionGeometry() {
+        var m = SketchModel(mergeTolerance: 1e-9)
+        let a = m.addLine(from: Vec2(0, 0), to: Vec2(4, 0))
+        let b = m.addLine(from: Vec2(4, 0), to: Vec2(4, 4))
+        // Eje de construcción que ARRANCA en una esquina del perfil.
+        let axis = m.addLine(from: Vec2(0, 0), to: Vec2(0, 9))
+        m.setConstruction(axis, true)
+
+        let chain = HitTester().connectedChain(from: a, in: m)
+        XCTAssertTrue(chain.contains(a))
+        XCTAssertTrue(chain.contains(b), "el perfil real sí encadena")
+        XCTAssertFalse(chain.contains(axis),
+                       "la cadena no cruza a geometría de construcción")
+    }
+
+    /// Y al revés: partiendo de un eje de construcción se encadenan ejes, no
+    /// el perfil.
+    func testConstructionChainStaysInConstruction() {
+        var m = SketchModel(mergeTolerance: 1e-9)
+        let real = m.addLine(from: Vec2(0, 0), to: Vec2(4, 0))
+        let axis1 = m.addLine(from: Vec2(0, 0), to: Vec2(0, 5))
+        let axis2 = m.addLine(from: Vec2(0, 5), to: Vec2(3, 5))
+        m.setConstruction(axis1, true)
+        m.setConstruction(axis2, true)
+
+        let chain = HitTester().connectedChain(from: axis1, in: m)
+        XCTAssertTrue(chain.contains(axis2), "los ejes encadenan entre sí")
+        XCTAssertFalse(chain.contains(real), "pero no saltan al perfil")
+    }
+
     /// Y el recorte se queda con las fuentes CERCANAS, que son las relevantes:
     /// una alineación a tiro del cursor no puede perderse porque otras 200
     /// lejanas ocuparan el cupo.
