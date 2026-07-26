@@ -91,9 +91,40 @@ struct Scene3D {
         configurePositionProvider()
     }
 
+    /// Añade un modelo manteniendo los OVERLAYS de UI (`__gizmo*`,
+    /// `__faceHighlight`, `__livePreview`…) siempre al FINAL del array.
+    ///
+    /// Por qué importa: la selección, el objetivo de transformación y el preview
+    /// en vivo guardan un `modelIndex`, es decir un ÍNDICE en `models`. Los
+    /// overlays se retiran y se vuelven a añadir en CADA cambio de selección o
+    /// de herramienta (`rebuildGizmoOverlays`), y `removeAll` desplaza a todo lo
+    /// que venga DESPUÉS. Si un cuerpo real se añadía detrás de un overlay, al
+    /// retirarlo ese cuerpo cambiaba de índice — y la selección pasaba a apuntar
+    /// a otro, en silencio.
+    ///
+    /// Con los overlays confinados a la cola, los índices de los cuerpos reales
+    /// son APPEND-ONLY: solo cambian al añadir o borrar cuerpos de verdad, que
+    /// es lo que el usuario percibe como un cambio de escena. Esto ataca el
+    /// MECANISMO del desfase; la validación de `SelectionController` sigue como
+    /// red de seguridad para el borrado real de cuerpos.
+    ///
+    /// La solución definitiva es que la selección referencie el `id` del modelo
+    /// y no su posición (151 usos de `modelIndex` en 14 archivos) — pendiente.
     mutating func addModel(_ model: Model) {
-        models.append(model)
+        if Self.isOverlay(model) {
+            models.append(model)
+        } else if let firstOverlay = models.firstIndex(where: Self.isOverlay) {
+            models.insert(model, at: firstOverlay)
+        } else {
+            models.append(model)
+        }
         resolveSceneConstraints()
+    }
+
+    /// Los overlays de UI se distinguen por el prefijo `__` (convención ya usada
+    /// por el renderer y el picker para excluirlos de la geometría tocable).
+    static func isOverlay(_ model: Model) -> Bool {
+        model.name.hasPrefix("__")
     }
 
     mutating func addStroke(_ stroke: BrushStroke) {
