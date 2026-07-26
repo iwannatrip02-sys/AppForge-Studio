@@ -1276,7 +1276,13 @@ struct CADModeView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(theme.surfaceSecondary)
+        // FORGE GLASS: la barra de boceto flota SOBRE el viewport 3D y lleva
+        // números vivos, así que le corresponde el contexto `.paramBar` (0.80)
+        // del Design Bible. Antes usaba `theme.surfaceSecondary`, un color
+        // plano: el lenguaje de vidrio existía y solo estaba aplicado en el HUD
+        // de transformación y las guías, así que el chrome del CAD no era
+        // coherente consigo mismo.
+        .glassPanel(context: .paramBar)
         .tempered(trigger: temperTick)
     }
 
