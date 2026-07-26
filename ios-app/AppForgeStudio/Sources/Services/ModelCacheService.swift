@@ -14,7 +14,19 @@ final class ModelCacheService {
     private let device: MTLDevice
     private let diskCacheURL: URL
     private let fileManager: FileManager
-    private let serialQueue: DispatchQueue
+    /// Cola de disco COMPARTIDA por todas las instancias.
+    ///
+    /// Era `private let` por instancia, pero el directorio de caché en disco es
+    /// el MISMO para todas: una cola por instancia solo ordena las operaciones
+    /// de esa instancia, y frente a un recurso compartido eso no basta. Una
+    /// escritura pendiente de una instancia podía aterrizar DESPUÉS de que otra
+    /// borrara el directorio, resucitando un fichero recién limpiado.
+    ///
+    /// Con una sola cola, todas las lecturas y escrituras de disco quedan
+    /// ordenadas entre sí, sea cual sea la instancia que las pida.
+    private static let serialQueue = DispatchQueue(
+        label: "com.appforgestudio.modelcache.disk", qos: .utility)
+    private var serialQueue: DispatchQueue { Self.serialQueue }
 
     var memoryLimitMB: Int {
         memoryCache.totalCostLimit / (1024 * 1024)
@@ -23,7 +35,6 @@ final class ModelCacheService {
     init(device: MTLDevice, maxMemoryMB: Int = 128) {
         self.device = device
         self.fileManager = .default
-        self.serialQueue = DispatchQueue(label: "com.appforgestudio.modelcache.disk", qos: .utility)
 
         self.memoryCache = {
             let cache = NSCache<NSURL, Model>()
