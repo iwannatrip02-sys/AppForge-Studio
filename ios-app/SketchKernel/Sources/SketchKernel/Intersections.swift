@@ -13,7 +13,18 @@ public enum Intersections {
         let s = b2 - b1
         let denom = r.cross(s)
         let qp = b1 - a1
-        if abs(denom) < tolerance {
+        // El producto cruz escala con |r|·|s|, así que compararlo contra una
+        // tolerancia ABSOLUTA hace que el criterio de paralelismo dependa del
+        // TAMAÑO de los segmentos: dos perpendiculares de longitud 1e-5 dan
+        // cruz 1e-10 y se declaraban paralelos — la intersección se perdía en
+        // silencio. Normalizado, `|r×s| / (|r||s|)` es el seno del ángulo:
+        // adimensional y correcto a cualquier escala.
+        //
+        // (`InferenceGuide.intersection` ya lo hacía bien porque sus
+        // direcciones son unitarias; aquí los vectores son crudos.)
+        let scale = r.length * s.length
+        guard scale > 0 else { return nil }          // algún segmento degenerado
+        if abs(denom) <= tolerance * scale {
             return nil // paralelos o colineales: sin punto único
         }
         let t = qp.cross(s) / denom

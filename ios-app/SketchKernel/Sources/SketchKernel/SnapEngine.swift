@@ -266,6 +266,19 @@ public struct SnapEngine: Sendable {
             if let m = g.midpoint { alignmentSources.append(m) }
             if let c = g.center { alignmentSources.append(c) }
         }
+        // ORDEN DETERMINISTA, y además el correcto: `model.positions` es un
+        // DICCIONARIO, así que sin ordenar, cuáles de las fuentes sobrevivían al
+        // corte de `maxAlignmentSources` variaba entre ejecuciones — la guía de
+        // alineación aparecía o no para el MISMO cursor. Un snap impredecible es
+        // lo contrario de la facilidad que se busca.
+        //
+        // Ordenar por cercanía al cursor no solo lo hace reproducible: las
+        // fuentes cercanas son las relevantes, así que el recorte deja de ser
+        // arbitrario y pasa a quedarse con las que importan.
+        alignmentSources.sort {
+            $0.distanceSquared(to: ctx.cursor) < $1.distanceSquared(to: ctx.cursor)
+        }
+
         var sources = 0
         for pos in alignmentSources {
             if sources >= maxAlignmentSources { break }
