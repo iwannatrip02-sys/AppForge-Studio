@@ -175,11 +175,27 @@ final class DynamicTopologyEngine {
         return map
     }
 
+    /// Orden DETERMINISTA de las aristas a procesar.
+    ///
+    /// `splitLongEdges` y `collapseShortEdges` iteraban `edges.keys` —un
+    /// diccionario, sin orden de iteración garantizado— MUTANDO la malla dentro
+    /// del bucle: cada corte añade vértices y reescribe índices, y cada colapso
+    /// los invalida. Con la mutación en marcha, el orden NO es un detalle: el
+    /// mismo trazo de escultura producía una topología distinta en cada
+    /// ejecución, y con ella el guardado y el undo/redo dejaban de ser
+    /// reproducibles.
+    ///
+    /// `Edge` normaliza `(a, b)` con min/max al construirse, así que ordenar por
+    /// el par es un orden total y estable.
+    private func orderedEdges(_ edges: [Edge: Float]) -> [Edge] {
+        edges.keys.sorted { ($0.a, $0.b) < ($1.a, $1.b) }
+    }
+
     // MARK: - Edge Split (subdivision by edge length)
 
     private func splitLongEdges(_ mesh: inout Mesh, edges: [Edge: Float], center: SIMD3<Float>, radius: Float) -> Int {
         var count = 0
-        for edge in edges.keys {
+        for edge in orderedEdges(edges) {
             let a = Int(edge.a), b = Int(edge.b)
             guard a < mesh.vertices.count, b < mesh.vertices.count else { continue }
             let va = mesh.vertices[a], vb = mesh.vertices[b]
@@ -291,7 +307,7 @@ final class DynamicTopologyEngine {
 
     private func collapseShortEdges(_ mesh: inout Mesh, edges: [Edge: Float], center: SIMD3<Float>, radius: Float) -> Int {
         var count = 0
-        for edge in edges.keys {
+        for edge in orderedEdges(edges) {
             let a = Int(edge.a), b = Int(edge.b)
             guard a < mesh.vertices.count, b < mesh.vertices.count else { continue }
             let va = mesh.vertices[a], vb = mesh.vertices[b]
