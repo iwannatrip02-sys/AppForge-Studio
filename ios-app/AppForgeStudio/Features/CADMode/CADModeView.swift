@@ -1428,10 +1428,16 @@ struct CADModeView: View {
 
     private func performSketchExtrude() {
         HapticService.shared.medium()
+        // Qué curvas van a convertirse en sólido — se pregunta ANTES de extruir,
+        // porque después la región activa ya no es la misma.
+        let consumed = sketch.activeRegionBoundaryForConsumption()
         guard let model = sketch.extrudeClosedArea(height: sketchExtrudeHeight) else { return }
         canvasVM.saveState()
         canvasVM.scene.addModel(model)
-        sketch.clear()
+        // Antes aquí había `sketch.clear()`, que borraba el dibujo ENTERO: con
+        // dos perfiles dibujados extruías uno y el otro desaparecía sin dejar
+        // rastro (feedback de device). Ahora se consume SOLO el perfil extruido.
+        sketch.consumeCurves(of: consumed)
         canvasVM.scene.cadHistory.pushOperation(
             CADOperation(type: .sketchExtrude, description: "Extrusión desde boceto",
                          parameters: ["altura": sketchExtrudeHeight]))
@@ -1467,12 +1473,15 @@ struct CADModeView: View {
 
     private func performSketchRevolve() {
         HapticService.shared.medium()
+        // Mismo criterio que la extrusión: se anota qué perfil se va a consumir
+        // ANTES de operar, y después se retira SOLO ese.
+        let consumed = sketch.activeRegionBoundaryForConsumption()
         guard let model = sketch.revolveProfile(angle: revolveAngleDeg * .pi / 180) else {
             return
         }
         canvasVM.saveState()
         canvasVM.scene.addModel(model)
-        sketch.clear()
+        sketch.consumeCurves(of: consumed)
         canvasVM.scene.cadHistory.pushOperation(
             CADOperation(type: .sketchRevolve, description: "Revolución desde boceto",
                          parameters: [:]))

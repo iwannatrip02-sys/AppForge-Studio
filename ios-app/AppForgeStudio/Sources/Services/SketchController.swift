@@ -1354,6 +1354,34 @@ final class SketchController: ObservableObject {
         return nil
     }
 
+    /// Retira del dibujo SOLO las curvas que formaron el contorno indicado,
+    /// dejando intacto el resto del boceto.
+    ///
+    /// Antes la UI llamaba a `clear()` tras extruir, que borraba el dibujo
+    /// ENTERO: con dos perfiles dibujados, extruías uno y el otro desaparecía
+    /// sin dejar rastro (feedback de device). Ahora se consume exactamente lo
+    /// que se convirtió en sólido, que es lo que espera cualquiera.
+    ///
+    /// Usa la PROCEDENCIA del contorno (`RegionEdge.curveID`), así que solo
+    /// funciona en el camino analítico; con contorno vacío no borra nada, que
+    /// es preferible a borrar de más.
+    func consumeCurves(of boundary: [SketchKernel.RegionEdge]) {
+        guard !boundary.isEmpty else { return }
+        let consumed = Set(boundary.map { $0.curveID })
+        mutate { model in
+            for id in consumed { model.removeCurve(id) }
+        }
+        selectedCurveIDs.subtract(consumed)
+        selectedRegion = nil
+        hotCurveID = nil
+    }
+
+    /// Contorno con procedencia de la región que se extruiría ahora mismo.
+    /// La UI lo pide ANTES de extruir para saber qué consumir después.
+    func activeRegionBoundaryForConsumption() -> [SketchKernel.RegionEdge] {
+        activeRegionBoundary()
+    }
+
     /// Extruye una región dada por sus vértices 2D del plano.
     func extrudeRegion(vertices: [SIMD2<Float>], height: Double) -> Model? {
         guard height > 1e-9, vertices.count >= 3 else {
