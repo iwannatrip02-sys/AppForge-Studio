@@ -992,6 +992,13 @@ struct CADModeView: View {
             if BRepHistory.shared.redo() { canvasVM.objectWillChange.send() }
         case .scene:
             canvasVM.redo()
+        case .sketch:
+            // DEUDA HONESTA: el dibujo tiene pila de DESHACER pero no de
+            // REHACER (`SketchController` solo guarda snapshots previos). Por
+            // eso `redoTarget` no recibe `sketchSeq` y este caso no se alcanza
+            // hoy; queda explícito para que rehacer un trazo no se cuele como
+            // un no-op silencioso el día que se añada la pila.
+            break
         case .none:
             break
         }

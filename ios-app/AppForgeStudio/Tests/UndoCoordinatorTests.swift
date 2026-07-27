@@ -75,6 +75,8 @@ final class UndoCoordinatorTests: XCTestCase {
                 let s = brepUndo.removeLast(); brepRedo.append(s); order.append(s)
             case .scene:
                 let s = sceneUndo.removeLast(); sceneRedo.append(s); order.append(s)
+            case .sketch:
+                XCTFail("este guion no alimenta el historial de dibujo")
             case .none:
                 XCTFail("quedaban operaciones por deshacer")
             }
@@ -87,13 +89,37 @@ final class UndoCoordinatorTests: XCTestCase {
         var redone: [UInt64] = []
         for _ in 0..<3 {
             switch UndoCoordinator.redoTarget(brepSeq: brepRedo.last, sceneSeq: sceneRedo.last) {
-            case .brep:  redone.append(brepRedo.removeLast())
-            case .scene: redone.append(sceneRedo.removeLast())
-            case .none:  XCTFail("quedaban operaciones por rehacer")
+            case .brep:   redone.append(brepRedo.removeLast())
+            case .scene:  redone.append(sceneRedo.removeLast())
+            case .sketch: XCTFail("el dibujo no tiene pila de rehacer")
+            case .none:   XCTFail("quedaban operaciones por rehacer")
             }
         }
         XCTAssertEqual(redone, [1, 2, 3],
             "rehacer reconstruye el orden original de ejecución")
+    }
+
+    // MARK: - El DIBUJO entra en el arbitraje
+
+    /// El historial del dibujo estaba fuera del coordinador, así que «Deshacer»
+    /// nunca podía borrar un trazo y parecía operar solo sobre el 3D — reportado
+    /// en device. Con su marca, gana cuando es lo más reciente.
+    func testUndoPicksSketchWhenItIsTheMostRecent() {
+        XCTAssertEqual(
+            UndoCoordinator.undoTarget(brepSeq: 1, sceneSeq: 2, sketchSeq: 3), .sketch,
+            "lo último fue dibujar: Deshacer debe borrar el trazo")
+    }
+
+    func testSketchLosesWhenSomethingNewerHappened() {
+        XCTAssertEqual(
+            UndoCoordinator.undoTarget(brepSeq: 9, sceneSeq: 2, sketchSeq: 3), .brep)
+        XCTAssertEqual(
+            UndoCoordinator.undoTarget(brepSeq: 1, sceneSeq: 9, sketchSeq: 3), .scene)
+    }
+
+    func testOnlySketchHistory() {
+        XCTAssertEqual(
+            UndoCoordinator.undoTarget(brepSeq: nil, sceneSeq: nil, sketchSeq: 4), .sketch)
     }
 
     // MARK: - El reloj
