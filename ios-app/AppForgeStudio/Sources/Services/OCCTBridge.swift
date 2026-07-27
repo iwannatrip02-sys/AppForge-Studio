@@ -108,11 +108,50 @@ enum OCCTBridge {
         var vertices: [Vertex] = []
         var indices: [UInt32] = []
         for edge in shape.edges() {
-            let pts = edge.points(count: edge.isLine ? 2 : 24)
+            let pts = edge.points(count: edgeSampleCount(edge))
                 .map { SIMD3<Float>(Float($0.x), Float($0.y), Float($0.z)) }
             LineRibbonBuilder.appendPolyline(pts, to: &vertices, indices: &indices)
         }
         return vertices.isEmpty ? nil : Mesh(vertices: vertices, indices: indices)
+    }
+
+    /// Nº de muestras de una arista para que la POLILÍNEA no se separe de la
+    /// curva real más de `maxDeviation`.
+    ///
+    /// Antes era `edge.isLine ? 2 : 24` — 24 puntos FIJOS para cualquier curva,
+    /// sin mirar su radio. Con eso, la circunferencia de un cilindro se dibujaba
+    /// como un polígono de 24 lados: aunque la superficie sea un cilindro
+    /// exacto, la SILUETA se veía facetada, que es lo que define visualmente la
+    /// forma. Arreglar el teselado de la malla sin arreglar el de las aristas
+    /// deja el defecto a la vista (feedback de device: "el cilindro sigue
+    /// creando un montón de caras").
+    ///
+    /// La flecha (sagitta) de una cuerda que abarca un ángulo θ en un círculo de
+    /// radio r es `r(1 − cos(θ/2))`; despejando θ sale el paso angular máximo, y
+    /// el nº de tramos es el barrido dividido por ese paso. Así una pieza grande
+    /// recibe más muestras que una pequeña, en vez de las mismas 24.
+    static func edgeSampleCount(_ edge: OCCTSwift.Edge,
+                                maxDeviation: Double = 0.004) -> Int {
+        if edge.isLine { return 2 }
+        let length = edge.length
+        guard length > 1e-9, maxDeviation > 0 else { return 24 }
+
+        // Radio de curvatura en el punto MEDIO del rango paramétrico: exacto
+        // para círculos y arcos; aproximación razonable para splines.
+        guard let bounds = edge.parameterBounds else { return 24 }
+        let mid = (bounds.first + bounds.last) / 2
+        guard let k = edge.curvature(at: mid), k > 1e-12 else { return 24 }
+
+        let r = 1 / k
+        let ratio = max(0, 1 - maxDeviation / r)
+        let maxStep = 2 * acos(min(1, ratio))          // radianes por tramo
+        guard maxStep > 1e-9 else { return 512 }
+
+        let sweep = length / r                          // ángulo total del arco
+        let segments = Int(ceil(sweep / maxStep))
+        // Piso 24 para no empeorar nunca lo que ya había; techo para acotar la
+        // memoria de la cinta de línea en piezas enormes.
+        return max(24, min(512, segments + 1))
     }
 }
 

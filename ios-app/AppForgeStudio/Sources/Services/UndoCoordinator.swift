@@ -34,6 +34,10 @@ enum UndoClock {
 enum UndoTarget: Equatable {
     case brep
     case scene
+    /// El DIBUJO (`SketchController`), que tiene su propia pila de modelos.
+    /// Faltaba: sin él, «Deshacer» nunca podía borrar un trazo y solo operaba
+    /// sobre el 3D — reportado en device.
+    case sketch
     case none
 }
 
@@ -47,17 +51,19 @@ enum UndoCoordinator {
     ///
     /// Empate (imposible con el reloj monótono, pero definido igual): gana el
     /// B-rep, que es el de grano más fino.
-    static func undoTarget(brepSeq: UInt64?, sceneSeq: UInt64?) -> UndoTarget {
-        switch (brepSeq, sceneSeq) {
-        case (nil, nil):
-            return .none
-        case (.some, nil):
-            return .brep
-        case (nil, .some):
-            return .scene
-        case let (.some(brep), .some(scene)):
-            return brep >= scene ? .brep : .scene
+    static func undoTarget(brepSeq: UInt64?, sceneSeq: UInt64?,
+                           sketchSeq: UInt64? = nil) -> UndoTarget {
+        // Gana la marca MAYOR de los tres. Empate: brep > scene > sketch (orden
+        // de grano fino), aunque con el reloj monótono no puede haber empates.
+        var best: (UndoTarget, UInt64)?
+        func offer(_ target: UndoTarget, _ seq: UInt64?) {
+            guard let seq else { return }
+            if best == nil || seq > best!.1 { best = (target, seq) }
         }
+        offer(.brep, brepSeq)
+        offer(.scene, sceneSeq)
+        offer(.sketch, sketchSeq)
+        return best?.0 ?? .none
     }
 
     /// «Rehacer» invierte la regla: hay que rehacer lo que se deshizo ÚLTIMO, y

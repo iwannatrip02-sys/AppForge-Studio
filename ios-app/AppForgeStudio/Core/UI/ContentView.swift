@@ -9,6 +9,17 @@ private let logger = Logger(subsystem: "com.appforgestudio", category: "ContentV
 struct ContentView: View {
     @ObservedObject var canvasVM: CanvasViewModel
     var renderer: SatinRenderer
+    /// ¿Mostrar los botones flotantes de deshacer/rehacer de ESTA vista?
+    ///
+    /// Declarado AQUÍ a propósito, justo tras `renderer`: el inicializador por
+    /// miembros exige el orden de declaración, y CADModeView lo pasa como tercer
+    /// argumento. (Los demás call sites lo omiten y toman el default.)
+    ///
+    /// El CAD tiene su propia barra de historial coordinada (dibujo + B-rep +
+    /// escena). Con estos botones visibles había DOS sitios para deshacer en la
+    /// misma pantalla, y estos solo tocaban el historial de ESCENA: parecía que
+    /// «Deshacer» saltaba varias acciones y nunca borraba un trazo del dibujo.
+    var showsFloatingHistoryButtons: Bool = true
     // TODO(F3): BrushEngine deleted — paint brush support pending reimplementation
     var brushEngine: AnyObject? = nil
     var isPaintMode: Bool = false
@@ -20,6 +31,7 @@ struct ContentView: View {
     /// CADModeView enchufa BRepHistory; SculptModeView enchufa el stack del SculptEngine.
     var onUndoGesture: (() -> Void)? = nil
     var onRedoGesture: (() -> Void)? = nil
+
     /// Transformación directa (Mover/Rotar/Escalar sobre el cuerpo arrastrado).
     var transformEnabled: Bool = false
     var onTransformBegan: ((SurfaceHit) -> Void)? = nil
@@ -97,17 +109,19 @@ struct ContentView: View {
             VStack {
                 Spacer()
                 HStack {
-                    Button(action: { HapticService.shared.light(); canvasVM.undo() }) {
-                        Image(systemName: "arrow.uturn.backward")
-                    }
-                    .accessibilityLabel("Deshacer")
-                    .dynamicTypeSize(...DynamicTypeSize.xLarge)
+                    if showsFloatingHistoryButtons {
+                        Button(action: { HapticService.shared.light(); canvasVM.undo() }) {
+                            Image(systemName: "arrow.uturn.backward")
+                        }
+                        .accessibilityLabel("Deshacer")
+                        .dynamicTypeSize(...DynamicTypeSize.xLarge)
 
-                    Button(action: { HapticService.shared.light(); canvasVM.redo() }) {
-                        Image(systemName: "arrow.uturn.forward")
+                        Button(action: { HapticService.shared.light(); canvasVM.redo() }) {
+                            Image(systemName: "arrow.uturn.forward")
+                        }
+                        .accessibilityLabel("Rehacer")
+                        .dynamicTypeSize(...DynamicTypeSize.xLarge)
                     }
-                    .accessibilityLabel("Rehacer")
-                    .dynamicTypeSize(...DynamicTypeSize.xLarge)
 
                     Spacer()
                     Button(action: { HapticService.shared.medium(); canvasVM.resetView() }) {

@@ -407,7 +407,15 @@ struct CADModeView: View {
                         drawingExportBar
                     }
                     ZStack {
-                        ContentView(canvasVM: canvasVM, renderer: renderer, onSurfaceHit: { hit in
+                        // `showsFloatingHistoryButtons: false` — el CAD tiene su
+                        // PROPIA barra de historial, coordinada entre los tres
+                        // stacks (dibujo, B-rep y escena). Los botones flotantes
+                        // de ContentView solo tocaban el de ESCENA, así que en la
+                        // misma pantalla había dos sitios para deshacer y uno de
+                        // ellos saltaba acciones y nunca borraba un trazo.
+                        ContentView(canvasVM: canvasVM, renderer: renderer,
+                                    showsFloatingHistoryButtons: false,
+                                    onSurfaceHit: { hit in
                             if selectedTool == .pushPull {
                                 pushPullController.selectFace(from: hit, in: canvasVM.scene.models)
                             } else if selectedTool == .measure {
@@ -958,13 +966,21 @@ struct CADModeView: View {
     /// `UndoCoordinator` comparando las marcas monótonas de ambos.
     private func performUndo() {
         switch UndoCoordinator.undoTarget(brepSeq: BRepHistory.shared.lastUndoSeq,
-                                          sceneSeq: canvasVM.lastUndoSeq) {
+                                          sceneSeq: canvasVM.lastUndoSeq,
+                                          sketchSeq: sketch.lastUndoSeq) {
         case .brep:
             if BRepHistory.shared.undo() { canvasVM.objectWillChange.send() }
         case .scene:
             canvasVM.undo()
+        case .sketch:
+            // El DIBUJO tiene su propia pila y no estaba en el coordinador: por
+            // eso «Deshacer» nunca borraba un trazo y parecía operar solo
+            // sobre el 3D (feedback de device).
+            sketch.undoLast()
         case .none:
-            break
+            // Todavía puede haber borradores en curso (spline a medias, ancla
+            // de arco) que no dejan marca en la pila pero sí son "lo último".
+            if sketch.canUndoSketch { sketch.undoLast() }
         }
     }
 

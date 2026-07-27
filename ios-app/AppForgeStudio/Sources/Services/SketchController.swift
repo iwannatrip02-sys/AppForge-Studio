@@ -50,6 +50,22 @@ final class SketchController: ObservableObject {
     @Published private(set) var regions: [SketchKernel.SketchRegion] = []
 
     private var undoStack: [SketchModel] = []
+    /// Marcas monótonas paralelas a `undoStack` (ver `UndoClock`).
+    ///
+    /// El dibujo tiene su PROPIO historial, separado del B-rep y del de escena.
+    /// Sin estas marcas no entraba en `UndoCoordinator`, así que «Deshacer»
+    /// nunca podía borrar un trazo — solo operaba sobre el 3D, que es
+    /// exactamente lo reportado en device.
+    private var undoSeqs: [UInt64] = []
+
+    /// Marca del último cambio de dibujo pendiente de deshacer (nil si no hay).
+    var lastUndoSeq: UInt64? { undoSeqs.last }
+
+    /// ¿Hay algo del DIBUJO que deshacer? Incluye borradores en curso, que se
+    /// deshacen antes que el modelo confirmado.
+    var canUndoSketch: Bool {
+        !splineDraft.isEmpty || arcStart != nil || anchor != nil || !undoStack.isEmpty
+    }
     // Calificado: la app tiene un `class SnapEngine` propio (snap 3D de
     // transformaciones) que sombrea al del kernel dentro de este módulo.
     private let snapEngine = SketchKernel.SnapEngine()
@@ -311,7 +327,11 @@ final class SketchController: ObservableObject {
 
     private func mutate(_ body: (inout SketchModel) -> Void) {
         undoStack.append(model)
-        if undoStack.count > 64 { undoStack.removeFirst() }
+        undoSeqs.append(UndoClock.tick())
+        if undoStack.count > 64 {
+            undoStack.removeFirst()
+            undoSeqs.removeFirst()
+        }
         body(&model)
         modelDidChange()
     }
@@ -986,6 +1006,7 @@ final class SketchController: ObservableObject {
             return false
         }
         undoStack.append(model)   // un snapshot por gesto, no por frame
+        undoSeqs.append(UndoClock.tick())
         draggedPoint = pid
         statusMessage = "Arrastra para ajustar — el snap te guía"
         return true
@@ -1038,6 +1059,7 @@ final class SketchController: ObservableObject {
         if chainLast != nil {
             // Deshacer el último segmento de la cadena restaura el modelo previo
             if let prev = undoStack.popLast() {
+                _ = undoSeqs.popLast()
                 model = prev
                 chainCount = max(0, chainCount - 1)
                 if chainCount == 0 { chainLast = nil; chainStart = nil; chainStartPoint = nil }
@@ -1048,6 +1070,7 @@ final class SketchController: ObservableObject {
             return
         }
         if let prev = undoStack.popLast() {
+            _ = undoSeqs.popLast()
             model = prev
             modelDidChange()
         }
